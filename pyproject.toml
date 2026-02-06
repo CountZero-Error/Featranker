@@ -24,7 +24,7 @@ dependencies = [
 feature-ranker = "featureRanker.importance:main"
 
 [tool.setuptools]
-packages = ["featureRanker"]
+packages = ["feature-ranker"]
 include-package-data = true
 
 [tool.setuptools.package-data]
