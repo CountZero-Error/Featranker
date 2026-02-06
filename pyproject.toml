@@ -3,13 +3,13 @@ requires = ["setuptools>=67", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "featureRanker"
+name = "feature-ranker"
 version = "0.1.0"
 description = "Rank feature importance across multiple ML models."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
-authors = [{ name = "Count Zero" }]
+authors = [{ name = "CountZero" }]
 dependencies = [
   "numpy",
   "scikit-learn",
@@ -21,7 +21,7 @@ dependencies = [
 ]
 
 [project.scripts]
-featureRanker = "featureRanker.importance:main"
+feature-ranker = "featureRanker.importance:main"
 
 [tool.setuptools]
 packages = ["featureRanker"]

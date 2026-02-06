@@ -5,7 +5,7 @@ from sklearn.datasets import load_diabetes, load_iris
 
 class prepFeature:
     """
-    Feature-preparation class for FeatureRanker.
+    Feature-preparation class for Feature Ranker.
 
     Override ``_calc_features`` to supply your own data.  The method must
     return a dict whose keys are feature names (strings) mapped to

@@ -1,16 +1,16 @@
-# FeatureRanker
+# Feature Ranker
 
 Rank feature importance across multiple ML models using permutation importance.
 
-FeatureRanker trains a configurable set of scikit-learn, XGBoost, and
+Feature Ranker trains a configurable set of scikit-learn, XGBoost, LightGBM, and
 CatBoost models on your data, computes permutation importance for every trained
 model, and returns per-model rankings plus an aggregated average ranking.
 
 | Item | Value |
 | --- | --- |
-| Package name | `featureRanker` |
+| Package name | `feature-ranker` |
 | Import module | `featureRanker` |
-| CLI command | `featureRanker` |
+| CLI command | `feature-ranker` |
 | Model config | `featureRanker/importance_config.yaml` |
 | Default prep file | `featureCalc.py` (project root) |
 
@@ -45,6 +45,12 @@ Install the package in editable (development) mode:
 pip install -e .
 ```
 
+Or install from PyPI:
+
+```bash
+pip install feature-ranker
+```
+
 ### Requirements
 
 - Python ≥ 3.10
@@ -66,7 +72,7 @@ pip install -e .
 
 ## Data Preparation
 
-Before running FeatureRanker you need a **prep class** — a Python class with a
+Before running Feature Ranker you need a **prep class** — a Python class with a
 `_calc_features()` method that returns your data as a dict.
 
 ### Expected return format
@@ -97,7 +103,7 @@ name is `prepFeature`, but you can name it anything and select it with
 Keep your prep logic in any Python file and point to it at runtime:
 
 ```bash
-featureRanker --prep-file ./my_features.py --prep-class MyPrepClass --task clf
+feature-ranker --prep-file ./my_features.py --prep-class MyPrepClass --task clf
 ```
 
 ### Example prep class
@@ -125,14 +131,14 @@ class IrisPrep:
 
 ```bash
 # Classification with all model families, using the default prepFeature class
-featureRanker --task clf --group all
+feature-ranker --task clf --group all
 
 # Regression with tree models only, custom prep file and class
-featureRanker --task reg --group tree \
+feature-ranker --task reg --group tree \
     --prep-file ./my_features.py --prep-class DiabetesPrep
 
 # Save results to a JSON file
-featureRanker --task clf --group linear --output results
+feature-ranker --task clf --group linear --output results
 ```
 
 ---
@@ -140,9 +146,9 @@ featureRanker --task clf --group linear --output results
 ## CLI Reference
 
 ```
-featureRanker --task {clf,reg} [--group {linear,tree,all}]
-              [--prep-file PATH] [--prep-class NAME]
-              [--output PATH]
+feature-ranker --task {clf,reg} [--group {linear,tree,all}]
+               [--prep-file PATH] [--prep-class NAME]
+               [--output PATH]
 ```
 
 | Flag | Description | Default |
@@ -233,7 +239,8 @@ Each entry has four fields:
 | `class` | Class name to instantiate from that module |
 | `params` | Dict of keyword arguments passed to the constructor (optional) |
 
-Edit this file to add, remove, or tune models.
+Edit this file to add, remove, or tune models. Changes take effect on the next
+run — no reinstall required.
 
 ---
 
@@ -336,7 +343,7 @@ four decimal places.
 
 | Symptom | Cause | Fix |
 | --- | --- | --- |
-| `Prep file not found` | FeatureRanker can't locate `featureCalc.py` | Run the command from the directory that contains `featureCalc.py`, or pass an explicit path with `--prep-file` |
+| `Prep file not found` | Feature Ranker can't locate `featureCalc.py` | Run the command from the directory that contains `featureCalc.py`, or pass an explicit path with `--prep-file` |
 | `AttributeError: … has no attribute 'X'` | The prep class name doesn't match what's in the file | Check spelling of `--prep-class` against the class defined in your prep file |
 | `'label' key missing` | `_calc_features()` didn't include a `"label"` entry | Add `features["label"] = ...` to your return dict |
 | Feature length mismatch | Feature lists have different lengths | Ensure every feature list and `"label"` have the same number of elements |
