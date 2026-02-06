@@ -2,7 +2,7 @@
 
 Rank feature importance across multiple ML models using permutation importance.
 
-FeatRanker trains a configurable set of scikit-learn, XGBoost, LightGBM, and
+FeatRanker trains a configurable set of scikit-learn, XGBoost, and
 CatBoost models on your data, computes permutation importance for every trained
 model, and returns per-model rankings plus an aggregated average ranking.
 
