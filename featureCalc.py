@@ -31,8 +31,10 @@ class prepFeature:
 
         Replace this placeholder with your own preprocessing logic.
         """
-        # TODO: implement your feature pipeline and return the result.
-        return features
+        raise NotImplementedError(
+            "Implement _calc_features() in your prep class, or uncomment "
+            "one of the examples below."
+        )
 
     # -----------------------------------------------------------------
     # Example implementations (uncomment ONE to try it out)

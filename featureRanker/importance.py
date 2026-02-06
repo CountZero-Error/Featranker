@@ -360,6 +360,11 @@ def main() -> int:
     )
     args = parser.parse_args()
 
+    # Show help when invoked with no arguments.
+    if args.task is None:
+        parser.print_help()
+        return 0
+
     ranker = build_ranker(
         task=args.task,
         group=args.group,
