@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=67", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "featureRanker"
+version = "0.1.0"
+description = "Rank feature importance across multiple ML models."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "FeatureRanker contributors" }]
+dependencies = [
+  "numpy",
+  "scikit-learn",
+  "pyyaml",
+  "tqdm",
+  "xgboost",
+  "lightgbm",
+  "catboost",
+]
+
+[project.scripts]
+featureRanker = "featureRanker.importance:main"
+
+[tool.setuptools]
+packages = ["featureRanker"]
+include-package-data = true
+
+[tool.setuptools.package-data]
+featureRanker = ["importance_config.yaml"]

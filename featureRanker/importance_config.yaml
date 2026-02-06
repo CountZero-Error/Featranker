@@ -1,0 +1,203 @@
+classification:
+  linear:
+    - name: logistic_regression
+      import: sklearn.linear_model
+      class: LogisticRegression
+      params:
+        max_iter: 2000
+    - name: logistic_regression_l1
+      import: sklearn.linear_model
+      class: LogisticRegression
+      params:
+        penalty: l1
+        solver: saga
+        max_iter: 5000
+    - name: logistic_regression_l2
+      import: sklearn.linear_model
+      class: LogisticRegression
+      params:
+        penalty: l2
+        solver: lbfgs
+        max_iter: 2000
+    - name: logistic_regression_elasticnet
+      import: sklearn.linear_model
+      class: LogisticRegression
+      params:
+        penalty: elasticnet
+        solver: saga
+        l1_ratio: 0.5
+        max_iter: 5000
+    - name: linear_svm
+      import: sklearn.svm
+      class: LinearSVC
+      params:
+        max_iter: 5000
+    - name: sgd_classifier
+      import: sklearn.linear_model
+      class: SGDClassifier
+    - name: ridge_classifier
+      import: sklearn.linear_model
+      class: RidgeClassifier
+    - name: perceptron
+      import: sklearn.linear_model
+      class: Perceptron
+    - name: passive_aggressive
+      import: sklearn.linear_model
+      class: PassiveAggressiveClassifier
+    - name: lda
+      import: sklearn.discriminant_analysis
+      class: LinearDiscriminantAnalysis
+    - name: qda
+      import: sklearn.discriminant_analysis
+      class: QuadraticDiscriminantAnalysis
+    - name: naive_bayes_gaussian
+      import: sklearn.naive_bayes
+      class: GaussianNB
+    - name: naive_bayes_bernoulli
+      import: sklearn.naive_bayes
+      class: BernoulliNB
+    - name: naive_bayes_multinomial
+      import: sklearn.naive_bayes
+      class: MultinomialNB
+    - name: pls_da
+      import: sklearn.cross_decomposition
+      class: PLSRegression
+
+  tree:
+    - name: decision_tree
+      import: sklearn.tree
+      class: DecisionTreeClassifier
+      params:
+        random_state: 42
+    - name: random_forest
+      import: sklearn.ensemble
+      class: RandomForestClassifier
+      params:
+        random_state: 42
+    - name: extra_trees
+      import: sklearn.ensemble
+      class: ExtraTreesClassifier
+      params:
+        random_state: 42
+    - name: bagging_tree
+      import: sklearn.ensemble
+      class: BaggingClassifier
+      params:
+        random_state: 42
+    - name: adaboost
+      import: sklearn.ensemble
+      class: AdaBoostClassifier
+      params:
+        random_state: 42
+    - name: gradient_boosting
+      import: sklearn.ensemble
+      class: GradientBoostingClassifier
+      params:
+        random_state: 42
+    - name: hist_gradient_boosting
+      import: sklearn.ensemble
+      class: HistGradientBoostingClassifier
+      params:
+        random_state: 42
+    - name: xgboost
+      import: xgboost
+      class: XGBClassifier
+      params:
+        random_state: 42
+        eval_metric: logloss
+    - name: catboost
+      import: catboost
+      class: CatBoostClassifier
+      params:
+        random_seed: 42
+        verbose: false
+
+regression:
+  linear:
+    - name: linear_regression
+      import: sklearn.linear_model
+      class: LinearRegression
+    - name: ridge_regression
+      import: sklearn.linear_model
+      class: Ridge
+    - name: lasso_regression
+      import: sklearn.linear_model
+      class: Lasso
+      params:
+        random_state: 42
+        max_iter: 2000
+    - name: elasticnet_regression
+      import: sklearn.linear_model
+      class: ElasticNet
+      params:
+        random_state: 42
+        max_iter: 2000
+    - name: elasticnet_cv_regression
+      import: sklearn.linear_model
+      class: ElasticNetCV
+      params:
+        random_state: 42
+        max_iter: 2000
+    - name: pls_regression
+      import: sklearn.cross_decomposition
+      class: PLSRegression
+    - name: huber_regression
+      import: sklearn.linear_model
+      class: HuberRegressor
+      params:
+        max_iter: 2000
+    - name: ransac_regression
+      import: sklearn.linear_model
+      class: RANSACRegressor
+      params:
+        random_state: 42
+    - name: kernel_ridge_regression
+      import: sklearn.kernel_ridge
+      class: KernelRidge
+    - name: svr_regression
+      import: sklearn.svm
+      class: SVR
+
+  tree:
+    - name: decision_tree_regressor
+      import: sklearn.tree
+      class: DecisionTreeRegressor
+      params:
+        random_state: 42
+    - name: random_forest_regressor
+      import: sklearn.ensemble
+      class: RandomForestRegressor
+      params:
+        random_state: 42
+    - name: extra_trees_regressor
+      import: sklearn.ensemble
+      class: ExtraTreesRegressor
+      params:
+        random_state: 42
+    - name: adaboost_regressor
+      import: sklearn.ensemble
+      class: AdaBoostRegressor
+      params:
+        random_state: 42
+    - name: gradient_boosting_regressor
+      import: sklearn.ensemble
+      class: GradientBoostingRegressor
+      params:
+        random_state: 42
+    - name: hist_gradient_boosting_regressor
+      import: sklearn.ensemble
+      class: HistGradientBoostingRegressor
+      params:
+        random_state: 42
+    - name: xgboost_regressor
+      import: xgboost
+      class: XGBRegressor
+      params:
+        random_state: 42
+        eval_metric: rmse
+    - name: catboost_regressor
+      import: catboost
+      class: CatBoostRegressor
+      params:
+        random_seed: 42
+        verbose: false
