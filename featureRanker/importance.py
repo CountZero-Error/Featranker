@@ -1,5 +1,5 @@
 """
-Examine Feature Importance
+Feature importance ranking via permutation importance across multiple ML models.
 """
 
 import argparse
@@ -9,15 +9,10 @@ import json
 import sys
 import warnings
 from pathlib import Path
-from types import ModuleType
 from typing import Any, Dict, List, Literal, Optional
 
 import numpy as np
 import yaml
-try:
-    from . import featureCalc
-except ImportError:  # pragma: no cover - fallback for direct script execution
-    import featureCalc  # type: ignore
 from sklearn.inspection import permutation_importance
 from tqdm import tqdm
 
@@ -29,111 +24,69 @@ task_map = {
 }
 
 
-def _resolve_prep_class(class_name: str):
-    return _resolve_prep_class_from_module(
-        module=featureCalc,
-        class_name=class_name,
-        source_label="featureRanker/featureCalc.py",
-    )
-
-
-def _resolve_prep_class_from_module(
-    module: ModuleType, class_name: str, source_label: str
-):
-    try:
-        prep_cls = getattr(module, class_name)
-    except AttributeError as exc:
-        raise ValueError(
-            f"[!] prepFeature class '{class_name}' not found in {source_label}"
-        ) from exc
-
-    if not isinstance(prep_cls, type):
-        raise ValueError(f"[!] '{class_name}' is not a class.")
-
-    if not hasattr(prep_cls, "_calc_features"):
-        raise ValueError(f"[!] '{class_name}' does not define _calc_features().")
-
-    return prep_cls
-
-
-def _load_module_from_file(prep_file: str) -> ModuleType:
-    prep_path = Path(prep_file).expanduser().resolve()
-    if not prep_path.exists():
-        raise ValueError(f"[!] prep file does not exist: {prep_path}")
-    if not prep_path.is_file():
-        raise ValueError(f"[!] prep file is not a file: {prep_path}")
-
-    module_name = f"_featureRanker_user_prep_{abs(hash(str(prep_path)))}"
-    spec = importlib.util.spec_from_file_location(module_name, prep_path)
-    if spec is None or spec.loader is None:
-        raise ValueError(f"[!] Could not load module from prep file: {prep_path}")
-
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-def _resolve_prep_class_with_source(
-    class_name: str, prep_file: Optional[str] = None
-):
-    if prep_file:
-        user_module = _load_module_from_file(prep_file)
-        return _resolve_prep_class_from_module(
-            module=user_module,
-            class_name=class_name,
-            source_label=f"{Path(prep_file).expanduser().resolve()}",
-        )
-
-    return _resolve_prep_class(class_name)
-
-
-def _build_feature_ranker(prep_class_name: str, prep_file: Optional[str] = None):
-    prep_cls = _resolve_prep_class_with_source(prep_class_name, prep_file)
-
-    class FeatureRanker(prep_cls, RankerMixin):
-        def __init__(
-            self,
-            task: Literal["clf", "reg"],
-            group: Literal["linear", "tree", "all"] = "all",
-        ):
-            super().__init__()
-            self._init_ranker(task=task, group=group)
-
-    FeatureRanker.__name__ = "FeatureRanker"
-    return FeatureRanker
-
-
-class RankerMixin:
-    def _init_ranker(
+class FeatureRanker:
+    def __init__(
         self,
         task: Literal["clf", "reg"],
         group: Literal["linear", "tree", "all"] = "all",
+        prep_file: Optional[str] = None,
+        prep_class: Any = "prepFeature",
     ) -> None:
         """
-        Initialize feature ranker, load models from config, and train them.
+        Initialize the ranker: load features, build models, and train them.
 
         Args:
-            task: Task type to run ("clf" or "reg").
-            group: Model group to train ("linear", "tree", or "all").
+            task: Task type — "clf" for classification or "reg" for regression.
+            group: Model family — "linear", "tree", or "all" for both.
+            prep_file: Path to a Python file that contains the feature-prep class.
+                       Defaults to "featureCalc.py" in the current working directory.
+            prep_class: Name of the class to instantiate from prep_file.
         """
+        # Resolve the feature-preparation file, falling back to the default.
+        if prep_file is None:
+            prep_file = "featureCalc.py"
+
+        prep_path = Path(prep_file).resolve()
+        if not prep_path.is_file():
+            raise FileNotFoundError(
+                f"[!] Prep file not found: {prep_path}\n"
+                "    Make sure you run featureRanker from the directory "
+                "containing your featureCalc.py, or pass --prep-file."
+            )
+
+        # Dynamically load the prep module from the file path.
+        spec = importlib.util.spec_from_file_location(prep_path.stem, str(prep_path))
+        if spec is None or spec.loader is None:
+            raise ImportError(f"[!] Could not load module from: {prep_path}")
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[prep_path.stem] = module
+        spec.loader.exec_module(module)
+
+        # Instantiate the prep class and compute the feature dict.
+        _featureCalc = getattr(module, prep_class)
+        featureCalc = _featureCalc()
+        self.features = featureCalc._calc_features()
+
         self.task = task
         self.group = group
 
-        # Initrialize models
+        # Initialize model instances from the YAML config.
         self.models = self.init_models()
 
-        # Train models
+        # Train every initialized model on the prepared features.
         self.trained_models = self.run_ML()
 
     def init_models(self) -> Dict[str, Dict[str, Dict[str, Any]]]:
         """
-        Load model definitions from importance_config.yaml and instantiate them.
+        Read model definitions from importance_config.yaml and instantiate them.
+
+        Only models that match the requested task and group are created, so
+        unnecessary work is avoided when the user narrows the scope.
 
         Returns:
-            Dict[task, Dict[group, Dict[model_name, model_instance]]]
+            Nested dict keyed by [task][group][model_name] → model instance.
         """
-        # Load config bundled in the package.
+        # Load the YAML config that ships alongside this module.
         config_path = Path(__file__).with_name("importance_config.yaml")
         with config_path.open("r", encoding="utf-8") as config_file:
             config = yaml.safe_load(config_file) or {}
@@ -143,7 +96,7 @@ class RankerMixin:
             "reg": {"linear": {}, "tree": {}},
         }
 
-        # Only initialize the requested task/group to avoid duplicate work.
+        # Determine which tasks and groups to initialize.
         allowed_tasks = {"clf", "reg"} if self.task == "all" else {self.task}
         allowed_groups = {"linear", "tree"} if self.group == "all" else {self.group}
 
@@ -191,8 +144,8 @@ class RankerMixin:
                         )
 
                     params = dict(params)
+                    # Suppress verbose LightGBM output unless the user overrides it.
                     if module_path == "lightgbm":
-                        # Silence LightGBM training logs unless overridden in config.
                         params.setdefault("verbosity", -1)
 
                     group_models[name] = model_class(**params)
@@ -203,15 +156,18 @@ class RankerMixin:
 
     def run_ML(self) -> Dict[str, Any]:
         """
-        Train all initialized models on the prepared features.
+        Train every initialized model on the feature matrix.
+
+        The feature dict is unpacked into a NumPy array X (features) and a
+        vector y (labels), then each model is fitted via its .fit() method.
 
         Returns:
-            Dict[model_name, trained_model]
+            Dict mapping model_name → trained model instance.
         """
         if not isinstance(self.features, dict) or len(self.features) == 0:
             raise ValueError("[!] inputs must be a non-empty dict of features.")
 
-        """Unpack Features"""
+        # --- Unpack the feature dict into X and y arrays ---
         feature_names = list(self.features.keys())
         n_samples = len(self.features[feature_names[0]])
         X, y = [], []
@@ -226,7 +182,6 @@ class RankerMixin:
 
             if feature_name == "label":
                 y = self.features["label"]
-
             else:
                 feature_names.append(np.asarray(values, dtype=float))
                 X.append(values)
@@ -234,7 +189,7 @@ class RankerMixin:
         X = np.column_stack(X)
         y = np.asarray(y)
 
-        """Train Models"""
+        # --- Fit each model in the selected group(s) ---
         group2train = ["linear", "tree"] if self.group == "all" else [self.group]
 
         trained_models: Dict[str, Any] = {}
@@ -257,10 +212,13 @@ class RankerMixin:
 
     def rankFeatures(self):
         """
-        Rank feature importance for each trained model and compute an average ranking.
+        Compute permutation importance for every trained model and produce
+        a per-model ranking plus an overall average ranking.
 
         Returns:
-            Dict[model_name, List[Dict[feature_name, score]]] with an "average" key.
+            Dict mapping each model name to a sorted list of
+            {feature_name: score} dicts, plus an "average" entry that
+            aggregates scores across all models.
         """
         if not isinstance(self.features, dict) or len(self.features) == 0:
             raise ValueError("[!] inputs must be a non-empty dict of features.")
@@ -273,6 +231,7 @@ class RankerMixin:
         if n_samples == 0:
             raise ValueError("[!] label must be a non-empty sequence.")
 
+        # Separate feature columns from the label.
         feature_names: List[str] = []
         X_cols: List[np.ndarray] = []
         for feature_name, values in self.features.items():
@@ -296,6 +255,7 @@ class RankerMixin:
             raise ValueError("[!] No trained models available.")
 
         def _sorted_scores(scores: Dict[str, float]) -> List[Dict[str, float]]:
+            """Return a list of single-entry dicts sorted by score descending."""
             return [
                 {name: scores[name]}
                 for name in sorted(scores, key=scores.get, reverse=True)
@@ -309,7 +269,7 @@ class RankerMixin:
             self.trained_models.items(), desc="[*] Computing permutation importance"
         ):
             try:
-                # Suppress sklearn warnings about missing feature names for some estimators.
+                # Silence sklearn warnings about feature-name mismatches.
                 with warnings.catch_warnings():
                     warnings.filterwarnings(
                         "ignore",
@@ -323,7 +283,7 @@ class RankerMixin:
                 print(f"[*] Error computing importance for model '{model_name}': {e}")
                 continue
 
-            # Keep output compact with 4 decimal places.
+            # Round scores to four decimal places for compact output.
             model_scores = {
                 fname: float(round(score, 4))
                 for fname, score in zip(feature_names, perm.importances_mean)
@@ -337,7 +297,7 @@ class RankerMixin:
         if not any_model:
             raise ValueError("[!] Failed to compute importance for any trained model.")
 
-        # Average across models for a single summary ranking.
+        # Aggregate a single summary ranking averaged across all models.
         average_scores = {
             fname: float(round(np.mean(scores), 4))
             for fname, scores in score_bank.items()
@@ -348,53 +308,34 @@ class RankerMixin:
         return results
 
 
-# Default FeatureRanker uses the base prepFeature class.
-FeatureRanker = _build_feature_ranker("prepFeature")
-
-
-def build_ranker(
-    prep_class: str = "prepFeature", prep_file: Optional[str] = None
-):
-    """
-    Build a FeatureRanker class using a prep class from package or external file.
-
-    Args:
-        prep_class: Prep class name to use.
-        prep_file: Optional path to a Python file that defines prep classes.
-
-    Returns:
-        Dynamically built FeatureRanker class.
-    """
-    return _build_feature_ranker(prep_class, prep_file)
-
-
 def main() -> int:
+    """CLI entry point — parse arguments, run the ranking, and output results."""
     parser = argparse.ArgumentParser(
         description=(
-            "Rank feature importance with ML models defined in importance_config.yaml. "
-            "Requires a prepFeature class in featureRanker/featureCalc.py "
-            "to provide features and labels."
+            "Rank feature importance using ML models defined in "
+            "importance_config.yaml.  Requires a prep class (default: "
+            "prepFeature in featureCalc.py) that supplies features and labels."
         )
     )
     parser.add_argument(
         "--task",
         choices=["clf", "reg"],
-        help=("Task type to run: `clf` for classification or `reg` for regression."),
+        help="Task type: 'clf' for classification, 'reg' for regression.",
     )
     parser.add_argument(
         "--prep-class",
         default="prepFeature",
         help=(
-            "Name of the prep class to use. "
-            "With --prep-file, this class is loaded from that file. "
-            "Without --prep-file, class is loaded from featureRanker/featureCalc.py."
+            "Name of the feature-preparation class to instantiate. "
+            "Loaded from the file specified by --prep-file (or the default "
+            "featureCalc.py when --prep-file is omitted)."
         ),
     )
     parser.add_argument(
         "--prep-file",
         default=None,
         help=(
-            "Optional path to user prep Python file. "
+            "Path to a custom Python file containing the prep class. "
             "Use this to avoid editing installed package files."
         ),
     )
@@ -403,8 +344,8 @@ def main() -> int:
         choices=["linear", "tree", "all"],
         default="all",
         help=(
-            "Model family to run: "
-            "`linear` (linear models), `tree` (tree/ensemble models), or `all`."
+            "Model family: 'linear' (linear models only), "
+            "'tree' (tree/ensemble models only), or 'all' (both)."
         ),
     )
     parser.add_argument(
@@ -412,21 +353,25 @@ def main() -> int:
         type=Path,
         default=None,
         help=(
-            "Write results as JSON to this path. "
-            "If no extension is provided, `.json` will be appended. "
-            "If omitted, results are printed to stdout."
+            "Write results as JSON to this file path. "
+            "A .json extension is appended automatically if missing. "
+            "When omitted, results are printed to stdout."
         ),
     )
     args = parser.parse_args()
 
-    RankerClass = _build_feature_ranker(args.prep_class, args.prep_file)
-    ranker = RankerClass(task=args.task, group=args.group)
+    ranker = build_ranker(
+        task=args.task,
+        group=args.group,
+        prep_class=args.prep_class,
+        prep_file=args.prep_file,
+    )
     results = ranker.rankFeatures()
 
     output = json.dumps(results, indent=2)
 
     if args.output:
-        # Ensure output path ends with .json when writing to disk.
+        # Guarantee a .json extension when writing to disk.
         output_path = args.output
         if output_path.suffix.lower() != ".json":
             output_path = output_path.with_suffix(".json")
@@ -435,6 +380,30 @@ def main() -> int:
         print(output)
 
     return 0
+
+
+def build_ranker(
+    task: Literal["clf", "reg"],
+    group: Literal["linear", "tree", "all"] = "all",
+    prep_file: Optional[str] = None,
+    prep_class: Any = "prepFeature",
+) -> "FeatureRanker":
+    """
+    Convenience factory that creates and returns a fully initialized
+    FeatureRanker (features loaded, models trained, ready to rank).
+
+    Args:
+        task: Task type — "clf" or "reg".
+        group: Model family — "linear", "tree", or "all".
+        prep_file: Path to the Python file containing the prep class.
+        prep_class: Name of the prep class inside that file.
+
+    Returns:
+        A ready-to-use FeatureRanker instance.
+    """
+    return FeatureRanker(
+        task=task, group=group, prep_file=prep_file, prep_class=prep_class
+    )
 
 
 if __name__ == "__main__":
