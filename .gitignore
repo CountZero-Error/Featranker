@@ -208,3 +208,6 @@ __marimo__/
 
 # Macintosh
 .DS_Store
+
+# catboost
+catboost_info/

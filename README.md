@@ -8,6 +8,7 @@ FeatureRanker ranks feature importance across many ML models using permutation i
 | Import module | `featureRanker` |
 | CLI command | `featureRanker` |
 | Model config | `featureRanker/importance_config.yaml` |
+| Default prep module | `featureCalc.py` (project root) |
 
 ---
 
@@ -50,7 +51,7 @@ pip install -e .
 
 ## Data Prep Classes (Required)
 
-Before running CLI or API, define at least one prep class in `featureRanker/featureCalc.py`.
+Before running CLI or API, define at least one prep class that returns your data in the expected shape.
 
 Expected return shape:
 
@@ -62,31 +63,28 @@ Expected return shape:
 }
 ```
 
-You can define multiple classes in the same file and choose one at runtime via `--prep-class`.
+Default workflow:
+- Edit `featureCalc.py` in your project root.
+- Define one or more prep classes there.
+- Select class via `--prep-class`.
 
-Reference example:
-- `example_featureCalc.py`
-- Includes `IrisPrepFeature` and `DiabetesPrepFeature`
+One-time-install workflow (no reinstall after data-prep edits):
+- Keep your prep classes in any file, e.g. `my_feature_calc.py`.
+- Load it with `--prep-file` + `--prep-class`.
 
 ---
 
 ## Quick Start
 
-1. Add your prep class(es) to `featureRanker/featureCalc.py`.
+1. Define your prep class(es) in `featureCalc.py` or your own prep file.
 2. Run FeatureRanker with the class name.
 
 ```bash
-# Classification with your custom prep class
+# Classification using class from project-root featureCalc.py
 featureRanker --prep-class IrisPrepFeature --task clf --group all
 
-# Regression with your custom prep class and JSON output
-featureRanker --prep-class DiabetesPrepFeature --task reg --group tree --output results
-```
-
-Without package install:
-
-```bash
-python featureRanker/importance.py --prep-class IrisPrepFeature --task clf --group all
+# Regression using external prep file, with JSON output
+featureRanker --prep-file ./my_feature_calc.py --prep-class DiabetesPrepFeature --task reg --group tree --output results
 ```
 
 ---
@@ -95,7 +93,8 @@ python featureRanker/importance.py --prep-class IrisPrepFeature --task clf --gro
 
 | Flag | Description | Default |
 | --- | --- | --- |
-| `--prep-class` | Class name in `featureRanker/featureCalc.py` | `prepFeature` |
+| `--prep-class` | Class name to load (from `--prep-file` or `featureCalc.py`) | `prepFeature` |
+| `--prep-file` | Optional user prep Python file path | Not set |
 | `--task` | `clf` or `reg` | Required |
 | `--group` | `linear`, `tree`, or `all` | `all` |
 | `--output` | Output file path (`.json` auto-added if missing) | Print to stdout |
@@ -146,7 +145,7 @@ Example:
 
 ## Python API (Basic)
 
-If your default class in `featureRanker/featureCalc.py` is `prepFeature`:
+If your default class in project-root `featureCalc.py` is `prepFeature`:
 
 ```python
 from featureRanker.importance import FeatureRanker
@@ -155,15 +154,26 @@ ranker = FeatureRanker(task="clf", group="all")
 result = ranker.rankFeatures()
 ```
 
-For non-default prep classes, prefer CLI with `--prep-class`.
+For external prep files, use:
+
+```python
+from featureRanker import build_ranker
+
+RankerClass = build_ranker(
+    prep_class="IrisPrepFeature",
+    prep_file="./my_feature_calc.py",
+)
+ranker = RankerClass(task="clf", group="all")
+result = ranker.rankFeatures()
+```
 
 ---
 
 ## Troubleshooting
 
 - Error: `prepFeature class 'X' not found`
-  - Define class `X` in `featureRanker/featureCalc.py`
-  - Re-run with `--prep-class X`
+  - If using external file: verify `--prep-file` path and class name
+  - If not using external file: define class `X` in project-root `featureCalc.py`
 - Error about missing `label`
   - Ensure `_calc_features()` returns a `label` key
 - Feature length mismatch

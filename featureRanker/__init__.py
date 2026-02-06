@@ -1,5 +1,5 @@
 """FeatureRanker package."""
 
-from .importance import FeatureRanker
+from .importance import FeatureRanker, build_ranker
 
-__all__ = ["FeatureRanker"]
+__all__ = ["FeatureRanker", "build_ranker"]

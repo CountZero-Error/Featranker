@@ -4,10 +4,13 @@ Examine Feature Importance
 
 import argparse
 import importlib
+import importlib.util
 import json
+import sys
 import warnings
 from pathlib import Path
-from typing import Any, Dict, List, Literal
+from types import ModuleType
+from typing import Any, Dict, List, Literal, Optional
 
 import numpy as np
 import yaml
@@ -27,11 +30,21 @@ task_map = {
 
 
 def _resolve_prep_class(class_name: str):
+    return _resolve_prep_class_from_module(
+        module=featureCalc,
+        class_name=class_name,
+        source_label="featureRanker/featureCalc.py",
+    )
+
+
+def _resolve_prep_class_from_module(
+    module: ModuleType, class_name: str, source_label: str
+):
     try:
-        prep_cls = getattr(featureCalc, class_name)
+        prep_cls = getattr(module, class_name)
     except AttributeError as exc:
         raise ValueError(
-            f"[!] prepFeature class '{class_name}' not found in featureRanker/featureCalc.py"
+            f"[!] prepFeature class '{class_name}' not found in {source_label}"
         ) from exc
 
     if not isinstance(prep_cls, type):
@@ -43,8 +56,40 @@ def _resolve_prep_class(class_name: str):
     return prep_cls
 
 
-def _build_feature_ranker(prep_class_name: str):
-    prep_cls = _resolve_prep_class(prep_class_name)
+def _load_module_from_file(prep_file: str) -> ModuleType:
+    prep_path = Path(prep_file).expanduser().resolve()
+    if not prep_path.exists():
+        raise ValueError(f"[!] prep file does not exist: {prep_path}")
+    if not prep_path.is_file():
+        raise ValueError(f"[!] prep file is not a file: {prep_path}")
+
+    module_name = f"_featureRanker_user_prep_{abs(hash(str(prep_path)))}"
+    spec = importlib.util.spec_from_file_location(module_name, prep_path)
+    if spec is None or spec.loader is None:
+        raise ValueError(f"[!] Could not load module from prep file: {prep_path}")
+
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _resolve_prep_class_with_source(
+    class_name: str, prep_file: Optional[str] = None
+):
+    if prep_file:
+        user_module = _load_module_from_file(prep_file)
+        return _resolve_prep_class_from_module(
+            module=user_module,
+            class_name=class_name,
+            source_label=f"{Path(prep_file).expanduser().resolve()}",
+        )
+
+    return _resolve_prep_class(class_name)
+
+
+def _build_feature_ranker(prep_class_name: str, prep_file: Optional[str] = None):
+    prep_cls = _resolve_prep_class_with_source(prep_class_name, prep_file)
 
     class FeatureRanker(prep_cls, RankerMixin):
         def __init__(
@@ -307,6 +352,22 @@ class RankerMixin:
 FeatureRanker = _build_feature_ranker("prepFeature")
 
 
+def build_ranker(
+    prep_class: str = "prepFeature", prep_file: Optional[str] = None
+):
+    """
+    Build a FeatureRanker class using a prep class from package or external file.
+
+    Args:
+        prep_class: Prep class name to use.
+        prep_file: Optional path to a Python file that defines prep classes.
+
+    Returns:
+        Dynamically built FeatureRanker class.
+    """
+    return _build_feature_ranker(prep_class, prep_file)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description=(
@@ -324,8 +385,17 @@ def main() -> int:
         "--prep-class",
         default="prepFeature",
         help=(
-            "Name of the prepFeature class defined in featureRanker/featureCalc.py. "
-            "Use this to select different datasets or preprocessing pipelines."
+            "Name of the prep class to use. "
+            "With --prep-file, this class is loaded from that file. "
+            "Without --prep-file, class is loaded from featureRanker/featureCalc.py."
+        ),
+    )
+    parser.add_argument(
+        "--prep-file",
+        default=None,
+        help=(
+            "Optional path to user prep Python file. "
+            "Use this to avoid editing installed package files."
         ),
     )
     parser.add_argument(
@@ -349,7 +419,7 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    RankerClass = _build_feature_ranker(args.prep_class)
+    RankerClass = _build_feature_ranker(args.prep_class, args.prep_file)
     ranker = RankerClass(task=args.task, group=args.group)
     results = ranker.rankFeatures()
 
