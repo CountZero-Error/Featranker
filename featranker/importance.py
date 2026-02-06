@@ -50,7 +50,7 @@ class FeatureRanker:
         if not prep_path.is_file():
             raise FileNotFoundError(
                 f"[!] Prep file not found: {prep_path}\n"
-                "    Make sure you run feature-ranker from the directory "
+                "    Make sure you run featranker from the directory "
                 "containing your featureCalc.py, or pass --prep-file."
             )
 

@@ -1,4 +1,4 @@
-"""Feature Ranker package."""
+"""FeatRanker package."""
 
 from .importance import FeatureRanker, build_ranker
 
