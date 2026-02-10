@@ -4,26 +4,26 @@ classification:
       import: sklearn.linear_model
       class: LogisticRegression
       params:
+        l1_ratio: 0
         max_iter: 2000
     - name: logistic_regression_l1
       import: sklearn.linear_model
       class: LogisticRegression
       params:
-        penalty: l1
+        l1_ratio: 1
         solver: saga
         max_iter: 5000
     - name: logistic_regression_l2
       import: sklearn.linear_model
       class: LogisticRegression
       params:
-        penalty: l2
+        l1_ratio: 0
         solver: lbfgs
         max_iter: 2000
     - name: logistic_regression_elasticnet
       import: sklearn.linear_model
       class: LogisticRegression
       params:
-        penalty: elasticnet
         solver: saga
         l1_ratio: 0.5
         max_iter: 5000
@@ -43,22 +43,26 @@ classification:
       class: Perceptron
     - name: passive_aggressive
       import: sklearn.linear_model
-      class: PassiveAggressiveClassifier
+      class: SGDClassifier
+      params:
+        loss: hinge
+        penalty: null
+        learning_rate: pa1
+        eta0: 1.0
     - name: lda
       import: sklearn.discriminant_analysis
       class: LinearDiscriminantAnalysis
     - name: qda
       import: sklearn.discriminant_analysis
       class: QuadraticDiscriminantAnalysis
+      params:
+        reg_param: 0.1
     - name: naive_bayes_gaussian
       import: sklearn.naive_bayes
       class: GaussianNB
     - name: naive_bayes_bernoulli
       import: sklearn.naive_bayes
       class: BernoulliNB
-    - name: naive_bayes_multinomial
-      import: sklearn.naive_bayes
-      class: MultinomialNB
     - name: pls_da
       import: sklearn.cross_decomposition
       class: PLSRegression

@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Literal, Optional
 import numpy as np
 import yaml
 from sklearn.inspection import permutation_importance
+from sklearn.preprocessing import LabelEncoder
 from tqdm import tqdm
 
 task_map = {
@@ -70,6 +71,7 @@ class FeatureRanker:
 
         self.task = task
         self.group = group
+        self.label_encoder = None
 
         # Initialize model instances from the YAML config.
         self.models = self.init_models()
@@ -190,6 +192,11 @@ class FeatureRanker:
         X = np.column_stack(X)
         y = np.asarray(y)
 
+        # Encode string labels to integers for models that require numeric targets
+        if y.dtype.kind in ("U", "S", "O"):  # Unicode, byte string, or object
+            self.label_encoder = LabelEncoder()
+            y = self.label_encoder.fit_transform(y)
+
         # --- Fit each model in the selected group(s) ---
         group2train = ["linear", "tree"] if self.group == "all" else [self.group]
 
@@ -228,6 +235,9 @@ class FeatureRanker:
             raise ValueError("[!] inputs must include a 'label' feature.")
 
         y = np.asarray(self.features["label"])
+        # Re-apply label encoding if labels were encoded during training
+        if self.label_encoder is not None:
+            y = self.label_encoder.transform(y)
         n_samples = len(y)
         if n_samples == 0:
             raise ValueError("[!] label must be a non-empty sequence.")
