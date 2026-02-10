@@ -31,6 +31,7 @@ class FeatureRanker:
         group: Literal["linear", "tree", "all"] = "all",
         prep_file: Optional[str] = None,
         prep_class: Any = "prepFeature",
+        **kwargs,
     ) -> None:
         """
         Initialize the ranker: load features, build models, and train them.
@@ -64,7 +65,7 @@ class FeatureRanker:
 
         # Instantiate the prep class and compute the feature dict.
         _featureCalc = getattr(module, prep_class)
-        featureCalc = _featureCalc()
+        featureCalc = _featureCalc(**kwargs)
         self.features = featureCalc._calc_features()
 
         self.task = task
@@ -392,6 +393,7 @@ def build_ranker(
     group: Literal["linear", "tree", "all"] = "all",
     prep_file: Optional[str] = None,
     prep_class: Any = "prepFeature",
+    **kwargs,
 ) -> "FeatureRanker":
     """
     Convenience factory that creates and returns a fully initialized
@@ -407,7 +409,7 @@ def build_ranker(
         A ready-to-use FeatureRanker instance.
     """
     return FeatureRanker(
-        task=task, group=group, prep_file=prep_file, prep_class=prep_class
+        task=task, group=group, prep_file=prep_file, prep_class=prep_class, **kwargs
     )
 
 

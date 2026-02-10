@@ -22,7 +22,7 @@ class prepFeature:
     runtime with the ``--prep-class`` CLI flag.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, **kwargs) -> None:
         pass
 
     def _calc_features(self) -> Dict[str, list]:
