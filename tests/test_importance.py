@@ -3,6 +3,7 @@ import pytest
 from sklearn.metrics import get_scorer
 
 from featranker import FeatureRanker
+from featranker.importance import _assign_ranks, _build_consensus
 
 
 class MeanRegressor:
@@ -20,6 +21,11 @@ class MeanRegressor:
 class FailFitRegressor(MeanRegressor):
     def fit(self, X, y):
         raise ValueError("fit exploded")
+
+
+class FailingScoreRegressor(MeanRegressor):
+    def score(self, X, y):
+        raise ValueError("score exploded")
 
 
 def ranker_with_models(monkeypatch, models):
@@ -257,3 +263,104 @@ def test_rank_features_validates_repeat_count_and_scorer(monkeypatch):
         ranker.rank_features(X_EVAL, Y_EVAL, scoring="r2", n_repeats=0)
     with pytest.raises(TypeError, match="scoring"):
         ranker.rank_features(X_EVAL, Y_EVAL, scoring=123)
+
+
+def test_ties_share_minimum_rank():
+    assert _assign_ranks({"b": 2.0, "a": 2.0, "c": 1.0}) == {
+        "a": 1,
+        "b": 1,
+        "c": 3,
+    }
+
+
+def test_consensus_uses_model_ranks_not_raw_importance():
+    model_reports = {
+        "large_scale": {
+            "importance": {
+                "a": {"mean": 1000.0, "rank": 1},
+                "b": {"mean": 999.0, "rank": 2},
+            }
+        },
+        "small_scale": {
+            "importance": {
+                "a": {"mean": 0.0, "rank": 2},
+                "b": {"mean": 1.0, "rank": 1},
+            }
+        },
+    }
+
+    consensus = {
+        row["feature_group"]: row for row in _build_consensus(model_reports)
+    }
+
+    assert consensus["a"] == {
+        "feature_group": "a",
+        "median_rank": 1.5,
+        "mean_rank": 1.5,
+        "rank_std": 0.5,
+        "n_models": 2,
+    }
+    assert consensus["b"]["mean_rank"] == 1.5
+    assert "mean_importance" not in consensus["a"]
+
+
+def test_model_report_contains_raw_importance_and_rank(monkeypatch):
+    ranker = fitted_ranker(monkeypatch)
+
+    report = ranker.rank_features(
+        X_EVAL, Y_EVAL, scoring="r2", n_repeats=3, random_state=42
+    )
+
+    importance = report["models"]["ok"]["importance"]["a"]
+    assert len(importance["values"]) == 3
+    assert set(importance) == {"values", "mean", "std", "rank"}
+    assert report["consensus"][0]["n_models"] == 1
+
+
+def test_fixed_seed_is_reproducible(monkeypatch):
+    ranker = fitted_ranker(monkeypatch)
+
+    first = ranker.rank_features(
+        X_EVAL, Y_EVAL, scoring="r2", n_repeats=4, random_state=42
+    )
+    second = ranker.rank_features(
+        X_EVAL, Y_EVAL, scoring="r2", n_repeats=4, random_state=42
+    )
+
+    assert first == second
+
+
+def test_partial_ranking_failure_is_reported_and_excluded(monkeypatch):
+    ranker = fitted_ranker(
+        monkeypatch,
+        models={"ok": MeanRegressor(), "bad": FailingScoreRegressor()},
+    )
+
+    report = ranker.rank_features(
+        X_EVAL,
+        Y_EVAL,
+        scoring=lambda model, X, y: model.score(X, y),
+        n_repeats=2,
+        random_state=1,
+    )
+
+    assert set(report["models"]) == {"ok"}
+    assert all(row["n_models"] == 1 for row in report["consensus"])
+    assert any(
+        failure["model"] == "bad" and failure["stage"] == "ranking"
+        for failure in report["failures"]
+    )
+
+
+def test_all_ranking_failures_raise(monkeypatch):
+    ranker = fitted_ranker(
+        monkeypatch, models={"bad": FailingScoreRegressor()}
+    )
+
+    with pytest.raises(RuntimeError, match="No models ranked successfully"):
+        ranker.rank_features(
+            X_EVAL,
+            Y_EVAL,
+            scoring=lambda model, X, y: model.score(X, y),
+            n_repeats=2,
+        )

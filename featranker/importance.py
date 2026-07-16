@@ -138,6 +138,48 @@ def _resolve_feature_groups(
     return resolved
 
 
+def _assign_ranks(importance: Dict[str, float]) -> Dict[str, int]:
+    """Assign descending minimum ranks; exact ties share a rank."""
+    ordered = sorted(importance, key=lambda name: (-importance[name], name))
+    ranks: Dict[str, int] = {}
+    previous_score: Optional[float] = None
+    previous_rank = 0
+    for index, name in enumerate(ordered, start=1):
+        score = importance[name]
+        rank = previous_rank if previous_score is not None and score == previous_score else index
+        ranks[name] = rank
+        previous_score = score
+        previous_rank = rank
+    return ranks
+
+
+def _build_consensus(model_reports: Dict[str, Any]) -> List[Dict[str, Any]]:
+    ranks_by_group: Dict[str, List[int]] = {}
+    for model_report in model_reports.values():
+        for group_name, importance in model_report["importance"].items():
+            ranks_by_group.setdefault(group_name, []).append(importance["rank"])
+
+    consensus = []
+    for group_name, ranks in ranks_by_group.items():
+        consensus.append(
+            {
+                "feature_group": group_name,
+                "median_rank": float(np.median(ranks)),
+                "mean_rank": float(np.mean(ranks)),
+                "rank_std": float(np.std(ranks)),
+                "n_models": len(ranks),
+            }
+        )
+    return sorted(
+        consensus,
+        key=lambda row: (
+            row["median_rank"],
+            row["mean_rank"],
+            row["feature_group"],
+        ),
+    )
+
+
 class FeatureRanker:
     def __init__(
         self,
@@ -268,6 +310,14 @@ class FeatureRanker:
                         "mean": float(np.mean(values)),
                         "std": float(np.std(values)),
                     }
+                ranks = _assign_ranks(
+                    {
+                        group_name: importance["mean"]
+                        for group_name, importance in importances.items()
+                    }
+                )
+                for group_name, rank in ranks.items():
+                    importances[group_name]["rank"] = rank
                 model_reports[model_name] = {
                     "evaluation_score": baseline,
                     "importance": importances,
@@ -288,7 +338,7 @@ class FeatureRanker:
             "random_state": random_state,
             "feature_groups": named_groups,
             "models": model_reports,
-            "consensus": [],
+            "consensus": _build_consensus(model_reports),
             "failures": self.initialization_failures_
             + self.fit_failures_
             + ranking_failures,
