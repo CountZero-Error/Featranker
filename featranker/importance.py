@@ -3,6 +3,7 @@ Feature importance ranking via permutation importance across multiple ML models.
 """
 
 import argparse
+import csv
 import importlib
 import importlib.util
 import json
@@ -25,6 +26,60 @@ task_map = {
 }
 
 OPTIONAL_MODEL_MODULES = {"xgboost", "lightgbm", "catboost"}
+
+
+def _load_csv(
+    path: Path, target: str
+) -> tuple[np.ndarray, np.ndarray, List[str]]:
+    """Load a numeric feature matrix and target column from a CSV file."""
+    with path.open("r", encoding="utf-8", newline="") as csv_file:
+        reader = csv.reader(csv_file)
+        try:
+            header = [name.strip() for name in next(reader)]
+        except StopIteration as error:
+            raise ValueError(f"[!] CSV '{path}' is empty.") from error
+        rows = list(reader)
+
+    if any(not name for name in header):
+        raise ValueError("[!] CSV column names must be non-empty.")
+    if len(set(header)) != len(header):
+        raise ValueError("[!] CSV column names must be unique.")
+    if target not in header:
+        raise ValueError(f"[!] Target column '{target}' was not found in '{path}'.")
+    if len(header) == 1:
+        raise ValueError("[!] CSV must contain at least one feature column.")
+    if not rows:
+        raise ValueError(f"[!] CSV '{path}' must contain at least one data row.")
+
+    target_index = header.index(target)
+    feature_indices = [index for index in range(len(header)) if index != target_index]
+    features: List[List[float]] = []
+    targets: List[str] = []
+    for row_number, row in enumerate(rows, start=2):
+        if len(row) != len(header):
+            raise ValueError(
+                f"[!] CSV row {row_number} has {len(row)} columns; "
+                f"expected {len(header)}."
+            )
+        try:
+            features.append([float(row[index]) for index in feature_indices])
+        except ValueError as error:
+            raise ValueError(
+                f"[!] CSV feature values must be numeric (row {row_number})."
+            ) from error
+        targets.append(row[target_index])
+
+    if any(value == "" for value in targets):
+        raise ValueError("[!] Target values must be non-empty.")
+    try:
+        y = np.asarray(targets, dtype=float)
+    except ValueError:
+        y = np.asarray(targets)
+    return (
+        np.asarray(features, dtype=float),
+        y,
+        [header[index] for index in feature_indices],
+    )
 
 
 def _validate_X(
@@ -576,9 +631,8 @@ def main() -> int:
     """CLI entry point — parse arguments, run the ranking, and output results."""
     parser = argparse.ArgumentParser(
         description=(
-            "Rank feature importance using ML models defined in "
-            "importance_config.yaml.  Requires a prep class (default: "
-            "prepFeature in featureCalc.py) that supplies features and labels."
+            "Fit feature-ranking models on explicit training data and rank "
+            "features on separate evaluation data."
         )
     )
     parser.add_argument(
@@ -588,9 +642,9 @@ def main() -> int:
     )
     parser.add_argument(
         "--prep-class",
-        default="prepFeature",
+        default=None,
         help=(
-            "Name of the feature-preparation class to instantiate. "
+            "Deprecated: feature-preparation class to instantiate. "
             "Loaded from the file specified by --prep-file (or the default "
             "featureCalc.py when --prep-file is omitted)."
         ),
@@ -599,9 +653,48 @@ def main() -> int:
         "--prep-file",
         default=None,
         help=(
-            "Path to a custom Python file containing the prep class. "
-            "Use this to avoid editing installed package files."
+            "Deprecated: path to a Python file containing the prep class."
         ),
+    )
+    parser.add_argument(
+        "--train-data",
+        type=Path,
+        default=None,
+        help="CSV containing training features and target.",
+    )
+    parser.add_argument(
+        "--eval-data",
+        type=Path,
+        default=None,
+        help="CSV containing held-out evaluation features and target.",
+    )
+    parser.add_argument(
+        "--target",
+        default=None,
+        help="Name of the target column in both CSV files.",
+    )
+    parser.add_argument(
+        "--scoring",
+        default=None,
+        help="Scikit-learn scorer name, such as neg_mean_absolute_error.",
+    )
+    parser.add_argument(
+        "--feature-groups",
+        type=Path,
+        default=None,
+        help="Optional YAML mapping of feature-group names to column names.",
+    )
+    parser.add_argument(
+        "--n-repeats",
+        type=int,
+        default=10,
+        help="Number of permutation repeats per feature group (default: 10).",
+    )
+    parser.add_argument(
+        "--random-state",
+        type=int,
+        default=None,
+        help="Optional random seed for reproducible permutations.",
     )
     parser.add_argument(
         "--group",
@@ -629,13 +722,69 @@ def main() -> int:
         parser.print_help()
         return 0
 
-    ranker = build_ranker(
-        task=args.task,
-        group=args.group,
-        prep_class=args.prep_class,
-        prep_file=args.prep_file,
+    modern_mode = any(
+        value is not None
+        for value in (
+            args.train_data,
+            args.eval_data,
+            args.target,
+            args.scoring,
+            args.feature_groups,
+        )
     )
-    results = ranker.rankFeatures()
+    if modern_mode:
+        if args.prep_file is not None or args.prep_class is not None:
+            parser.error("Modern data options cannot be combined with prep options.")
+        missing = [
+            flag
+            for flag, value in (
+                ("--train-data", args.train_data),
+                ("--eval-data", args.eval_data),
+                ("--target", args.target),
+                ("--scoring", args.scoring),
+            )
+            if value is None
+        ]
+        if missing:
+            parser.error(
+                "Modern CLI mode requires " + ", ".join(missing) + "."
+            )
+        try:
+            X_train, y_train, feature_names = _load_csv(
+                args.train_data, args.target
+            )
+            X_eval, y_eval, eval_names = _load_csv(args.eval_data, args.target)
+            if eval_names != feature_names:
+                raise ValueError(
+                    "[!] Evaluation feature names and order must match training data."
+                )
+            feature_groups = None
+            if args.feature_groups is not None:
+                with args.feature_groups.open("r", encoding="utf-8") as group_file:
+                    feature_groups = yaml.safe_load(group_file)
+                if not isinstance(feature_groups, dict):
+                    raise ValueError("[!] Feature groups YAML must contain a mapping.")
+        except (OSError, ValueError, yaml.YAMLError) as error:
+            parser.error(str(error))
+
+        ranker = FeatureRanker(task=args.task, group=args.group)
+        ranker.fit(X_train, y_train, feature_names)
+        results = ranker.rank_features(
+            X_eval,
+            y_eval,
+            scoring=args.scoring,
+            feature_groups=feature_groups,
+            n_repeats=args.n_repeats,
+            random_state=args.random_state,
+        )
+    else:
+        ranker = build_ranker(
+            task=args.task,
+            group=args.group,
+            prep_class=args.prep_class or "prepFeature",
+            prep_file=args.prep_file,
+        )
+        results = ranker.rankFeatures()
 
     output = json.dumps(results, indent=2)
 

@@ -99,6 +99,52 @@ print(report["consensus"])
 
 NumPy training matrices require `feature_names`. pandas DataFrames retain their column names.
 
+### CLI
+
+The modern CLI accepts separate numeric training and evaluation CSV files. No preparation Python script is required.
+
+`train.csv`:
+
+```csv
+feature_a,feature_b,segment_red,segment_blue,target
+1.2,8.1,1,0,12.4
+2.1,7.3,0,1,14.8
+3.4,6.8,1,0,18.2
+4.0,5.9,0,1,20.1
+```
+
+`eval.csv`:
+
+```csv
+feature_a,feature_b,segment_red,segment_blue,target
+1.7,7.8,1,0,13.6
+3.8,6.2,0,1,19.4
+```
+
+`groups.yaml`:
+
+```yaml
+segment:
+  - segment_red
+  - segment_blue
+```
+
+```bash
+featranker \
+  --task reg \
+  --group tree \
+  --train-data train.csv \
+  --eval-data eval.csv \
+  --target target \
+  --scoring neg_mean_absolute_error \
+  --feature-groups groups.yaml \
+  --n-repeats 20 \
+  --random-state 42 \
+  --output report.json
+```
+
+Both CSV files require headers, the same feature columns in the same order, and the target column. Feature values must be numeric; targets may be numeric or strings. Splitting and preprocessing remain the caller's responsibility.
+
 ## Leakage-safe validation
 
 > [!IMPORTANT]
@@ -302,7 +348,7 @@ Model definitions live in [`featranker/importance_config.yaml`](featranker/impor
 
 ## Legacy migration
 
-The preparation-file factory and CLI remain available for migration.
+The preparation-file factory and prep-file CLI mode remain available for migration.
 
 ```python
 from featranker import build_ranker
@@ -323,7 +369,7 @@ assert legacy_report["evaluation_mode"] == "in_sample"
 
 Warnings can be suppressed, so inspect `evaluation_mode`. Normal `fit()` does not retain training data; only the legacy prep-file path retains it for `rankFeatures()`.
 
-`run_ML()` is deprecated. The CLI also uses legacy in-sample ranking.
+`run_ML()` is deprecated. CLI commands using the prep-file compatibility mode also use legacy in-sample ranking; the CSV CLI uses held-out evaluation data.
 
 ## Development
 

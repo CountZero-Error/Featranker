@@ -1,4 +1,6 @@
+import json
 from pathlib import Path
+import sys
 from types import SimpleNamespace
 
 import numpy as np
@@ -441,6 +443,199 @@ def test_non_finite_permuted_score_causes_zero_success_error(
             n_repeats=2,
             random_state=1,
         )
+
+
+def test_load_csv_returns_features_target_and_names(tmp_path):
+    path = tmp_path / "train.csv"
+    path.write_text(
+        "a,b,target\n1,2,low\n3,4,high\n",
+        encoding="utf-8",
+    )
+
+    X, y, names = importance_module._load_csv(path, "target")
+
+    assert names == ["a", "b"]
+    assert np.array_equal(X, [[1.0, 2.0], [3.0, 4.0]])
+    assert y.tolist() == ["low", "high"]
+
+
+def test_load_csv_parses_numeric_target(tmp_path):
+    path = tmp_path / "train.csv"
+    path.write_text("a,target\n1,2.5\n3,4.5\n", encoding="utf-8")
+
+    _, y, _ = importance_module._load_csv(path, "target")
+
+    assert np.array_equal(y, [2.5, 4.5])
+
+
+@pytest.mark.parametrize(
+    ("contents", "target", "message"),
+    [
+        ("a,a,target\n1,2,3\n", "target", "unique"),
+        ("a,b\n1,2\n", "target", "target"),
+        ("a,target\n1,2\n3\n", "target", "columns"),
+        ("a,target\nnope,2\n", "target", "numeric"),
+        ("a,target\n", "target", "data row"),
+    ],
+)
+def test_load_csv_rejects_invalid_input(tmp_path, contents, target, message):
+    path = tmp_path / "bad.csv"
+    path.write_text(contents, encoding="utf-8")
+
+    with pytest.raises(ValueError, match=message):
+        importance_module._load_csv(path, target)
+
+
+def test_modern_cli_routes_train_and_eval_data(monkeypatch, tmp_path, capsys):
+    train_path = tmp_path / "train.csv"
+    eval_path = tmp_path / "eval.csv"
+    groups_path = tmp_path / "groups.yaml"
+    train_path.write_text(
+        "a,b,target\n1,2,3\n4,5,6\n7,8,9\n",
+        encoding="utf-8",
+    )
+    eval_path.write_text(
+        "a,b,target\n10,11,12\n13,14,15\n",
+        encoding="utf-8",
+    )
+    groups_path.write_text("pair: [a, b]\n", encoding="utf-8")
+    calls = {}
+
+    class RecordingRanker:
+        def __init__(self, task, group):
+            calls["constructor"] = (task, group)
+
+        def fit(self, X, y, feature_names):
+            calls["fit"] = (X.copy(), y.copy(), list(feature_names))
+            return self
+
+        def rank_features(self, X, y, **kwargs):
+            calls["rank"] = (X.copy(), y.copy(), kwargs)
+            return {"evaluation_mode": "held_out"}
+
+    monkeypatch.setattr(importance_module, "FeatureRanker", RecordingRanker)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "featranker",
+            "--task",
+            "reg",
+            "--group",
+            "tree",
+            "--train-data",
+            str(train_path),
+            "--eval-data",
+            str(eval_path),
+            "--target",
+            "target",
+            "--scoring",
+            "neg_mean_absolute_error",
+            "--feature-groups",
+            str(groups_path),
+            "--n-repeats",
+            "20",
+            "--random-state",
+            "42",
+        ],
+    )
+
+    assert importance_module.main() == 0
+
+    assert calls["constructor"] == ("reg", "tree")
+    assert np.array_equal(calls["fit"][0], [[1, 2], [4, 5], [7, 8]])
+    assert np.array_equal(calls["fit"][1], [3, 6, 9])
+    assert calls["fit"][2] == ["a", "b"]
+    assert np.array_equal(calls["rank"][0], [[10, 11], [13, 14]])
+    assert np.array_equal(calls["rank"][1], [12, 15])
+    assert calls["rank"][2] == {
+        "scoring": "neg_mean_absolute_error",
+        "feature_groups": {"pair": ["a", "b"]},
+        "n_repeats": 20,
+        "random_state": 42,
+    }
+    assert json.loads(capsys.readouterr().out)["evaluation_mode"] == "held_out"
+
+
+def test_modern_cli_requires_both_data_files(monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "featranker",
+            "--task",
+            "reg",
+            "--train-data",
+            str(tmp_path / "train.csv"),
+            "--target",
+            "target",
+            "--scoring",
+            "r2",
+        ],
+    )
+
+    with pytest.raises(SystemExit, match="2"):
+        importance_module.main()
+
+    assert "--eval-data" in capsys.readouterr().err
+
+
+def test_modern_cli_rejects_legacy_prep_flags(monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "featranker",
+            "--task",
+            "reg",
+            "--train-data",
+            str(tmp_path / "train.csv"),
+            "--eval-data",
+            str(tmp_path / "eval.csv"),
+            "--target",
+            "target",
+            "--scoring",
+            "r2",
+            "--prep-file",
+            "prep.py",
+        ],
+    )
+
+    with pytest.raises(SystemExit, match="2"):
+        importance_module.main()
+
+    assert "cannot be combined" in capsys.readouterr().err
+
+
+def test_modern_cli_rejects_mismatched_feature_order(
+    monkeypatch, tmp_path, capsys
+):
+    train_path = tmp_path / "train.csv"
+    eval_path = tmp_path / "eval.csv"
+    train_path.write_text("a,b,target\n1,2,3\n", encoding="utf-8")
+    eval_path.write_text("b,a,target\n2,1,3\n", encoding="utf-8")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "featranker",
+            "--task",
+            "reg",
+            "--train-data",
+            str(train_path),
+            "--eval-data",
+            str(eval_path),
+            "--target",
+            "target",
+            "--scoring",
+            "r2",
+        ],
+    )
+
+    with pytest.raises(SystemExit, match="2"):
+        importance_module.main()
+
+    assert "names and order" in capsys.readouterr().err
 
 
 def test_legacy_prep_workflow_warns_and_marks_in_sample(monkeypatch, tmp_path):
