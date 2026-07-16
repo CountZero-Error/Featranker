@@ -30,7 +30,7 @@ Built for feature-selection and ablation workflows where leakage control, semant
 
 | Held-out by design | Semantic feature groups | Rank consensus |
 |---|---|---|
-| `fit()` receives training data. `rank_features()` requires separate evaluation data. | Jointly permute one-hot, genotype, or related feature blocks with one row permutation. | Aggregate per-model ranks instead of incomparable raw importance magnitudes. |
+| `fit()` receives training data. `rank_features()` requires separate evaluation data. | Jointly permute one-hot, encoded category, or related feature blocks with one row permutation. | Aggregate per-model ranks instead of incomparable raw importance magnitudes. |
 
 Also included:
 
@@ -67,18 +67,18 @@ The caller owns splitting and preprocessing. Fit on training data, then rank on 
 from featranker import FeatureRanker
 
 feature_names = [
-    "age",
-    "weight",
-    "CYP2C9_*1/*1",
-    "CYP2C9_*1/*2",
-    "CYP2C9_other",
+    "feature_a",
+    "feature_b",
+    "segment_red",
+    "segment_blue",
+    "segment_other",
 ]
 
 feature_groups = {
-    "CYP2C9": [
-        "CYP2C9_*1/*1",
-        "CYP2C9_*1/*2",
-        "CYP2C9_other",
+    "segment": [
+        "segment_red",
+        "segment_blue",
+        "segment_other",
     ]
 }
 
@@ -137,15 +137,15 @@ Related columns can be permuted as one semantic unit:
 
 ```python
 feature_groups = {
-    "CYP2C9": [
-        "CYP2C9_*1/*1",
-        "CYP2C9_*1/*2",
-        "CYP2C9_other",
+    "segment": [
+        "segment_red",
+        "segment_blue",
+        "segment_other",
     ],
-    "VKORC1": [
-        "VKORC1_GG",
-        "VKORC1_GA",
-        "VKORC1_AA",
+    "channel": [
+        "channel_web",
+        "channel_store",
+        "channel_partner",
     ],
 }
 ```
@@ -184,13 +184,13 @@ The report preserves raw model evidence and keeps aggregation rank-based.
     "n_repeats": 20,
     "random_state": 42,
     "feature_groups": {
-        "CYP2C9": ["CYP2C9_*1/*1", "CYP2C9_*1/*2", "CYP2C9_other"]
+        "segment": ["segment_red", "segment_blue", "segment_other"]
     },
     "models": {
         "random_forest_regressor": {
             "evaluation_score": -8.2,
             "importance": {
-                "CYP2C9": {
+                "segment": {
                     "values": [1.1, 1.3],
                     "mean": 1.2,
                     "std": 0.1,
@@ -201,7 +201,7 @@ The report preserves raw model evidence and keeps aggregation rank-based.
     },
     "consensus": [
         {
-            "feature_group": "CYP2C9",
+            "feature_group": "segment",
             "median_rank": 1.0,
             "mean_rank": 1.0,
             "rank_std": 0.0,
