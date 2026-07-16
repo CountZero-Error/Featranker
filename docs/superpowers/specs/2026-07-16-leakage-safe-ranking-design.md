@@ -19,21 +19,21 @@ report = ranker.rank_features(
 )
 ```
 
-`FeatureRanker` initializes configured estimators but does not load data or train. `fit()` accepts only training data and returns `self`. `rank_features()` always requires evaluation data; it never falls back to training data.
+`FeatureRanker` initializes configured estimators but does not load data or train. `fit()` accepts only training data and returns `self`. Normal `fit()` retains fitted estimators and feature metadata, not raw training data. `rank_features()` always requires evaluation data; it never falls back to training data.
 
 NumPy training input requires `feature_names`. pandas DataFrame training input uses column names and rejects a conflicting explicit list. Evaluation input must have the fitted column count; DataFrame columns must exactly match fitted names and order. Targets must be one-dimensional, non-empty, and match row counts. Featranker converts feature values to numeric arrays but does not impute, encode, scale, split, or select data.
 
 ## Legacy Compatibility
 
-`build_ranker()` and CLI preserve preparation-file loading: they load the feature dictionary, split out `label`, construct `FeatureRanker`, and call `fit()`.
+`build_ranker()` and CLI preserve preparation-file loading: they load the feature dictionary, split out `label`, construct `FeatureRanker`, call `fit()`, and retain that data only for the deprecated no-argument `rankFeatures()` path.
 
-Legacy `run_ML()` remains as a deprecated alias that fits stored preparation-file data. Legacy `rankFeatures()` remains available and ranks stored training data through `rank_features()`, emitting a prominent `DeprecationWarning` that identifies the result as in-sample and shows the held-out replacement. Bare `FeatureRanker(task=...)` changes to the safe unfitted workflow; migration is documented.
+Legacy `run_ML()` remains as a deprecated alias that fits stored preparation-file data. Legacy `rankFeatures()` remains available and ranks stored training data through the shared ranking implementation, emitting a prominent `DeprecationWarning` that identifies the result as in-sample and shows the held-out replacement. Its report records `evaluation_mode: "in_sample"`; normal `rank_features()` records `evaluation_mode: "held_out"`. Bare `FeatureRanker(task=...)` changes to the safe unfitted workflow; migration is documented.
 
 ## Model Lifecycle and Optional Dependencies
 
 YAML model selection remains task/group based. Model initialization, fitting, and ranking failures are retained as structured records with stage, exception type, and message. Missing optional imports warn and skip only affected XGBoost or CatBoost models. Core models continue without those packages. LightGBM is removed from core dependencies and no LightGBM estimator is added.
 
-If at least one model ranks successfully, return its results plus all failures. Failed models never contribute zero importance. If no model ranks successfully, raise an informative `RuntimeError` containing failure details.
+`fit()` raises an informative `RuntimeError` with structured failure details when zero models fit successfully, so the ranker never enters a falsely fitted state. If at least one model ranks successfully, `rank_features()` returns its results plus all failures. Failed models never contribute zero importance. If every fitted model fails during ranking, `rank_features()` raises an informative `RuntimeError` containing failure details.
 
 ## Scoring and Permutation
 
@@ -57,6 +57,7 @@ Consensus aggregates successful per-model ranks only and reports `median_rank`, 
 
 ```python
 {
+    "evaluation_mode": "held_out",
     "scoring": "neg_mean_absolute_error",
     "n_repeats": 20,
     "random_state": 42,
