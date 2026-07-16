@@ -2,7 +2,6 @@ numpy
 scikit-learn
 pyyaml
 tqdm
-xgboost
-lightgbm
-catboost
 pytest
+pandas
+build

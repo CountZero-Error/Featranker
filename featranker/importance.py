@@ -24,6 +24,8 @@ task_map = {
     "reg": "regression",
 }
 
+OPTIONAL_MODEL_MODULES = {"xgboost", "lightgbm", "catboost"}
+
 
 def _validate_X(
     X: Any,
@@ -467,7 +469,22 @@ class FeatureRanker:
                     if not name or not module_path or not class_name:
                         continue
 
-                    module = importlib.import_module(module_path)
+                    try:
+                        module = importlib.import_module(module_path)
+                    except ModuleNotFoundError as error:
+                        dependency = module_path.split(".", 1)[0]
+                        if dependency not in OPTIONAL_MODEL_MODULES:
+                            raise
+                        self.initialization_failures_.append(
+                            _failure(name, "initialization", error)
+                        )
+                        warnings.warn(
+                            f"Skipping model '{name}': optional dependency "
+                            f"'{dependency}' is not installed.",
+                            UserWarning,
+                            stacklevel=2,
+                        )
+                        continue
                     model_class = getattr(module, class_name, None)
                     if model_class is None:
                         raise ValueError(
@@ -479,12 +496,7 @@ class FeatureRanker:
                             f"[!] Params for model '{name}' must be a dict, got {type(params)}"
                         )
 
-                    params = dict(params)
-                    # Suppress verbose LightGBM output unless the user overrides it.
-                    if module_path == "lightgbm":
-                        params.setdefault("verbosity", -1)
-
-                    group_models[name] = model_class(**params)
+                    group_models[name] = model_class(**dict(params))
 
                 models[task_key][group_name] = group_models
 

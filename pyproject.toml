@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "featranker"
-version = "0.1.3"
+version = "0.2.0"
 description = "Rank feature importance across multiple ML models."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -15,10 +15,14 @@ dependencies = [
   "scikit-learn",
   "pyyaml",
   "tqdm",
-  "xgboost",
-  "lightgbm",
-  "catboost",
 ]
+
+[project.optional-dependencies]
+xgboost = ["xgboost"]
+lightgbm = ["lightgbm"]
+catboost = ["catboost"]
+all = ["xgboost", "lightgbm", "catboost"]
+test = ["pytest", "pandas", "build"]
 
 [project.scripts]
 featranker = "featranker.importance:main"

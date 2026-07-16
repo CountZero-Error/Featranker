@@ -1,8 +1,10 @@
 import numpy as np
 import pytest
 from sklearn.metrics import get_scorer
+import tomllib
 
 from featranker import FeatureRanker, build_ranker
+import featranker.importance as importance_module
 from featranker.importance import _assign_ranks, _build_consensus
 
 
@@ -439,3 +441,47 @@ def test_legacy_rank_features_unavailable_after_normal_fit(monkeypatch):
 
     with pytest.raises(RuntimeError, match="evaluation data"):
         ranker.rankFeatures()
+
+
+def test_missing_optional_estimators_skip_only_affected_models(monkeypatch):
+    real_import = importance_module.importlib.import_module
+
+    def import_without_optional(module_name):
+        if module_name in {"xgboost", "catboost"}:
+            raise ModuleNotFoundError(f"No module named '{module_name}'")
+        return real_import(module_name)
+
+    monkeypatch.setattr(
+        importance_module.importlib, "import_module", import_without_optional
+    )
+
+    with pytest.warns(UserWarning, match="optional dependency"):
+        ranker = FeatureRanker(task="reg", group="tree")
+
+    tree_models = ranker.models["reg"]["tree"]
+    assert "decision_tree_regressor" in tree_models
+    assert "xgboost_regressor" not in tree_models
+    assert "catboost_regressor" not in tree_models
+    assert {failure["model"] for failure in ranker.initialization_failures_} == {
+        "xgboost_regressor",
+        "catboost_regressor",
+    }
+    assert all(
+        failure["stage"] == "initialization"
+        for failure in ranker.initialization_failures_
+    )
+
+
+def test_optional_estimators_are_not_core_dependencies():
+    with open("pyproject.toml", "rb") as project_file:
+        project = tomllib.load(project_file)["project"]
+
+    core = {dependency.lower() for dependency in project["dependencies"]}
+    extras = project["optional-dependencies"]
+
+    assert core.isdisjoint({"xgboost", "lightgbm", "catboost"})
+    assert extras["xgboost"] == ["xgboost"]
+    assert extras["lightgbm"] == ["lightgbm"]
+    assert extras["catboost"] == ["catboost"]
+    assert set(extras["all"]) == {"xgboost", "lightgbm", "catboost"}
+    assert {"pytest", "pandas", "build"}.issubset(extras["test"])
