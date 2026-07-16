@@ -1,4 +1,5 @@
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -32,6 +33,14 @@ class FailFitRegressor(MeanRegressor):
 class FailingScoreRegressor(MeanRegressor):
     def score(self, X, y):
         raise ValueError("score exploded")
+
+
+class FixedScoreRegressor(MeanRegressor):
+    def __init__(self, score_value):
+        self.score_value = score_value
+
+    def score(self, X, y):
+        return self.score_value
 
 
 def ranker_with_models(monkeypatch, models):
@@ -372,6 +381,68 @@ def test_all_ranking_failures_raise(monkeypatch):
         )
 
 
+@pytest.mark.parametrize("non_finite", [np.nan, np.inf])
+def test_non_finite_baseline_is_reported_and_excluded(monkeypatch, non_finite):
+    ranker = fitted_ranker(
+        monkeypatch,
+        models={
+            "ok": MeanRegressor(),
+            "bad": FixedScoreRegressor(non_finite),
+        },
+    )
+
+    report = ranker.rank_features(
+        X_EVAL,
+        Y_EVAL,
+        scoring=lambda model, X, y: model.score(X, y),
+        n_repeats=2,
+        random_state=1,
+    )
+
+    assert set(report["models"]) == {"ok"}
+    failure = next(item for item in report["failures"] if item["model"] == "bad")
+    assert failure["stage"] == "ranking"
+    assert "baseline score" in failure["message"]
+    assert "finite" in failure["message"]
+    for model_report in report["models"].values():
+        assert np.isfinite(model_report["evaluation_score"])
+        for importance in model_report["importance"].values():
+            assert np.all(np.isfinite(importance["values"]))
+            assert np.isfinite(importance["mean"])
+            assert np.isfinite(importance["std"])
+    assert all(
+        np.isfinite(row[key])
+        for row in report["consensus"]
+        for key in ("median_rank", "mean_rank", "rank_std")
+    )
+
+
+@pytest.mark.parametrize("non_finite", [np.nan, np.inf])
+def test_non_finite_permuted_score_causes_zero_success_error(
+    monkeypatch, non_finite
+):
+    calls = 0
+
+    def scorer(model, X, y):
+        nonlocal calls
+        calls += 1
+        return 0.0 if calls == 1 else non_finite
+
+    ranker = fitted_ranker(monkeypatch, models={"bad": MeanRegressor()})
+
+    with pytest.raises(
+        RuntimeError,
+        match="No models ranked successfully.*permuted score.*finite",
+    ):
+        ranker.rank_features(
+            X_EVAL,
+            Y_EVAL,
+            scoring=scorer,
+            n_repeats=2,
+            random_state=1,
+        )
+
+
 def test_legacy_prep_workflow_warns_and_marks_in_sample(monkeypatch, tmp_path):
     prep_path = tmp_path / "clinical_prep.py"
     prep_path.write_text(
@@ -474,6 +545,123 @@ def test_missing_optional_estimators_skip_only_affected_models(monkeypatch):
         failure["stage"] == "initialization"
         for failure in ranker.initialization_failures_
     )
+
+
+def test_optional_binary_load_error_skips_model_and_core_model_still_fits(
+    monkeypatch,
+):
+    config = {
+        "regression": {
+            "tree": [
+                {
+                    "name": "core",
+                    "import": "core_estimators",
+                    "class": "MeanRegressor",
+                },
+                {
+                    "name": "optional",
+                    "import": "xgboost",
+                    "class": "XGBRegressor",
+                },
+            ]
+        }
+    }
+
+    monkeypatch.setattr(importance_module.yaml, "safe_load", lambda stream: config)
+
+    def import_models(module_name):
+        if module_name == "xgboost":
+            raise OSError("binary image not found")
+        return SimpleNamespace(MeanRegressor=MeanRegressor)
+
+    monkeypatch.setattr(importance_module.importlib, "import_module", import_models)
+
+    with pytest.warns(UserWarning, match="optional.*binary image not found"):
+        ranker = FeatureRanker(task="reg", group="tree")
+
+    ranker.fit(np.ones((4, 1)), np.arange(4), ["a"])
+    assert set(ranker.trained_models) == {"core"}
+    assert ranker.initialization_failures_ == [
+        {
+            "model": "optional",
+            "stage": "initialization",
+            "error_type": "OSError",
+            "message": "binary image not found",
+        }
+    ]
+
+
+def test_constructor_failure_is_recorded_without_blocking_other_model(monkeypatch):
+    class BrokenRegressor:
+        def __init__(self):
+            raise ValueError("invalid constructor")
+
+    config = {
+        "regression": {
+            "linear": [
+                {
+                    "name": "broken",
+                    "import": "estimators",
+                    "class": "BrokenRegressor",
+                },
+                {
+                    "name": "core",
+                    "import": "estimators",
+                    "class": "MeanRegressor",
+                },
+            ]
+        }
+    }
+    module = SimpleNamespace(
+        BrokenRegressor=BrokenRegressor,
+        MeanRegressor=MeanRegressor,
+    )
+    monkeypatch.setattr(importance_module.yaml, "safe_load", lambda stream: config)
+    monkeypatch.setattr(
+        importance_module.importlib, "import_module", lambda module_name: module
+    )
+
+    with pytest.warns(UserWarning, match="broken.*invalid constructor"):
+        ranker = FeatureRanker(task="reg", group="linear")
+
+    assert set(ranker.models["reg"]["linear"]) == {"core"}
+    assert ranker.initialization_failures_[0] == {
+        "model": "broken",
+        "stage": "initialization",
+        "error_type": "ValueError",
+        "message": "invalid constructor",
+    }
+
+
+def test_zero_success_fit_error_includes_initialization_failures(monkeypatch):
+    class BrokenRegressor:
+        def __init__(self):
+            raise RuntimeError("constructor unavailable")
+
+    config = {
+        "regression": {
+            "linear": [
+                {
+                    "name": "broken",
+                    "import": "estimators",
+                    "class": "BrokenRegressor",
+                }
+            ]
+        }
+    }
+    monkeypatch.setattr(importance_module.yaml, "safe_load", lambda stream: config)
+    monkeypatch.setattr(
+        importance_module.importlib,
+        "import_module",
+        lambda module_name: SimpleNamespace(BrokenRegressor=BrokenRegressor),
+    )
+
+    with pytest.warns(UserWarning, match="broken.*constructor unavailable"):
+        ranker = FeatureRanker(task="reg", group="linear")
+    with pytest.raises(RuntimeError, match="broken.*constructor unavailable"):
+        ranker.fit(np.ones((4, 1)), np.arange(4), ["a"])
+
+    assert ranker.is_fitted_ is False
 
 
 def test_optional_estimators_are_not_core_dependencies():

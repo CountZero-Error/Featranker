@@ -90,6 +90,13 @@ def _failure(model: str, stage: str, error: Exception) -> Dict[str, str]:
     }
 
 
+def _finite_float(value: Any, label: str) -> float:
+    result = float(value)
+    if not np.isfinite(result):
+        raise ValueError(f"{label} must be finite, got {result!r}")
+    return result
+
+
 def _resolve_feature_groups(
     feature_names: List[str],
     feature_groups: Optional[Dict[str, List[str]]],
@@ -293,7 +300,7 @@ class FeatureRanker:
                 self.fit_failures_.append(_failure(model_name, "fit", error))
 
         if not self.trained_models:
-            details = json.dumps(self.fit_failures_)
+            details = json.dumps(self.initialization_failures_ + self.fit_failures_)
             raise RuntimeError(f"[!] No models fit successfully. Failures: {details}")
 
         self.feature_names_ = names
@@ -362,7 +369,9 @@ class FeatureRanker:
         ranking_failures: List[Dict[str, str]] = []
         for model_name, model in self.trained_models.items():
             try:
-                baseline = float(scorer(model, X_values, y_values))
+                baseline = _finite_float(
+                    scorer(model, X_values, y_values), "baseline score"
+                )
                 rng = np.random.default_rng(random_state)
                 importances: Dict[str, Dict[str, Any]] = {}
                 for group_name, column_indices in groups.items():
@@ -373,12 +382,23 @@ class FeatureRanker:
                         X_permuted[:, column_indices] = X_values[row_order][
                             :, column_indices
                         ]
-                        permuted_score = float(scorer(model, X_permuted, y_values))
-                        values.append(baseline - permuted_score)
+                        permuted_score = _finite_float(
+                            scorer(model, X_permuted, y_values), "permuted score"
+                        )
+                        values.append(
+                            _finite_float(
+                                baseline - permuted_score,
+                                "permutation importance",
+                            )
+                        )
                     importances[group_name] = {
                         "values": values,
-                        "mean": float(np.mean(values)),
-                        "std": float(np.std(values)),
+                        "mean": _finite_float(
+                            np.mean(values), "importance mean"
+                        ),
+                        "std": _finite_float(
+                            np.std(values), "importance standard deviation"
+                        ),
                     }
                 ranks = _assign_ranks(
                     {
@@ -465,38 +485,45 @@ class FeatureRanker:
                     name = model.get("name")
                     module_path = model.get("import")
                     class_name = model.get("class")
-                    params = model.get("params") or {}
+                    params = model.get("params", {})
+                    if params is None:
+                        params = {}
                     if not name or not module_path or not class_name:
                         continue
 
                     try:
                         module = importlib.import_module(module_path)
-                    except ModuleNotFoundError as error:
-                        dependency = module_path.split(".", 1)[0]
-                        if dependency not in OPTIONAL_MODEL_MODULES:
-                            raise
+                        model_class = getattr(module, class_name, None)
+                        if model_class is None:
+                            raise ValueError(
+                                f"Model class '{class_name}' not found in "
+                                f"module '{module_path}'"
+                            )
+                        if not isinstance(params, dict):
+                            raise ValueError(
+                                f"Params must be a dict, got {type(params).__name__}"
+                            )
+                        group_models[name] = model_class(**dict(params))
+                    except Exception as error:
                         self.initialization_failures_.append(
                             _failure(name, "initialization", error)
                         )
+                        dependency = str(module_path).split(".", 1)[0]
+                        if dependency in OPTIONAL_MODEL_MODULES and isinstance(
+                            error, (ImportError, OSError)
+                        ):
+                            reason = (
+                                f"optional dependency '{dependency}' failed to "
+                                f"initialize: {error}"
+                            )
+                        else:
+                            reason = f"initialization failed: {error}"
                         warnings.warn(
-                            f"Skipping model '{name}': optional dependency "
-                            f"'{dependency}' is not installed.",
+                            f"Skipping model '{name}': {reason}",
                             UserWarning,
                             stacklevel=2,
                         )
                         continue
-                    model_class = getattr(module, class_name, None)
-                    if model_class is None:
-                        raise ValueError(
-                            f"[!] Model class '{class_name}' not found in module '{module_path}'"
-                        )
-
-                    if not isinstance(params, dict):
-                        raise ValueError(
-                            f"[!] Params for model '{name}' must be a dict, got {type(params)}"
-                        )
-
-                    group_models[name] = model_class(**dict(params))
 
                 models[task_key][group_name] = group_models
 
