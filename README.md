@@ -23,10 +23,7 @@
 
 FeatRanker trains configurable estimators on explicit training data, measures permutation importance on separate evaluation data, and combines model-specific rankings into a robust consensus.
 
-Built for feature-selection and ablation workflows where leakage control, semantic feature groups, and model failures must remain visible.
-
-> [!NOTE]
-> Feature rankings are predictive evidence. They are not causal effects, biological mechanisms, or clinical importance.
+Designed as a universal feature-ranking package for ML workflows where leakage control, semantic feature groups, and model failures must remain visible.
 
 ## Why FeatRanker?
 
@@ -340,17 +337,17 @@ python -m build
 
 Continuous integration runs the core test suite on supported Python versions without optional estimator libraries.
 
-## Scope and interpretation
+## Scope
 
-FeatRanker provides evidence for predictive feature selection and ablation. Results depend on the evaluation sample, scorer, estimator behavior, correlated predictors, and permutation design.
+FeatRanker is a general-purpose feature-ranking package. Results depend on the evaluation sample, scorer, estimator behavior, correlated predictors, and permutation design.
 
 FeatRanker intentionally does not provide:
 
 - nested cross-validation or site-grouped splitting;
 - imputation, encoding, scaling, or target transformation;
 - automatic feature selection;
-- SHAP or causal interpretation;
-- clinical-model-specific logic or a user interface.
+- SHAP or model-specific attribution methods;
+- domain-specific modeling logic or a user interface.
 
 ## License
 
