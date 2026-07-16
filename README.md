@@ -1,7 +1,8 @@
 <div align="center">
   <h1>FeatRanker</h1>
   <p><strong>Leakage-safe, model-agnostic feature ranking for trustworthy ML workflows.</strong></p>
-  <p>Fit on training data. Rank on held-out data. Build consensus across models.</p>
+  <p>Rank feature importance across multiple ML models using permutation importance.</p>
+  <p>Supports 30+ scikit-learn, XGBoost, and CatBoost classifiers &amp; regressors with CLI and Python API.</p>
   <p>
     <a href="https://pypi.org/project/featranker/"><img src="https://img.shields.io/pypi/v/featranker?style=flat-square" alt="PyPI"></a>
     <a href="https://pypi.org/project/featranker/"><img src="https://img.shields.io/pypi/pyversions/featranker?style=flat-square" alt="Python"></a>
@@ -14,6 +15,7 @@
   <a href="#installation">Installation</a> ·
   <a href="#quick-start">Quick start</a> ·
   <a href="#leakage-safe-validation">Validation safety</a> ·
+  <a href="#available-models">Models</a> ·
   <a href="#result-schema">Result schema</a>
 </p>
 
@@ -34,6 +36,7 @@ Built for feature-selection and ablation workflows where leakage control, semant
 
 Also included:
 
+- 41 configured model entries: 23 for classification and 18 for regression;
 - classification and regression model families;
 - scikit-learn scorer names or scorer-protocol callables;
 - per-model evaluation scores and raw repeat importances;
@@ -224,6 +227,67 @@ The report preserves raw model evidence and keeps aggregation rank-based.
 - Failed models receive no zero placeholder and do not enter consensus.
 - `fit()` raises if no model fits; `rank_features()` raises if every model fails ranking.
 - `random_state` controls permutation reproducibility. Estimator randomness remains estimator-specific.
+
+</details>
+
+## Available models
+
+Model entries come directly from [`importance_config.yaml`](featranker/importance_config.yaml). Names in the **Key** column are used in reports and structured failures.
+
+<details>
+<summary><strong>Classification models — 23 configurations</strong></summary>
+
+| Family | Key | Estimator |
+|---|---|---|
+| Linear | `logistic_regression` | `LogisticRegression` |
+| Linear | `logistic_regression_l1` | `LogisticRegression` |
+| Linear | `logistic_regression_l2` | `LogisticRegression` |
+| Linear | `logistic_regression_elasticnet` | `LogisticRegression` |
+| Linear | `linear_svm` | `LinearSVC` |
+| Linear | `sgd_classifier` | `SGDClassifier` |
+| Linear | `ridge_classifier` | `RidgeClassifier` |
+| Linear | `perceptron` | `Perceptron` |
+| Linear | `passive_aggressive` | `SGDClassifier` |
+| Linear | `lda` | `LinearDiscriminantAnalysis` |
+| Linear | `qda` | `QuadraticDiscriminantAnalysis` |
+| Linear | `naive_bayes_gaussian` | `GaussianNB` |
+| Linear | `naive_bayes_bernoulli` | `BernoulliNB` |
+| Linear | `pls_da` | `PLSRegression` |
+| Tree | `decision_tree` | `DecisionTreeClassifier` |
+| Tree | `random_forest` | `RandomForestClassifier` |
+| Tree | `extra_trees` | `ExtraTreesClassifier` |
+| Tree | `bagging_tree` | `BaggingClassifier` |
+| Tree | `adaboost` | `AdaBoostClassifier` |
+| Tree | `gradient_boosting` | `GradientBoostingClassifier` |
+| Tree | `hist_gradient_boosting` | `HistGradientBoostingClassifier` |
+| Tree | `xgboost` | `XGBClassifier` (optional) |
+| Tree | `catboost` | `CatBoostClassifier` (optional) |
+
+</details>
+
+<details>
+<summary><strong>Regression models — 18 configurations</strong></summary>
+
+| Family | Key | Estimator |
+|---|---|---|
+| Linear | `linear_regression` | `LinearRegression` |
+| Linear | `ridge_regression` | `Ridge` |
+| Linear | `lasso_regression` | `Lasso` |
+| Linear | `elasticnet_regression` | `ElasticNet` |
+| Linear | `elasticnet_cv_regression` | `ElasticNetCV` |
+| Linear | `pls_regression` | `PLSRegression` |
+| Linear | `huber_regression` | `HuberRegressor` |
+| Linear | `ransac_regression` | `RANSACRegressor` |
+| Linear | `kernel_ridge_regression` | `KernelRidge` |
+| Linear | `svr_regression` | `SVR` |
+| Tree | `decision_tree_regressor` | `DecisionTreeRegressor` |
+| Tree | `random_forest_regressor` | `RandomForestRegressor` |
+| Tree | `extra_trees_regressor` | `ExtraTreesRegressor` |
+| Tree | `adaboost_regressor` | `AdaBoostRegressor` |
+| Tree | `gradient_boosting_regressor` | `GradientBoostingRegressor` |
+| Tree | `hist_gradient_boosting_regressor` | `HistGradientBoostingRegressor` |
+| Tree | `xgboost_regressor` | `XGBRegressor` (optional) |
+| Tree | `catboost_regressor` | `CatBoostRegressor` (optional) |
 
 </details>
 
