@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Literal, Optional
 
 import numpy as np
 import yaml
-from sklearn.inspection import permutation_importance
+from sklearn.metrics import get_scorer
 from sklearn.preprocessing import LabelEncoder
 from tqdm import tqdm
 
@@ -36,6 +36,11 @@ def _validate_X(
         raise ValueError("[!] X must be a two-dimensional feature matrix.")
     if values.shape[0] == 0 or values.shape[1] == 0:
         raise ValueError("[!] X must contain at least one row and one feature.")
+    if expected_names is not None and values.shape[1] != len(expected_names):
+        raise ValueError(
+            f"[!] Expected {len(expected_names)} feature names/columns, "
+            f"got {values.shape[1]}."
+        )
 
     if dataframe_names is not None:
         names = [str(name) for name in dataframe_names]
@@ -81,6 +86,56 @@ def _failure(model: str, stage: str, error: Exception) -> Dict[str, str]:
         "error_type": type(error).__name__,
         "message": str(error),
     }
+
+
+def _resolve_feature_groups(
+    feature_names: List[str],
+    feature_groups: Optional[Dict[str, List[str]]],
+) -> Dict[str, List[int]]:
+    if feature_groups is None:
+        return {name: [index] for index, name in enumerate(feature_names)}
+    if not isinstance(feature_groups, dict):
+        raise TypeError("[!] feature_groups must be a dict or None.")
+
+    positions = {name: index for index, name in enumerate(feature_names)}
+    resolved: Dict[str, List[int]] = {}
+    assigned: Dict[str, str] = {}
+    for group_name, members in feature_groups.items():
+        if not isinstance(group_name, str) or not group_name:
+            raise ValueError("[!] Feature group names must be non-empty strings.")
+        if not isinstance(members, (list, tuple)):
+            raise TypeError(f"[!] Feature group '{group_name}' must contain a list.")
+        if not members:
+            raise ValueError(f"[!] Feature group '{group_name}' is empty.")
+        if len(set(members)) != len(members):
+            raise ValueError(
+                f"[!] Feature group '{group_name}' has duplicate membership."
+            )
+
+        indices: List[int] = []
+        for member in members:
+            if member not in positions:
+                raise ValueError(
+                    f"[!] Feature group '{group_name}' contains unknown feature '{member}'."
+                )
+            if member in assigned:
+                raise ValueError(
+                    f"[!] Feature '{member}' overlaps groups "
+                    f"'{assigned[member]}' and '{group_name}'."
+                )
+            assigned[member] = group_name
+            indices.append(positions[member])
+        resolved[group_name] = indices
+
+    for name, index in positions.items():
+        if name in assigned:
+            continue
+        if name in resolved:
+            raise ValueError(
+                f"[!] Feature group name '{name}' collides with implicit singleton '{name}'."
+            )
+        resolved[name] = [index]
+    return resolved
 
 
 class FeatureRanker:
@@ -154,6 +209,90 @@ class FeatureRanker:
         self.n_features_in_ = len(names)
         self.is_fitted_ = True
         return self
+
+    def rank_features(
+        self,
+        X_eval: Any,
+        y_eval: Any,
+        *,
+        scoring: Any,
+        feature_groups: Optional[Dict[str, List[str]]] = None,
+        n_repeats: int = 10,
+        random_state: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Rank feature groups on explicitly supplied evaluation data."""
+        if not self.is_fitted_:
+            raise RuntimeError("[!] Call fit() before rank_features().")
+        if not isinstance(n_repeats, int) or isinstance(n_repeats, bool) or n_repeats < 1:
+            raise ValueError("[!] n_repeats must be a positive integer.")
+        if isinstance(scoring, str):
+            scorer = get_scorer(scoring)
+            scoring_name = scoring
+        elif callable(scoring):
+            scorer = scoring
+            scoring_name = getattr(scoring, "__name__", type(scoring).__name__)
+        else:
+            raise TypeError(
+                "[!] scoring must be a scikit-learn scorer name or callable."
+            )
+
+        X_values, _ = _validate_X(X_eval, expected_names=self.feature_names_)
+        y_values = _validate_y(y_eval, len(X_values))
+        if self.label_encoder is not None:
+            y_values = self.label_encoder.transform(y_values)
+        groups = _resolve_feature_groups(self.feature_names_, feature_groups)
+        named_groups = {
+            name: [self.feature_names_[index] for index in indices]
+            for name, indices in groups.items()
+        }
+
+        model_reports: Dict[str, Any] = {}
+        ranking_failures: List[Dict[str, str]] = []
+        for model_name, model in self.trained_models.items():
+            try:
+                baseline = float(scorer(model, X_values, y_values))
+                rng = np.random.default_rng(random_state)
+                importances: Dict[str, Dict[str, Any]] = {}
+                for group_name, column_indices in groups.items():
+                    values: List[float] = []
+                    for _ in range(n_repeats):
+                        row_order = rng.permutation(len(X_values))
+                        X_permuted = X_values.copy()
+                        X_permuted[:, column_indices] = X_values[row_order][
+                            :, column_indices
+                        ]
+                        permuted_score = float(scorer(model, X_permuted, y_values))
+                        values.append(baseline - permuted_score)
+                    importances[group_name] = {
+                        "values": values,
+                        "mean": float(np.mean(values)),
+                        "std": float(np.std(values)),
+                    }
+                model_reports[model_name] = {
+                    "evaluation_score": baseline,
+                    "importance": importances,
+                }
+            except Exception as error:
+                ranking_failures.append(_failure(model_name, "ranking", error))
+
+        if not model_reports:
+            details = json.dumps(ranking_failures)
+            raise RuntimeError(
+                f"[!] No models ranked successfully. Failures: {details}"
+            )
+
+        return {
+            "evaluation_mode": "held_out",
+            "scoring": scoring_name,
+            "n_repeats": n_repeats,
+            "random_state": random_state,
+            "feature_groups": named_groups,
+            "models": model_reports,
+            "consensus": [],
+            "failures": self.initialization_failures_
+            + self.fit_failures_
+            + ranking_failures,
+        }
 
     def init_models(self) -> Dict[str, Dict[str, Dict[str, Any]]]:
         """
