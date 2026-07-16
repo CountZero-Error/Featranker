@@ -1,10 +1,13 @@
+from pathlib import Path
+
 import numpy as np
 import pytest
 from sklearn.metrics import get_scorer
-import tomllib
 
 from featranker import FeatureRanker, build_ranker
 import featranker.importance as importance_module
+
+OPTIONAL_NAMES = {"xgboost", "lightgbm", "catboost"}
 from featranker.importance import _assign_ranks, _build_consensus
 
 
@@ -473,15 +476,12 @@ def test_missing_optional_estimators_skip_only_affected_models(monkeypatch):
 
 
 def test_optional_estimators_are_not_core_dependencies():
-    with open("pyproject.toml", "rb") as project_file:
-        project = tomllib.load(project_file)["project"]
+    project = Path("pyproject.toml").read_text(encoding="utf-8")
+    core, extras = project.split("[project.optional-dependencies]", maxsplit=1)
 
-    core = {dependency.lower() for dependency in project["dependencies"]}
-    extras = project["optional-dependencies"]
-
-    assert core.isdisjoint({"xgboost", "lightgbm", "catboost"})
-    assert extras["xgboost"] == ["xgboost"]
-    assert extras["lightgbm"] == ["lightgbm"]
-    assert extras["catboost"] == ["catboost"]
-    assert set(extras["all"]) == {"xgboost", "lightgbm", "catboost"}
-    assert {"pytest", "pandas", "build"}.issubset(extras["test"])
+    assert all(f'  "{name}",' not in core for name in OPTIONAL_NAMES)
+    assert 'xgboost = ["xgboost"]' in extras
+    assert 'lightgbm = ["lightgbm"]' in extras
+    assert 'catboost = ["catboost"]' in extras
+    assert 'all = ["xgboost", "lightgbm", "catboost"]' in extras
+    assert 'test = ["pytest", "pandas", "build"]' in extras
