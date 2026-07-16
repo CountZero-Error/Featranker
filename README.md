@@ -1,184 +1,171 @@
 # FeatRanker
 
-Rank feature importance across multiple ML models using permutation importance.
+Leakage-safe permutation feature ranking across multiple scikit-learn and optional gradient-boosting models.
 
-FeatRanker trains a configurable set of scikit-learn, XGBoost, and
-CatBoost models on your data, computes permutation importance for every trained
-model, and returns per-model rankings plus an aggregated average ranking.
+FeatRanker fits configured models on data supplied to `fit()` and ranks features only on separate data supplied to `rank_features()`. It does not split, preprocess, select, or cross-validate data.
 
-| Item | Value |
-| --- | --- |
-| Package name | `featranker` |
-| Import module | `featranker` |
-| CLI command | `featranker` |
-| Model config | `featranker/importance_config.yaml` |
-| Default prep file | `featureCalc.py` (project root) |
-
----
-
-## Table of Contents
-
-- [Installation](#installation)
-- [How It Works](#how-it-works)
-- [Data Preparation](#data-preparation)
-- [Quick Start](#quick-start)
-- [CLI Reference](#cli-reference)
-- [Python API](#python-api)
-- [Model Configuration](#model-configuration)
-- [Available Models](#available-models)
-- [Output Format](#output-format)
-- [Troubleshooting](#troubleshooting)
-
----
+> Feature rankings are evidence for feature selection and ablation experiments. They are not causal effects, biological mechanisms, or clinical importance.
 
 ## Installation
 
-Install dependencies:
-
-```bash
-pip install -r requirements.txt
-```
-
-Install the package in editable (development) mode:
-
-```bash
-pip install -e .
-```
-
-Or install from PyPI:
+Core installation:
 
 ```bash
 pip install featranker
 ```
 
-### Requirements
-
-- Python ≥ 3.10
-- numpy, scikit-learn, pyyaml, tqdm, xgboost, lightgbm, catboost
-
----
-
-## How It Works
-
-1. **Load data** — A user-defined prep class returns a feature dict with a
-   `"label"` key.
-2. **Initialize models** — Model definitions are read from
-   `importance_config.yaml` and instantiated for the requested task and group.
-3. **Train models** — Every initialized model is fitted on the feature matrix.
-4. **Rank features** — Permutation importance is computed per model, and an
-   overall average ranking is produced.
-
----
-
-## Data Preparation
-
-Before running FeatRanker you need a **prep class** — a Python class with a
-`_calc_features()` method that returns your data as a dict.
-
-### Expected return format
-
-```python
-{
-    "feature_1": [v1, v2, v3, ...],
-    "feature_2": [v1, v2, v3, ...],
-    ...
-    "label":     [y1, y2, y3, ...],
-}
-```
-
-- Every feature key maps to a list of numeric values.
-- All lists (including `"label"`) must have the same length.
-- The `"label"` key is required.
-
-### Where to put it
-
-**Option A — Edit the default file (simplest)**
-
-Define your class in `featureCalc.py` at the project root. The default class
-name is `prepFeature`, but you can name it anything and select it with
-`--prep-class`.
-
-**Option B — Use a separate file (no reinstall needed)**
-
-Keep your prep logic in any Python file and point to it at runtime:
+Optional estimator libraries:
 
 ```bash
-featranker --prep-file ./my_features.py --prep-class MyPrepClass --task clf
+pip install 'featranker[xgboost]'
+pip install 'featranker[lightgbm]'
+pip install 'featranker[catboost]'
+pip install 'featranker[all]'
 ```
 
-### Example prep class
+LightGBM is available as an installation extra, but no LightGBM model is configured by default. Missing optional libraries skip only their configured models and produce warnings plus structured failure records.
 
-```python
-from sklearn.datasets import load_iris
-
-class IrisPrep:
-    def _calc_features(self):
-        data = load_iris()
-        features = {
-            data.feature_names[i]: data.data[:, i].tolist()
-            for i in range(data.data.shape[1])
-        }
-        features["label"] = data.target.tolist()
-        return features
-```
-
----
-
-## Quick Start
-
-1. Implement `_calc_features()` in `featureCalc.py` (or your own file).
-2. Run the CLI:
+Development installation:
 
 ```bash
-# Classification with all model families, using the default prepFeature class
-featranker --task clf --group all
-
-# Regression with tree models only, custom prep file and class
-featranker --task reg --group tree \
-    --prep-file ./my_features.py --prep-class DiabetesPrep
-
-# Save results to a JSON file
-featranker --task clf --group linear --output results
+pip install -e '.[test]'
 ```
 
----
+Requires Python 3.10 or newer.
 
-## CLI Reference
+## Held-out regression workflow
 
-```
-featranker --task {clf,reg} [--group {linear,tree,all}]
-           [--prep-file PATH] [--prep-class NAME]
-           [--output PATH]
-```
-
-| Flag | Description | Default |
-| --- | --- | --- |
-| `--task` | `clf` (classification) or `reg` (regression) | *required* |
-| `--group` | `linear`, `tree`, or `all` (both) | `all` |
-| `--prep-class` | Name of the prep class to instantiate | `prepFeature` |
-| `--prep-file` | Path to the Python file containing the prep class | `featureCalc.py` in the current working directory |
-| `--output` | File path for JSON output (`.json` appended if missing) | print to stdout |
-
----
-
-## Python API
-
-### Using `FeatureRanker` directly (default prep file)
-
-When your default `prepFeature` class lives in `featureCalc.py` at the project
-root:
+The caller owns splitting and preprocessing. Pass only training data to `fit()` and separate evaluation data to `rank_features()`:
 
 ```python
 from featranker import FeatureRanker
 
-ranker = FeatureRanker(task="clf", group="all")
-results = ranker.rankFeatures()
+feature_names = [
+    "age",
+    "weight",
+    "CYP2C9_*1/*1",
+    "CYP2C9_*1/*2",
+    "CYP2C9_other",
+]
+
+ranker = FeatureRanker(task="reg", group="tree")
+ranker.fit(X_train, y_train, feature_names=feature_names)
+
+report = ranker.rank_features(
+    X_eval,
+    y_eval,
+    scoring="neg_mean_absolute_error",
+    n_repeats=20,
+    random_state=42,
+)
 ```
 
-### Using `build_ranker` with a custom prep file
+NumPy training matrices require `feature_names`. pandas DataFrames retain their column names. Evaluation DataFrames must have the same columns in the same order as training. Evaluation NumPy arrays reuse fitted names and must have the same column count.
 
-`build_ranker` is a convenience factory that returns a fully initialized
-`FeatureRanker` instance (features loaded, models trained, ready to rank):
+FeatRanker deliberately leaves imputation, encoding, scaling, target transformation, and splitting to the caller.
+
+## Grouped permutation
+
+Semantic one-hot or genotype blocks can be permuted jointly:
+
+```python
+report = ranker.rank_features(
+    X_eval,
+    y_eval,
+    scoring="neg_mean_absolute_error",
+    feature_groups={
+        "CYP2C9": [
+            "CYP2C9_*1/*1",
+            "CYP2C9_*1/*2",
+            "CYP2C9_other",
+        ],
+        "VKORC1": [
+            "VKORC1_GG",
+            "VKORC1_GA",
+            "VKORC1_AA",
+        ],
+    },
+    n_repeats=20,
+    random_state=42,
+)
+```
+
+Every column in a multi-column group receives the same row permutation during a repeat. This preserves relationships among group columns while breaking the group's relationship with the target. Features omitted from `feature_groups` become singleton groups.
+
+Unknown features, duplicate membership, overlapping groups, empty groups, and group-name collisions raise clear errors.
+
+## Validation placement and leakage
+
+Ranking belongs inside the training portion of each validation split. For nested validation:
+
+1. Split an outer training and outer test fold.
+2. Within the outer training fold, fit FeatRanker on inner-training data.
+3. Rank on inner-validation data.
+4. Make feature-selection or ablation decisions using only those inner results.
+5. Keep the outer test fold untouched until final evaluation.
+
+Do not rank on final test or outer-fold data and then select features using those rankings. That leaks evaluation information into model development. FeatRanker intentionally does not implement or hide cross-validation or site-grouped splitting.
+
+## Scoring and importance
+
+`scoring` accepts a scikit-learn scorer name or a scorer-protocol callable:
+
+```python
+score = scorer(estimator, X, y)
+```
+
+The same scorer computes baseline and permuted scores. Importance for every repeat is:
+
+```text
+baseline_score - permuted_score
+```
+
+Positive importance means permutation reduced predictive performance. Each model's held-out baseline score is recorded as `evaluation_score`.
+
+## Report schema
+
+```python
+{
+    "evaluation_mode": "held_out",
+    "scoring": "neg_mean_absolute_error",
+    "n_repeats": 20,
+    "random_state": 42,
+    "feature_groups": {"CYP2C9": ["CYP2C9_*1/*1", "CYP2C9_*1/*2"]},
+    "models": {
+        "random_forest_regressor": {
+            "evaluation_score": -8.2,
+            "importance": {
+                "CYP2C9": {
+                    "values": [1.1, 1.3],
+                    "mean": 1.2,
+                    "std": 0.1,
+                    "rank": 1,
+                }
+            },
+        }
+    },
+    "consensus": [
+        {
+            "feature_group": "CYP2C9",
+            "median_rank": 1.0,
+            "mean_rank": 1.0,
+            "rank_std": 0.0,
+            "n_models": 1,
+        }
+    ],
+    "failures": [],
+}
+```
+
+Raw importance values remain per model. Consensus uses ranks because raw magnitudes from heterogeneous estimators are not directly comparable. Exact equal importance means share the minimum rank; output ties are ordered by group name. Consensus sorts by median rank, mean rank, then group name.
+
+Initialization, fit, and ranking failures contain `model`, `stage`, `error_type`, and `message`. Failed models do not receive zero importance and do not enter consensus. `fit()` raises if no model fits. `rank_features()` raises if every fitted model fails during ranking; partial success returns successful reports and failures together.
+
+Set `random_state` for repeatable row permutations. Estimators can still be stochastic unless their own configuration also fixes a seed.
+
+## Legacy preparation-file migration
+
+The preparation-file factory and CLI remain available:
 
 ```python
 from featranker import build_ranker
@@ -186,165 +173,34 @@ from featranker import build_ranker
 ranker = build_ranker(
     task="reg",
     group="tree",
-    prep_file="./my_features.py",
-    prep_class="DiabetesPrep",
+    prep_file="./featureCalc.py",
+    prep_class="prepFeature",
 )
-results = ranker.rankFeatures()
+legacy_report = ranker.rankFeatures()
 ```
 
-### Constructor parameters
+`rankFeatures()` emits `DeprecationWarning`, ranks retained training data in-sample, and records `evaluation_mode: "in_sample"`. Warnings can be suppressed, so always inspect this field. Migrate to explicit `fit(X_train, y_train, ...)` followed by `rank_features(X_eval, y_eval, scoring=...)`.
 
-| Parameter | Type | Description |
-| --- | --- | --- |
-| `task` | `"clf"` \| `"reg"` | Classification or regression |
-| `group` | `"linear"` \| `"tree"` \| `"all"` | Which model family to use |
-| `prep_file` | `str` or `None` | Path to prep file (defaults to `featureCalc.py`) |
-| `prep_class` | `str` | Name of the prep class (defaults to `"prepFeature"`) |
+Normal `fit()` does not retain raw training data; only the legacy preparation-file path retains it for `rankFeatures()`. `run_ML()` is also deprecated.
 
----
+CLI usage remains for migration:
 
-## Model Configuration
-
-Models are defined in `featranker/importance_config.yaml`, organized by task
-and group:
-
-```yaml
-classification:
-  linear:
-    - name: logistic_regression
-      import: sklearn.linear_model
-      class: LogisticRegression
-      params:
-        max_iter: 2000
-  tree:
-    - name: random_forest
-      import: sklearn.ensemble
-      class: RandomForestClassifier
-      params:
-        random_state: 42
-
-regression:
-  linear:
-    - ...
-  tree:
-    - ...
+```bash
+featranker --task reg --group tree \
+    --prep-file ./featureCalc.py --prep-class prepFeature \
+    --output results.json
 ```
 
-Each entry has four fields:
+CLI ranking is legacy in-sample ranking and must not be used for leakage-safe feature selection.
 
-| Field | Description |
-| --- | --- |
-| `name` | Display name used in output |
-| `import` | Python module to import (e.g., `sklearn.ensemble`) |
-| `class` | Class name to instantiate from that module |
-| `params` | Dict of keyword arguments passed to the constructor (optional) |
+## Model configuration
 
-Edit this file to add, remove, or tune models. Changes take effect on the next
-run — no reinstall required.
+Models are declared in `featranker/importance_config.yaml` by task (`classification` or `regression`) and family (`linear` or `tree`). Each entry supplies output name, import module, estimator class, and optional constructor parameters. Missing XGBoost or CatBoost installations skip only those entries.
 
----
+## Scope
 
-## Available Models
+FeatRanker does not provide nested cross-validation, site-grouped splitting, imputation, encoding, scaling, automatic feature selection, SHAP, a UI, or clinical-model-specific logic.
 
-### Classification — Linear
+## License
 
-| Name | Class |
-| --- | --- |
-| `logistic_regression` | `LogisticRegression` |
-| `logistic_regression_l1` | `LogisticRegression` (L1) |
-| `logistic_regression_l2` | `LogisticRegression` (L2) |
-| `logistic_regression_elasticnet` | `LogisticRegression` (ElasticNet) |
-| `linear_svm` | `LinearSVC` |
-| `sgd_classifier` | `SGDClassifier` |
-| `ridge_classifier` | `RidgeClassifier` |
-| `perceptron` | `Perceptron` |
-| `passive_aggressive` | `PassiveAggressiveClassifier` |
-| `lda` | `LinearDiscriminantAnalysis` |
-| `qda` | `QuadraticDiscriminantAnalysis` |
-| `naive_bayes_gaussian` | `GaussianNB` |
-| `naive_bayes_bernoulli` | `BernoulliNB` |
-| `naive_bayes_multinomial` | `MultinomialNB` |
-| `pls_da` | `PLSRegression` |
-
-### Classification — Tree
-
-| Name | Class |
-| --- | --- |
-| `decision_tree` | `DecisionTreeClassifier` |
-| `random_forest` | `RandomForestClassifier` |
-| `extra_trees` | `ExtraTreesClassifier` |
-| `bagging_tree` | `BaggingClassifier` |
-| `adaboost` | `AdaBoostClassifier` |
-| `gradient_boosting` | `GradientBoostingClassifier` |
-| `hist_gradient_boosting` | `HistGradientBoostingClassifier` |
-| `xgboost` | `XGBClassifier` |
-| `catboost` | `CatBoostClassifier` |
-
-### Regression — Linear
-
-| Name | Class |
-| --- | --- |
-| `linear_regression` | `LinearRegression` |
-| `ridge_regression` | `Ridge` |
-| `lasso_regression` | `Lasso` |
-| `elasticnet_regression` | `ElasticNet` |
-| `elasticnet_cv_regression` | `ElasticNetCV` |
-| `pls_regression` | `PLSRegression` |
-| `huber_regression` | `HuberRegressor` |
-| `ransac_regression` | `RANSACRegressor` |
-| `kernel_ridge_regression` | `KernelRidge` |
-| `svr_regression` | `SVR` |
-
-### Regression — Tree
-
-| Name | Class |
-| --- | --- |
-| `decision_tree_regressor` | `DecisionTreeRegressor` |
-| `random_forest_regressor` | `RandomForestRegressor` |
-| `extra_trees_regressor` | `ExtraTreesRegressor` |
-| `adaboost_regressor` | `AdaBoostRegressor` |
-| `gradient_boosting_regressor` | `GradientBoostingRegressor` |
-| `hist_gradient_boosting_regressor` | `HistGradientBoostingRegressor` |
-| `xgboost_regressor` | `XGBRegressor` |
-| `catboost_regressor` | `CatBoostRegressor` |
-
----
-
-## Output Format
-
-The result is a dict (or JSON object) keyed by model name, with an additional
-`"average"` entry that aggregates across all models. Each value is a list of
-single-entry dicts sorted by score in descending order. Scores are rounded to
-four decimal places.
-
-```json
-{
-  "logistic_regression": [
-    {"feature_a": 0.1234},
-    {"feature_b": 0.0567},
-    {"feature_c": 0.0012}
-  ],
-  "random_forest": [
-    {"feature_b": 0.0890},
-    {"feature_a": 0.0745},
-    {"feature_c": 0.0023}
-  ],
-  "average": [
-    {"feature_a": 0.0990},
-    {"feature_b": 0.0729},
-    {"feature_c": 0.0018}
-  ]
-}
-```
-
----
-
-## Troubleshooting
-
-| Symptom | Cause | Fix |
-| --- | --- | --- |
-| `Prep file not found` | FeatRanker can't locate `featureCalc.py` | Run the command from the directory that contains `featureCalc.py`, or pass an explicit path with `--prep-file` |
-| `AttributeError: … has no attribute 'X'` | The prep class name doesn't match what's in the file | Check spelling of `--prep-class` against the class defined in your prep file |
-| `'label' key missing` | `_calc_features()` didn't include a `"label"` entry | Add `features["label"] = ...` to your return dict |
-| Feature length mismatch | Feature lists have different lengths | Ensure every feature list and `"label"` have the same number of elements |
-| Model training errors (printed, not fatal) | A model failed to converge or doesn't support the data | Check the printed warning; consider removing or tuning that model in `importance_config.yaml` |
+MIT
