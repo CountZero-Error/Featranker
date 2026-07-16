@@ -201,6 +201,12 @@ cython_debug/
 
 # Local feature worktrees
 .worktrees/
+
+# Local-only project files
+/.codegraph/
+/docs/
+/CHANGELOG.md
+/MANIFEST.in
 .cursorignore
 .cursorindexingignore
 
