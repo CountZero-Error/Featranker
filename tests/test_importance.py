@@ -2,6 +2,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from sklearn.base import BaseEstimator, RegressorMixin
 from sklearn.metrics import get_scorer
 
 from featranker import FeatureRanker, build_ranker
@@ -11,7 +12,7 @@ OPTIONAL_NAMES = {"xgboost", "lightgbm", "catboost"}
 from featranker.importance import _assign_ranks, _build_consensus
 
 
-class MeanRegressor:
+class MeanRegressor(RegressorMixin, BaseEstimator):
     def fit(self, X, y):
         self.mean_ = float(np.mean(y))
         return self
