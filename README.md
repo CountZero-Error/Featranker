@@ -1,20 +1,56 @@
-# FeatRanker
+<div align="center">
+  <h1>FeatRanker</h1>
+  <p><strong>Leakage-safe, model-agnostic feature ranking for trustworthy ML workflows.</strong></p>
+  <p>Fit on training data. Rank on held-out data. Build consensus across models.</p>
+  <p>
+    <a href="https://pypi.org/project/featranker/"><img src="https://img.shields.io/pypi/v/featranker?style=flat-square" alt="PyPI"></a>
+    <a href="https://pypi.org/project/featranker/"><img src="https://img.shields.io/pypi/pyversions/featranker?style=flat-square" alt="Python"></a>
+    <a href="https://github.com/CountZero-Error/Featranker/actions/workflows/tests.yml"><img src="https://github.com/CountZero-Error/Featranker/actions/workflows/tests.yml/badge.svg?branch=main" alt="Tests"></a>
+    <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="MIT License"></a>
+  </p>
+</div>
 
-Leakage-safe permutation feature ranking across multiple scikit-learn and optional gradient-boosting models.
+<p align="center">
+  <a href="#installation">Installation</a> ·
+  <a href="#quick-start">Quick start</a> ·
+  <a href="#leakage-safe-validation">Validation safety</a> ·
+  <a href="#result-schema">Result schema</a>
+</p>
 
-FeatRanker fits configured models on data supplied to `fit()` and ranks features only on separate data supplied to `rank_features()`. It does not split, preprocess, select, or cross-validate data.
+---
 
-> Feature rankings are evidence for feature selection and ablation experiments. They are not causal effects, biological mechanisms, or clinical importance.
+FeatRanker trains configurable estimators on explicit training data, measures permutation importance on separate evaluation data, and combines model-specific rankings into a robust consensus.
+
+Built for feature-selection and ablation workflows where leakage control, semantic feature groups, and model failures must remain visible.
+
+> [!NOTE]
+> Feature rankings are predictive evidence. They are not causal effects, biological mechanisms, or clinical importance.
+
+## Why FeatRanker?
+
+| Held-out by design | Semantic feature groups | Rank consensus |
+|---|---|---|
+| `fit()` receives training data. `rank_features()` requires separate evaluation data. | Jointly permute one-hot, genotype, or related feature blocks with one row permutation. | Aggregate per-model ranks instead of incomparable raw importance magnitudes. |
+
+Also included:
+
+- classification and regression model families;
+- scikit-learn scorer names or scorer-protocol callables;
+- per-model evaluation scores and raw repeat importances;
+- structured initialization, fit, and ranking failures;
+- deterministic permutations and tie handling.
 
 ## Installation
 
-Core installation:
+Install the core package:
 
 ```bash
 pip install featranker
 ```
 
-Optional estimator libraries:
+Core dependencies are NumPy, scikit-learn, PyYAML, and tqdm. Python 3.10 or newer is required.
+
+Install optional estimator libraries only when needed:
 
 ```bash
 pip install 'featranker[xgboost]'
@@ -23,19 +59,9 @@ pip install 'featranker[catboost]'
 pip install 'featranker[all]'
 ```
 
-LightGBM is available as an installation extra, but no LightGBM model is configured by default. Missing optional libraries skip only their configured models and produce warnings plus structured failure records.
+## Quick start
 
-Development installation:
-
-```bash
-pip install -e '.[test]'
-```
-
-Requires Python 3.10 or newer.
-
-## Held-out regression workflow
-
-The caller owns splitting and preprocessing. Pass only training data to `fit()` and separate evaluation data to `rank_features()`:
+The caller owns splitting and preprocessing. Fit on training data, then rank on a separate evaluation set.
 
 ```python
 from featranker import FeatureRanker
@@ -48,6 +74,14 @@ feature_names = [
     "CYP2C9_other",
 ]
 
+feature_groups = {
+    "CYP2C9": [
+        "CYP2C9_*1/*1",
+        "CYP2C9_*1/*2",
+        "CYP2C9_other",
+    ]
+}
+
 ranker = FeatureRanker(task="reg", group="tree")
 ranker.fit(X_train, y_train, feature_names=feature_names)
 
@@ -55,74 +89,93 @@ report = ranker.rank_features(
     X_eval,
     y_eval,
     scoring="neg_mean_absolute_error",
+    feature_groups=feature_groups,
     n_repeats=20,
     random_state=42,
 )
+
+print(report["consensus"])
 ```
 
-NumPy training matrices require `feature_names`. pandas DataFrames retain their column names. Evaluation DataFrames must have the same columns in the same order as training. Evaluation NumPy arrays reuse fitted names and must have the same column count.
+NumPy training matrices require `feature_names`. pandas DataFrames retain their column names.
 
-FeatRanker deliberately leaves imputation, encoding, scaling, target transformation, and splitting to the caller.
+## Leakage-safe validation
+
+> [!IMPORTANT]
+> Ranking belongs inside the training portion of validation. Never use outer-fold or final-test rankings to choose features.
+
+For nested validation:
+
+1. Create outer training and outer test folds.
+2. Fit FeatRanker on inner-training data from the outer training fold.
+3. Rank features on inner-validation data.
+4. Make selection or ablation decisions from inner results only.
+5. Keep the outer test fold untouched until final evaluation.
+
+FeatRanker does not implement cross-validation or site-grouped splitting. Those decisions remain explicit in downstream projects.
+
+## How it works
+
+1. **Initialize** configured models for `task="clf"` or `task="reg"`.
+2. **Fit** each model on data supplied to `fit()`.
+3. **Score** each successful model on held-out evaluation data.
+4. **Permute** each feature group repeatedly and measure score degradation.
+5. **Rank** groups within each model using mean permutation importance.
+6. **Aggregate** model ranks into median- and mean-rank consensus.
+
+Importance is always calculated with the same scorer:
+
+```text
+importance = baseline_score - permuted_score
+```
+
+Positive importance means permutation reduced predictive performance.
 
 ## Grouped permutation
 
-Semantic one-hot or genotype blocks can be permuted jointly:
+Related columns can be permuted as one semantic unit:
 
 ```python
-report = ranker.rank_features(
-    X_eval,
-    y_eval,
-    scoring="neg_mean_absolute_error",
-    feature_groups={
-        "CYP2C9": [
-            "CYP2C9_*1/*1",
-            "CYP2C9_*1/*2",
-            "CYP2C9_other",
-        ],
-        "VKORC1": [
-            "VKORC1_GG",
-            "VKORC1_GA",
-            "VKORC1_AA",
-        ],
-    },
-    n_repeats=20,
-    random_state=42,
-)
+feature_groups = {
+    "CYP2C9": [
+        "CYP2C9_*1/*1",
+        "CYP2C9_*1/*2",
+        "CYP2C9_other",
+    ],
+    "VKORC1": [
+        "VKORC1_GG",
+        "VKORC1_GA",
+        "VKORC1_AA",
+    ],
+}
 ```
 
-Every column in a multi-column group receives the same row permutation during a repeat. This preserves relationships among group columns while breaking the group's relationship with the target. Features omitted from `feature_groups` become singleton groups.
+Every column in a multi-column group receives the same row permutation during a repeat. This preserves relationships within the block while breaking its relationship with the target.
 
-Unknown features, duplicate membership, overlapping groups, empty groups, and group-name collisions raise clear errors.
+Features omitted from `feature_groups` become singleton groups. Empty groups, unknown features, duplicate membership, overlaps, and group-name collisions raise errors.
 
-## Validation placement and leakage
+## Data and scoring contract
 
-Ranking belongs inside the training portion of each validation split. For nested validation:
+| Input | Contract |
+|---|---|
+| `X_train` | Two-dimensional NumPy array or pandas DataFrame. |
+| `y_train` | One-dimensional target with the same row count. |
+| `feature_names` | Required for NumPy training input; inferred from DataFrame columns. |
+| `X_eval` | Must match fitted feature count, names, and order. |
+| `y_eval` | One-dimensional evaluation target with matching rows. |
+| `scoring` | scikit-learn scorer name or callable `(estimator, X, y) -> float`. |
+| `feature_groups` | Optional mapping of group names to fitted feature names. |
 
-1. Split an outer training and outer test fold.
-2. Within the outer training fold, fit FeatRanker on inner-training data.
-3. Rank on inner-validation data.
-4. Make feature-selection or ablation decisions using only those inner results.
-5. Keep the outer test fold untouched until final evaluation.
+FeatRanker does not impute, encode, scale, split, transform targets, or select features.
 
-Do not rank on final test or outer-fold data and then select features using those rankings. That leaks evaluation information into model development. FeatRanker intentionally does not implement or hide cross-validation or site-grouped splitting.
+Non-finite baseline, permuted, or derived importance values fail that model's ranking. They never enter successful reports or consensus.
 
-## Scoring and importance
+## Result schema
 
-`scoring` accepts a scikit-learn scorer name or a scorer-protocol callable:
+The report preserves raw model evidence and keeps aggregation rank-based.
 
-```python
-score = scorer(estimator, X, y)
-```
-
-The same scorer computes baseline and permuted scores. Importance for every repeat is:
-
-```text
-baseline_score - permuted_score
-```
-
-Positive importance means permutation reduced predictive performance. Each model's held-out baseline score is recorded as `evaluation_score`.
-
-## Report schema
+<details>
+<summary><strong>View complete report structure</strong></summary>
 
 ```python
 {
@@ -130,7 +183,9 @@ Positive importance means permutation reduced predictive performance. Each model
     "scoring": "neg_mean_absolute_error",
     "n_repeats": 20,
     "random_state": 42,
-    "feature_groups": {"CYP2C9": ["CYP2C9_*1/*1", "CYP2C9_*1/*2"]},
+    "feature_groups": {
+        "CYP2C9": ["CYP2C9_*1/*1", "CYP2C9_*1/*2", "CYP2C9_other"]
+    },
     "models": {
         "random_forest_regressor": {
             "evaluation_score": -8.2,
@@ -157,15 +212,36 @@ Positive importance means permutation reduced predictive performance. Each model
 }
 ```
 
-Raw importance values remain per model. Consensus uses ranks because raw magnitudes from heterogeneous estimators are not directly comparable. Exact equal importance means share the minimum rank; output ties are ordered by group name. Consensus sorts by median rank, mean rank, then group name.
+</details>
 
-Initialization, fit, and ranking failures contain `model`, `stage`, `error_type`, and `message`. Failed models do not receive zero importance and do not enter consensus. `fit()` raises if no model fits. `rank_features()` raises if every fitted model fails during ranking; partial success returns successful reports and failures together.
+<details>
+<summary><strong>Ranking, failures, and reproducibility</strong></summary>
 
-Set `random_state` for repeatable row permutations. Estimators can still be stochastic unless their own configuration also fixes a seed.
+- Raw importance values remain model-specific and are never averaged into primary consensus.
+- Exact equal mean importances share the minimum rank. Group names provide deterministic output order.
+- Consensus sorts by `median_rank`, `mean_rank`, then group name.
+- Failures contain `model`, `stage`, `error_type`, and `message`.
+- Failed models receive no zero placeholder and do not enter consensus.
+- `fit()` raises if no model fits; `rank_features()` raises if every model fails ranking.
+- `random_state` controls permutation reproducibility. Estimator randomness remains estimator-specific.
 
-## Legacy preparation-file migration
+</details>
 
-The preparation-file factory and CLI remain available:
+## Optional estimators
+
+| Extra | Installation | Default model configured? |
+|---|---|---|
+| XGBoost | `pip install 'featranker[xgboost]'` | Yes |
+| LightGBM | `pip install 'featranker[lightgbm]'` | No |
+| CatBoost | `pip install 'featranker[catboost]'` | Yes |
+
+Missing or broken optional libraries skip only affected models. Each skipped model produces a warning and structured initialization failure.
+
+Model definitions live in [`featranker/importance_config.yaml`](featranker/importance_config.yaml).
+
+## Legacy migration
+
+The preparation-file factory and CLI remain available for migration.
 
 ```python
 from featranker import build_ranker
@@ -176,31 +252,42 @@ ranker = build_ranker(
     prep_file="./featureCalc.py",
     prep_class="prepFeature",
 )
+
 legacy_report = ranker.rankFeatures()
+assert legacy_report["evaluation_mode"] == "in_sample"
 ```
 
-`rankFeatures()` emits `DeprecationWarning`, ranks retained training data in-sample, and records `evaluation_mode: "in_sample"`. Warnings can be suppressed, so always inspect this field. Migrate to explicit `fit(X_train, y_train, ...)` followed by `rank_features(X_eval, y_eval, scoring=...)`.
+> [!WARNING]
+> `rankFeatures()` performs deprecated in-sample ranking. Use `fit()` and `rank_features()` with separate data for leakage-safe work.
 
-Normal `fit()` does not retain raw training data; only the legacy preparation-file path retains it for `rankFeatures()`. `run_ML()` is also deprecated.
+Warnings can be suppressed, so inspect `evaluation_mode`. Normal `fit()` does not retain training data; only the legacy prep-file path retains it for `rankFeatures()`.
 
-CLI usage remains for migration:
+`run_ML()` is deprecated. The CLI also uses legacy in-sample ranking.
+
+## Development
 
 ```bash
-featranker --task reg --group tree \
-    --prep-file ./featureCalc.py --prep-class prepFeature \
-    --output results.json
+git clone https://github.com/CountZero-Error/Featranker.git
+cd Featranker
+pip install -e '.[test]'
+python -m pytest -q
+python -m build
 ```
 
-CLI ranking is legacy in-sample ranking and must not be used for leakage-safe feature selection.
+Continuous integration runs the core test suite on supported Python versions without optional estimator libraries.
 
-## Model configuration
+## Scope and interpretation
 
-Models are declared in `featranker/importance_config.yaml` by task (`classification` or `regression`) and family (`linear` or `tree`). Each entry supplies output name, import module, estimator class, and optional constructor parameters. Missing XGBoost or CatBoost installations skip only those entries.
+FeatRanker provides evidence for predictive feature selection and ablation. Results depend on the evaluation sample, scorer, estimator behavior, correlated predictors, and permutation design.
 
-## Scope
+FeatRanker intentionally does not provide:
 
-FeatRanker does not provide nested cross-validation, site-grouped splitting, imputation, encoding, scaling, automatic feature selection, SHAP, a UI, or clinical-model-specific logic.
+- nested cross-validation or site-grouped splitting;
+- imputation, encoding, scaling, or target transformation;
+- automatic feature selection;
+- SHAP or causal interpretation;
+- clinical-model-specific logic or a user interface.
 
 ## License
 
-MIT
+Released under the [MIT License](LICENSE).
