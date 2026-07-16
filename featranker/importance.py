@@ -180,6 +180,36 @@ def _build_consensus(model_reports: Dict[str, Any]) -> List[Dict[str, Any]]:
     )
 
 
+def _load_prep_data(
+    prep_file: str,
+    prep_class: str,
+    kwargs: Dict[str, Any],
+) -> tuple[np.ndarray, np.ndarray, List[str]]:
+    prep_path = Path(prep_file).resolve()
+    if not prep_path.is_file():
+        raise FileNotFoundError(f"[!] Prep file not found: {prep_path}")
+
+    spec = importlib.util.spec_from_file_location(prep_path.stem, str(prep_path))
+    if spec is None or spec.loader is None:
+        raise ImportError(f"[!] Could not load module from: {prep_path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[prep_path.stem] = module
+    spec.loader.exec_module(module)
+    prep_type = getattr(module, prep_class)
+    features = prep_type(**kwargs)._calc_features()
+    if not isinstance(features, dict) or not features:
+        raise ValueError("[!] Prep class must return a non-empty feature dict.")
+    if "label" not in features:
+        raise ValueError("[!] Prep feature dict must include 'label'.")
+
+    names = [name for name in features if name != "label"]
+    if not names:
+        raise ValueError("[!] Prep feature dict has no feature columns.")
+    X = np.column_stack([features[name] for name in names])
+    y = np.asarray(features["label"])
+    return X, y, names
+
+
 class FeatureRanker:
     def __init__(
         self,
@@ -213,6 +243,20 @@ class FeatureRanker:
         self.trained_models: Dict[str, Any] = {}
         self.fit_failures_: List[Dict[str, str]] = []
         self.is_fitted_ = False
+        if prep_file is not None:
+            self._fit_legacy_prep(prep_file, str(prep_class), kwargs)
+
+    def _fit_legacy_prep(
+        self,
+        prep_file: str,
+        prep_class: str,
+        kwargs: Dict[str, Any],
+    ) -> "FeatureRanker":
+        X, y, feature_names = _load_prep_data(prep_file, prep_class, kwargs)
+        self.fit(X, y, feature_names)
+        self._legacy_X = X.copy()
+        self._legacy_y = y.copy()
+        return self
 
     def fit(
         self,
@@ -221,6 +265,9 @@ class FeatureRanker:
         feature_names: Optional[List[str]] = None,
     ) -> "FeatureRanker":
         """Fit configured models using training data only."""
+        for attribute in ("_legacy_X", "_legacy_y"):
+            if hasattr(self, attribute):
+                delattr(self, attribute)
         X_values, names = _validate_X(X, feature_names=feature_names)
         y_values = _validate_y(y, len(X_values))
 
@@ -263,6 +310,27 @@ class FeatureRanker:
         random_state: Optional[int] = None,
     ) -> Dict[str, Any]:
         """Rank feature groups on explicitly supplied evaluation data."""
+        return self._rank_features(
+            X_eval,
+            y_eval,
+            scoring=scoring,
+            feature_groups=feature_groups,
+            n_repeats=n_repeats,
+            random_state=random_state,
+            evaluation_mode="held_out",
+        )
+
+    def _rank_features(
+        self,
+        X_eval: Any,
+        y_eval: Any,
+        *,
+        scoring: Any,
+        feature_groups: Optional[Dict[str, List[str]]] = None,
+        n_repeats: int = 10,
+        random_state: Optional[int] = None,
+        evaluation_mode: str,
+    ) -> Dict[str, Any]:
         if not self.is_fitted_:
             raise RuntimeError("[!] Call fit() before rank_features().")
         if not isinstance(n_repeats, int) or isinstance(n_repeats, bool) or n_repeats < 1:
@@ -332,7 +400,7 @@ class FeatureRanker:
             )
 
         return {
-            "evaluation_mode": "held_out",
+            "evaluation_mode": evaluation_mode,
             "scoring": scoring_name,
             "n_repeats": n_repeats,
             "random_state": random_state,
@@ -423,165 +491,46 @@ class FeatureRanker:
         return models
 
     def run_ML(self) -> Dict[str, Any]:
-        """
-        Train every initialized model on the feature matrix.
-
-        The feature dict is unpacked into a NumPy array X (features) and a
-        vector y (labels), then each model is fitted via its .fit() method.
-
-        Returns:
-            Dict mapping model_name → trained model instance.
-        """
-        if not isinstance(self.features, dict) or len(self.features) == 0:
-            raise ValueError("[!] inputs must be a non-empty dict of features.")
-
-        # --- Unpack the feature dict into X and y arrays ---
-        feature_names = list(self.features.keys())
-        n_samples = len(self.features[feature_names[0]])
-        X, y = [], []
-        feature_names = []
-        for feature_name, values in tqdm(
-            self.features.items(), desc="[*] Unpacking features"
-        ):
-            if len(values) != n_samples:
-                raise ValueError(
-                    f"[!] Feature '{feature_name}' length {len(values)} does not match {n_samples}."
-                )
-
-            if feature_name == "label":
-                y = self.features["label"]
-            else:
-                feature_names.append(np.asarray(values, dtype=float))
-                X.append(values)
-
-        X = np.column_stack(X)
-        y = np.asarray(y)
-
-        # Encode string labels to integers for models that require numeric targets
-        if y.dtype.kind in ("U", "S", "O"):  # Unicode, byte string, or object
-            self.label_encoder = LabelEncoder()
-            y = self.label_encoder.fit_transform(y)
-
-        # --- Fit each model in the selected group(s) ---
-        group2train = ["linear", "tree"] if self.group == "all" else [self.group]
-
-        trained_models: Dict[str, Any] = {}
-        for group in group2train:
-            models = self.models.get(self.task, {}).get(group, {})
-
-            for model_name, model in tqdm(
-                models.items(),
-                desc=f"[*] Training {task_map[self.task]}-{group} models",
-            ):
-                try:
-                    trained_models[model_name] = model.fit(X, y)
-                except Exception as e:
-                    print(
-                        f"[*] Error training {task_map[self.task]}-{group} model '{model_name}': {e}"
-                    )
-                    continue
-
-        return trained_models
+        """Deprecated alias that refits retained preparation-file data."""
+        if not hasattr(self, "_legacy_X") or not hasattr(self, "_legacy_y"):
+            raise RuntimeError(
+                "[!] run_ML() requires the legacy preparation-file workflow; "
+                "use fit(X_train, y_train, feature_names=...) instead."
+            )
+        warnings.warn(
+            "run_ML() is deprecated; use fit(X_train, y_train, feature_names=...).",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        X = self._legacy_X.copy()
+        y = self._legacy_y.copy()
+        self.fit(X, y, self.feature_names_)
+        self._legacy_X = X
+        self._legacy_y = y
+        return self.trained_models
 
     def rankFeatures(self):
-        """
-        Compute permutation importance for every trained model and produce
-        a per-model ranking plus an overall average ranking.
-
-        Returns:
-            Dict mapping each model name to a sorted list of
-            {feature_name: score} dicts, plus an "average" entry that
-            aggregates scores across all models.
-        """
-        if not isinstance(self.features, dict) or len(self.features) == 0:
-            raise ValueError("[!] inputs must be a non-empty dict of features.")
-
-        if "label" not in self.features:
-            raise ValueError("[!] inputs must include a 'label' feature.")
-
-        y = np.asarray(self.features["label"])
-        # Re-apply label encoding if labels were encoded during training
-        if self.label_encoder is not None:
-            y = self.label_encoder.transform(y)
-        n_samples = len(y)
-        if n_samples == 0:
-            raise ValueError("[!] label must be a non-empty sequence.")
-
-        # Separate feature columns from the label.
-        feature_names: List[str] = []
-        X_cols: List[np.ndarray] = []
-        for feature_name, values in self.features.items():
-            if feature_name == "label":
-                continue
-
-            if len(values) != n_samples:
-                raise ValueError(
-                    f"[!] Feature '{feature_name}' length {len(values)} does not match {n_samples}."
-                )
-
-            feature_names.append(feature_name)
-            X_cols.append(np.asarray(values, dtype=float))
-
-        if len(feature_names) == 0:
-            raise ValueError("[!] No feature columns found (excluding 'label').")
-
-        X = np.column_stack(X_cols)
-
-        if not isinstance(self.trained_models, dict) or len(self.trained_models) == 0:
-            raise ValueError("[!] No trained models available.")
-
-        def _sorted_scores(scores: Dict[str, float]) -> List[Dict[str, float]]:
-            """Return a list of single-entry dicts sorted by score descending."""
-            return [
-                {name: scores[name]}
-                for name in sorted(scores, key=scores.get, reverse=True)
-            ]
-
-        results: Dict[str, List[Dict[str, float]]] = {}
-        score_bank: Dict[str, List[float]] = {name: [] for name in feature_names}
-        any_model = False
-
-        for model_name, model in tqdm(
-            self.trained_models.items(), desc="[*] Computing permutation importance"
-        ):
-            try:
-                # Silence sklearn warnings about feature-name mismatches.
-                with warnings.catch_warnings():
-                    warnings.filterwarnings(
-                        "ignore",
-                        message=r"X does not have valid feature names, but .* was fitted with feature names",
-                        category=UserWarning,
-                    )
-                    perm = permutation_importance(
-                        model, X, y, n_repeats=10, random_state=42
-                    )
-            except Exception as e:
-                print(f"[*] Error computing importance for model '{model_name}': {e}")
-                continue
-
-            # Round scores to four decimal places for compact output.
-            model_scores = {
-                fname: float(round(score, 4))
-                for fname, score in zip(feature_names, perm.importances_mean)
-            }
-            for fname, score in model_scores.items():
-                score_bank[fname].append(score)
-
-            results[model_name] = _sorted_scores(model_scores)
-            any_model = True
-
-        if not any_model:
-            raise ValueError("[!] Failed to compute importance for any trained model.")
-
-        # Aggregate a single summary ranking averaged across all models.
-        average_scores = {
-            fname: float(round(np.mean(scores), 4))
-            for fname, scores in score_bank.items()
-            if scores
-        }
-        results["average"] = _sorted_scores(average_scores)
-
-        return results
+        """Deprecated in-sample ranking for preparation-file users."""
+        if not hasattr(self, "_legacy_X") or not hasattr(self, "_legacy_y"):
+            raise RuntimeError(
+                "[!] rankFeatures() has no retained training data. Supply separate "
+                "evaluation data with rank_features(X_eval, y_eval, scoring=...)."
+            )
+        warnings.warn(
+            "rankFeatures() performs in-sample ranking and is deprecated. "
+            "Use rank_features(X_eval, y_eval, scoring=...) with held-out data.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        scoring = "accuracy" if self.task == "clf" else "r2"
+        return self._rank_features(
+            self._legacy_X,
+            self._legacy_y,
+            scoring=scoring,
+            n_repeats=10,
+            random_state=42,
+            evaluation_mode="in_sample",
+        )
 
 
 def main() -> int:
@@ -684,7 +633,11 @@ def build_ranker(
         A ready-to-use FeatureRanker instance.
     """
     return FeatureRanker(
-        task=task, group=group, prep_file=prep_file, prep_class=prep_class, **kwargs
+        task=task,
+        group=group,
+        prep_file=prep_file or "featureCalc.py",
+        prep_class=prep_class,
+        **kwargs,
     )
 
 

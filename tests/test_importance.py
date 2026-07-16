@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 from sklearn.metrics import get_scorer
 
-from featranker import FeatureRanker
+from featranker import FeatureRanker, build_ranker
 from featranker.importance import _assign_ranks, _build_consensus
 
 
@@ -364,3 +364,78 @@ def test_all_ranking_failures_raise(monkeypatch):
             scoring=lambda model, X, y: model.score(X, y),
             n_repeats=2,
         )
+
+
+def test_legacy_prep_workflow_warns_and_marks_in_sample(monkeypatch, tmp_path):
+    prep_path = tmp_path / "clinical_prep.py"
+    prep_path.write_text(
+        "class Prep:\n"
+        "    def __init__(self, **kwargs):\n"
+        "        self.offset = kwargs.get('offset', 0)\n"
+        "    def _calc_features(self):\n"
+        "        return {\n"
+        "            'age': [50, 60, 70, 80],\n"
+        "            'dose': [1, 2, 3, 4],\n"
+        "            'label': [2, 3, 4, 5],\n"
+        "        }\n",
+        encoding="utf-8",
+    )
+
+    def init_models(self):
+        return {
+            "clf": {"linear": {}, "tree": {}},
+            "reg": {"linear": {"ok": MeanRegressor()}, "tree": {}},
+        }
+
+    monkeypatch.setattr(FeatureRanker, "init_models", init_models)
+    ranker = build_ranker(
+        task="reg",
+        group="linear",
+        prep_file=str(prep_path),
+        prep_class="Prep",
+        offset=1,
+    )
+
+    assert ranker.is_fitted_
+    assert hasattr(ranker, "_legacy_X")
+    assert hasattr(ranker, "_legacy_y")
+    with pytest.warns(DeprecationWarning, match="in-sample"):
+        report = ranker.rankFeatures()
+
+    assert report["evaluation_mode"] == "in_sample"
+    assert report["scoring"] == "r2"
+
+
+def test_explicit_constructor_prep_file_remains_supported(monkeypatch, tmp_path):
+    prep_path = tmp_path / "prep.py"
+    prep_path.write_text(
+        "class Prep:\n"
+        "    def _calc_features(self):\n"
+        "        return {'x': [1, 2, 3], 'label': [2, 4, 6]}\n",
+        encoding="utf-8",
+    )
+
+    def init_models(self):
+        return {
+            "clf": {"linear": {}, "tree": {}},
+            "reg": {"linear": {"ok": MeanRegressor()}, "tree": {}},
+        }
+
+    monkeypatch.setattr(FeatureRanker, "init_models", init_models)
+
+    ranker = FeatureRanker(
+        task="reg",
+        group="linear",
+        prep_file=str(prep_path),
+        prep_class="Prep",
+    )
+
+    assert ranker.is_fitted_
+    assert ranker.feature_names_ == ["x"]
+
+
+def test_legacy_rank_features_unavailable_after_normal_fit(monkeypatch):
+    ranker = fitted_ranker(monkeypatch)
+
+    with pytest.raises(RuntimeError, match="evaluation data"):
+        ranker.rankFeatures()
