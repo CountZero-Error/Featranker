@@ -25,6 +25,64 @@ task_map = {
 }
 
 
+def _validate_X(
+    X: Any,
+    feature_names: Optional[List[str]] = None,
+    expected_names: Optional[List[str]] = None,
+) -> tuple[np.ndarray, List[str]]:
+    dataframe_names = list(X.columns) if hasattr(X, "columns") else None
+    values = np.asarray(X, dtype=float)
+    if values.ndim != 2:
+        raise ValueError("[!] X must be a two-dimensional feature matrix.")
+    if values.shape[0] == 0 or values.shape[1] == 0:
+        raise ValueError("[!] X must contain at least one row and one feature.")
+
+    if dataframe_names is not None:
+        names = [str(name) for name in dataframe_names]
+        if feature_names is not None and list(feature_names) != names:
+            raise ValueError("[!] feature_names conflict with DataFrame columns.")
+    elif feature_names is None:
+        if expected_names is None:
+            raise ValueError("[!] feature_names are required for NumPy input.")
+        names = list(expected_names)
+    else:
+        names = list(feature_names)
+
+    if len(names) != values.shape[1]:
+        raise ValueError(
+            f"[!] Expected {values.shape[1]} feature names, got {len(names)}."
+        )
+    if any(not isinstance(name, str) or not name for name in names):
+        raise ValueError("[!] Feature names must be non-empty strings.")
+    if len(set(names)) != len(names):
+        raise ValueError("[!] Feature names must be unique.")
+    if expected_names is not None and names != list(expected_names):
+        raise ValueError("[!] Evaluation feature names and order must match fit().")
+    return values, names
+
+
+def _validate_y(y: Any, n_rows: int) -> np.ndarray:
+    values = np.asarray(y)
+    if values.ndim != 1:
+        raise ValueError("[!] y must be one-dimensional.")
+    if len(values) != n_rows:
+        raise ValueError(
+            f"[!] X has {n_rows} rows but y has {len(values)} rows."
+        )
+    if len(values) == 0:
+        raise ValueError("[!] y must contain at least one value.")
+    return values
+
+
+def _failure(model: str, stage: str, error: Exception) -> Dict[str, str]:
+    return {
+        "model": model,
+        "stage": stage,
+        "error_type": type(error).__name__,
+        "message": str(error),
+    }
+
+
 class FeatureRanker:
     def __init__(
         self,
@@ -35,49 +93,67 @@ class FeatureRanker:
         **kwargs,
     ) -> None:
         """
-        Initialize the ranker: load features, build models, and train them.
+        Initialize configured models without loading or fitting data.
 
         Args:
             task: Task type — "clf" for classification or "reg" for regression.
             group: Model family — "linear", "tree", or "all" for both.
-            prep_file: Path to a Python file that contains the feature-prep class.
-                       Defaults to "featureCalc.py" in the current working directory.
-            prep_class: Name of the class to instantiate from prep_file.
+            prep_file: Deprecated preparation-file compatibility path.
+            prep_class: Deprecated preparation class name.
         """
-        # Resolve the feature-preparation file, falling back to the default.
-        if prep_file is None:
-            prep_file = "featureCalc.py"
-
-        prep_path = Path(prep_file).resolve()
-        if not prep_path.is_file():
-            raise FileNotFoundError(
-                f"[!] Prep file not found: {prep_path}\n"
-                "    Make sure you run featranker from the directory "
-                "containing your featureCalc.py, or pass --prep-file."
-            )
-
-        # Dynamically load the prep module from the file path.
-        spec = importlib.util.spec_from_file_location(prep_path.stem, str(prep_path))
-        if spec is None or spec.loader is None:
-            raise ImportError(f"[!] Could not load module from: {prep_path}")
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[prep_path.stem] = module
-        spec.loader.exec_module(module)
-
-        # Instantiate the prep class and compute the feature dict.
-        _featureCalc = getattr(module, prep_class)
-        featureCalc = _featureCalc(**kwargs)
-        self.features = featureCalc._calc_features()
-
+        if task not in {"clf", "reg"}:
+            raise ValueError("[!] task must be 'clf' or 'reg'.")
+        if group not in {"linear", "tree", "all"}:
+            raise ValueError("[!] group must be 'linear', 'tree', or 'all'.")
         self.task = task
         self.group = group
+        self.prep_file = prep_file
+        self.prep_class = prep_class
+        self.prep_kwargs = kwargs
         self.label_encoder = None
-
-        # Initialize model instances from the YAML config.
+        self.initialization_failures_: List[Dict[str, str]] = []
         self.models = self.init_models()
+        self.trained_models: Dict[str, Any] = {}
+        self.fit_failures_: List[Dict[str, str]] = []
+        self.is_fitted_ = False
 
-        # Train every initialized model on the prepared features.
-        self.trained_models = self.run_ML()
+    def fit(
+        self,
+        X: Any,
+        y: Any,
+        feature_names: Optional[List[str]] = None,
+    ) -> "FeatureRanker":
+        """Fit configured models using training data only."""
+        X_values, names = _validate_X(X, feature_names=feature_names)
+        y_values = _validate_y(y, len(X_values))
+
+        self.label_encoder = None
+        if y_values.dtype.kind in ("U", "S", "O"):
+            self.label_encoder = LabelEncoder()
+            y_values = self.label_encoder.fit_transform(y_values)
+
+        groups = ["linear", "tree"] if self.group == "all" else [self.group]
+        candidates: Dict[str, Any] = {}
+        for group in groups:
+            candidates.update(self.models.get(self.task, {}).get(group, {}))
+
+        self.trained_models = {}
+        self.fit_failures_ = []
+        self.is_fitted_ = False
+        for model_name, model in tqdm(candidates.items(), desc="[*] Training models"):
+            try:
+                self.trained_models[model_name] = model.fit(X_values, y_values)
+            except Exception as error:
+                self.fit_failures_.append(_failure(model_name, "fit", error))
+
+        if not self.trained_models:
+            details = json.dumps(self.fit_failures_)
+            raise RuntimeError(f"[!] No models fit successfully. Failures: {details}")
+
+        self.feature_names_ = names
+        self.n_features_in_ = len(names)
+        self.is_fitted_ = True
+        return self
 
     def init_models(self) -> Dict[str, Dict[str, Dict[str, Any]]]:
         """
