@@ -25,7 +25,7 @@ all = ["xgboost", "lightgbm", "catboost"]
 test = ["pytest", "pandas", "build"]
 
 [project.scripts]
-featranker = "featranker.importance:main"
+featranker = "featranker.cli:main"
 
 [tool.setuptools]
 packages = ["featranker"]

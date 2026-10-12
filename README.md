@@ -229,11 +229,11 @@ Features omitted from `feature_groups` become singleton groups. Empty groups, un
 
 | Input | Contract |
 |---|---|
-| `X_train` | Two-dimensional NumPy array or pandas DataFrame. |
+| `X_train` | Two-dimensional NumPy array or pandas DataFrame of finite numbers. NaN and infinite values are rejected; imputing or dropping missing values is the caller's job. |
 | `y_train` | One-dimensional target with the same row count. |
 | `feature_names` | Required for NumPy training input; inferred from DataFrame columns. |
-| `X_eval` | Must match fitted feature count, names, and order. |
-| `y_eval` | One-dimensional evaluation target with matching rows. |
+| `X_eval` | Finite values matching the fitted feature count, names, and order. |
+| `y_eval` | One-dimensional evaluation target with matching rows. Classification labels must have appeared in `y_train`. |
 | `scoring` | scikit-learn scorer name or callable `(estimator, X, y) -> float`. |
 | `feature_groups` | Optional mapping of group names to fitted feature names. |
 
