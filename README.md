@@ -102,7 +102,7 @@ NumPy training matrices require `feature_names`. pandas DataFrames retain their 
 
 ### CLI
 
-The modern CLI accepts separate numeric training and evaluation CSV files. No preparation Python script is required.
+The CLI accepts separate numeric training and evaluation CSV files. No preparation Python script is required.
 
 `train.csv`:
 
@@ -351,30 +351,9 @@ Missing or broken optional libraries skip only affected models. Each skipped mod
 
 Model definitions live in [`featranker/importance_config.yaml`](featranker/importance_config.yaml).
 
-## Legacy migration
+## Removed in 0.4.0
 
-The preparation-file factory and prep-file CLI mode remain available for migration.
-
-```python
-from featranker import build_ranker
-
-ranker = build_ranker(
-    task="reg",
-    group="tree",
-    prep_file="./featureCalc.py",
-    prep_class="prepFeature",
-)
-
-legacy_report = ranker.rankFeatures()
-assert legacy_report["evaluation_mode"] == "in_sample"
-```
-
-> [!WARNING]
-> `rankFeatures()` performs deprecated in-sample ranking. Use `fit()` and `rank_features()` with separate data for leakage-safe work.
-
-Warnings can be suppressed, so inspect `evaluation_mode`. Normal `fit()` does not retain training data; only the legacy prep-file path retains it for `rankFeatures()`.
-
-`run_ML()` is deprecated. CLI commands using the prep-file compatibility mode also use legacy in-sample ranking; the CSV CLI uses held-out evaluation data.
+The preparation-file workflow is gone: `build_ranker()`, the `prep_file`/`prep_class` constructor arguments, `run_ML()`, `rankFeatures()`, the `--prep-file`/`--prep-class` CLI flags, and the in-sample `evaluation_mode`. Use `FeatureRanker.fit()` and `rank_features()` with separate training and evaluation data, or the CLI with `--train-data` and `--eval-data`. Every report now has `evaluation_mode: "held_out"`.
 
 ## Development
 

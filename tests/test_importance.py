@@ -10,7 +10,8 @@ from sklearn.dummy import DummyClassifier, DummyRegressor
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import get_scorer
 
-from featranker import FeatureRanker, build_ranker
+import featranker
+from featranker import FeatureRanker
 import featranker.importance as importance_module
 
 OPTIONAL_NAMES = {"xgboost", "lightgbm", "catboost"}
@@ -88,7 +89,7 @@ def fitted_ranker(monkeypatch, X_train=None, names=None, models=None):
     return ranker
 
 
-def test_constructor_is_unfitted_without_loading_default_prep(monkeypatch):
+def test_constructor_is_unfitted(monkeypatch):
     ranker = ranker_with_models(monkeypatch, {"ok": MeanRegressor()})
 
     assert ranker.is_fitted_ is False
@@ -155,15 +156,13 @@ def test_fit_raises_when_every_model_fails(monkeypatch):
     assert ranker.is_fitted_ is False
 
 
-def test_normal_fit_does_not_retain_training_data(monkeypatch):
+def test_fit_records_feature_count(monkeypatch):
     ranker = ranker_with_models(monkeypatch, {"ok": MeanRegressor()})
     X = np.ones((4, 1))
     y = np.arange(4)
 
     ranker.fit(X, y, ["a"])
 
-    assert not hasattr(ranker, "_legacy_X")
-    assert not hasattr(ranker, "_legacy_y")
     assert ranker.n_features_in_ == 1
 
 
@@ -389,13 +388,14 @@ def test_models_beating_dummy_baseline_join_consensus(monkeypatch):
 
 
 def test_no_model_beating_baseline_warns_and_empties_consensus(monkeypatch):
-    with pytest.warns(UserWarning, match="dummy baseline"):
+    with pytest.warns(UserWarning, match="dummy baseline") as caught:
         report = baseline_report(
             monkeypatch,
             {"tie": ConstantRegressor(0.0), "bad": ConstantRegressor(100.0)},
         )
 
     assert report["consensus"] == []
+    assert caught[0].filename == __file__  # points at the rank_features caller
     assert not any(m["in_consensus"] for m in report["models"].values())
     assert set(report["models"]) == {"tie", "bad"}
 
@@ -702,31 +702,67 @@ def test_modern_cli_requires_both_data_files(monkeypatch, tmp_path, capsys):
     assert "--eval-data" in capsys.readouterr().err
 
 
-def test_modern_cli_rejects_legacy_prep_flags(monkeypatch, tmp_path, capsys):
+def test_removed_prep_flags_are_rejected(monkeypatch, tmp_path, capsys):
     monkeypatch.setattr(
-        sys,
-        "argv",
-        [
-            "featranker",
-            "--task",
-            "reg",
-            "--train-data",
-            str(tmp_path / "train.csv"),
-            "--eval-data",
-            str(tmp_path / "eval.csv"),
-            "--target",
-            "target",
-            "--scoring",
-            "r2",
-            "--prep-file",
-            "prep.py",
-        ],
+        sys, "argv", _modern_argv(tmp_path, "--task", "reg", "--scoring", "r2", "--prep-file", "prep.py")
     )
 
     with pytest.raises(SystemExit, match="2"):
         importance_module.main()
 
-    assert "cannot be combined" in capsys.readouterr().err
+    assert "unrecognized arguments: --prep-file" in capsys.readouterr().err
+
+
+def test_legacy_prep_api_is_removed():
+    assert not hasattr(featranker, "build_ranker")
+    assert not hasattr(importance_module, "build_ranker")
+    assert not hasattr(FeatureRanker, "rankFeatures")
+    with pytest.raises(TypeError):
+        FeatureRanker(task="reg", prep_file="prep.py")
+
+
+def test_cli_without_arguments_prints_help(monkeypatch, capsys):
+    monkeypatch.setattr(sys, "argv", ["featranker"])
+
+    assert importance_module.main() == 0
+
+    assert "--train-data" in capsys.readouterr().out
+
+
+def test_cli_end_to_end_with_real_ranker_and_registry(monkeypatch, tmp_path):
+    rng = np.random.default_rng(0)
+
+    def write_csv(path, n_rows):
+        X = rng.normal(size=(n_rows, 3))
+        y = 3.0 * X[:, 0] + 0.1 * rng.normal(size=n_rows)
+        lines = ["signal,noise_a,noise_b,target"]
+        lines += [",".join(map(str, [*row, target])) for row, target in zip(X, y)]
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    write_csv(tmp_path / "train.csv", 60)
+    write_csv(tmp_path / "eval.csv", 30)
+    output = tmp_path / "report.json"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "featranker", "--task", "reg", "--group", "linear",
+            "--train-data", str(tmp_path / "train.csv"),
+            "--eval-data", str(tmp_path / "eval.csv"),
+            "--target", "target", "--scoring", "r2",
+            "--n-repeats", "2", "--random-state", "0",
+            "--output", str(output),
+        ],
+    )
+
+    assert importance_module.main() == 0
+
+    report = json.loads(output.read_text(encoding="utf-8"))
+    assert report["evaluation_mode"] == "held_out"
+    assert isinstance(report["baseline_score"], float)
+    assert report["consensus"]
+    assert report["consensus"][0]["feature_group"] == "signal"
+    assert not [f for f in report["failures"] if f["stage"] in {"fit", "ranking"}]
 
 
 def test_modern_cli_rejects_mismatched_feature_order(
@@ -945,79 +981,10 @@ def test_modern_cli_requires_task(monkeypatch, tmp_path, capsys):
     assert "--task" in capsys.readouterr().err
 
 
-def test_legacy_prep_workflow_warns_and_marks_in_sample(monkeypatch, tmp_path):
-    prep_path = tmp_path / "clinical_prep.py"
-    prep_path.write_text(
-        "class Prep:\n"
-        "    def __init__(self, **kwargs):\n"
-        "        self.offset = kwargs.get('offset', 0)\n"
-        "    def _calc_features(self):\n"
-        "        return {\n"
-        "            'age': [50, 60, 70, 80],\n"
-        "            'dose': [1, 2, 3, 4],\n"
-        "            'label': [2, 3, 4, 5],\n"
-        "        }\n",
-        encoding="utf-8",
-    )
-
-    def init_models(self):
-        return {
-            "clf": {"linear": {}, "tree": {}},
-            "reg": {"linear": {"ok": MeanRegressor()}, "tree": {}},
-        }
-
-    monkeypatch.setattr(FeatureRanker, "init_models", init_models)
-    ranker = build_ranker(
-        task="reg",
-        group="linear",
-        prep_file=str(prep_path),
-        prep_class="Prep",
-        offset=1,
-    )
-
-    assert ranker.is_fitted_
-    assert hasattr(ranker, "_legacy_X")
-    assert hasattr(ranker, "_legacy_y")
-    with pytest.warns(DeprecationWarning, match="in-sample"):
-        report = ranker.rankFeatures()
-
-    assert report["evaluation_mode"] == "in_sample"
-    assert report["scoring"] == "r2"
 
 
-def test_explicit_constructor_prep_file_remains_supported(monkeypatch, tmp_path):
-    prep_path = tmp_path / "prep.py"
-    prep_path.write_text(
-        "class Prep:\n"
-        "    def _calc_features(self):\n"
-        "        return {'x': [1, 2, 3], 'label': [2, 4, 6]}\n",
-        encoding="utf-8",
-    )
-
-    def init_models(self):
-        return {
-            "clf": {"linear": {}, "tree": {}},
-            "reg": {"linear": {"ok": MeanRegressor()}, "tree": {}},
-        }
-
-    monkeypatch.setattr(FeatureRanker, "init_models", init_models)
-
-    ranker = FeatureRanker(
-        task="reg",
-        group="linear",
-        prep_file=str(prep_path),
-        prep_class="Prep",
-    )
-
-    assert ranker.is_fitted_
-    assert ranker.feature_names_ == ["x"]
 
 
-def test_legacy_rank_features_unavailable_after_normal_fit(monkeypatch):
-    ranker = fitted_ranker(monkeypatch)
-
-    with pytest.raises(RuntimeError, match="evaluation data"):
-        ranker.rankFeatures()
 
 
 def test_missing_optional_estimators_skip_only_affected_models(monkeypatch):

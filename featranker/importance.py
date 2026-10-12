@@ -5,7 +5,6 @@ Feature importance ranking via permutation importance across multiple ML models.
 import argparse
 import csv
 import importlib
-import importlib.util
 import json
 import sys
 import warnings
@@ -258,8 +257,8 @@ def _build_consensus(model_reports: Dict[str, Any]) -> List[Dict[str, Any]]:
         warnings.warn(
             "No model beat the dummy baseline, so the consensus is empty.",
             UserWarning,
-            # caller -> rank_features -> _rank_features -> _build_consensus
-            stacklevel=4,
+            # caller -> rank_features -> _build_consensus
+            stacklevel=3,
         )
     ranks_by_group: Dict[str, List[int]] = {}
     for model_report in voters:
@@ -287,44 +286,11 @@ def _build_consensus(model_reports: Dict[str, Any]) -> List[Dict[str, Any]]:
     )
 
 
-def _load_prep_data(
-    prep_file: str,
-    prep_class: str,
-    kwargs: Dict[str, Any],
-) -> tuple[np.ndarray, np.ndarray, List[str]]:
-    prep_path = Path(prep_file).resolve()
-    if not prep_path.is_file():
-        raise FileNotFoundError(f"[!] Prep file not found: {prep_path}")
-
-    spec = importlib.util.spec_from_file_location(prep_path.stem, str(prep_path))
-    if spec is None or spec.loader is None:
-        raise ImportError(f"[!] Could not load module from: {prep_path}")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[prep_path.stem] = module
-    spec.loader.exec_module(module)
-    prep_type = getattr(module, prep_class)
-    features = prep_type(**kwargs)._calc_features()
-    if not isinstance(features, dict) or not features:
-        raise ValueError("[!] Prep class must return a non-empty feature dict.")
-    if "label" not in features:
-        raise ValueError("[!] Prep feature dict must include 'label'.")
-
-    names = [name for name in features if name != "label"]
-    if not names:
-        raise ValueError("[!] Prep feature dict has no feature columns.")
-    X = np.column_stack([features[name] for name in names])
-    y = np.asarray(features["label"])
-    return X, y, names
-
-
 class FeatureRanker:
     def __init__(
         self,
         task: Literal["clf", "reg"],
         group: Literal["linear", "tree", "all"] = "all",
-        prep_file: Optional[str] = None,
-        prep_class: Any = "prepFeature",
-        **kwargs,
     ) -> None:
         """
         Initialize configured models without loading or fitting data.
@@ -332,8 +298,6 @@ class FeatureRanker:
         Args:
             task: Task type — "clf" for classification or "reg" for regression.
             group: Model family — "linear", "tree", or "all" for both.
-            prep_file: Deprecated preparation-file compatibility path.
-            prep_class: Deprecated preparation class name.
         """
         if task not in {"clf", "reg"}:
             raise ValueError("[!] task must be 'clf' or 'reg'.")
@@ -341,9 +305,6 @@ class FeatureRanker:
             raise ValueError("[!] group must be 'linear', 'tree', or 'all'.")
         self.task = task
         self.group = group
-        self.prep_file = prep_file
-        self.prep_class = prep_class
-        self.prep_kwargs = kwargs
         self.label_encoder = None
         self.initialization_failures_: List[Dict[str, str]] = []
         self.models = self.init_models()
@@ -351,20 +312,6 @@ class FeatureRanker:
         self.baseline_model_: Any = None
         self.fit_failures_: List[Dict[str, str]] = []
         self.is_fitted_ = False
-        if prep_file is not None:
-            self._fit_legacy_prep(prep_file, str(prep_class), kwargs)
-
-    def _fit_legacy_prep(
-        self,
-        prep_file: str,
-        prep_class: str,
-        kwargs: Dict[str, Any],
-    ) -> "FeatureRanker":
-        X, y, feature_names = _load_prep_data(prep_file, prep_class, kwargs)
-        self.fit(X, y, feature_names)
-        self._legacy_X = X.copy()
-        self._legacy_y = y.copy()
-        return self
 
     def fit(
         self,
@@ -374,9 +321,6 @@ class FeatureRanker:
     ) -> "FeatureRanker":
         """Fit configured models using training data only."""
         self.is_fitted_ = False
-        for attribute in ("_legacy_X", "_legacy_y"):
-            if hasattr(self, attribute):
-                delattr(self, attribute)
         X_values, names = _validate_X(X, feature_names=feature_names)
         y_values = _validate_y(y, len(X_values))
 
@@ -430,27 +374,6 @@ class FeatureRanker:
         random_state: Optional[int] = None,
     ) -> Dict[str, Any]:
         """Rank feature groups on explicitly supplied evaluation data."""
-        return self._rank_features(
-            X_eval,
-            y_eval,
-            scoring=scoring,
-            feature_groups=feature_groups,
-            n_repeats=n_repeats,
-            random_state=random_state,
-            evaluation_mode="held_out",
-        )
-
-    def _rank_features(
-        self,
-        X_eval: Any,
-        y_eval: Any,
-        *,
-        scoring: Any,
-        feature_groups: Optional[Dict[str, List[str]]] = None,
-        n_repeats: int = 10,
-        random_state: Optional[int] = None,
-        evaluation_mode: str,
-    ) -> Dict[str, Any]:
         if not self.is_fitted_:
             raise RuntimeError("[!] Call fit() before rank_features().")
         if not isinstance(n_repeats, int) or isinstance(n_repeats, bool) or n_repeats < 1:
@@ -542,7 +465,7 @@ class FeatureRanker:
             )
 
         return {
-            "evaluation_mode": evaluation_mode,
+            "evaluation_mode": "held_out",
             "scoring": scoring_name,
             "n_repeats": n_repeats,
             "random_state": random_state,
@@ -670,51 +593,8 @@ class FeatureRanker:
 
         return models
 
-    def run_ML(self) -> Dict[str, Any]:
-        """Deprecated alias that refits retained preparation-file data."""
-        if not hasattr(self, "_legacy_X") or not hasattr(self, "_legacy_y"):
-            raise RuntimeError(
-                "[!] run_ML() requires the legacy preparation-file workflow; "
-                "use fit(X_train, y_train, feature_names=...) instead."
-            )
-        warnings.warn(
-            "run_ML() is deprecated; use fit(X_train, y_train, feature_names=...).",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        X = self._legacy_X.copy()
-        y = self._legacy_y.copy()
-        self.fit(X, y, self.feature_names_)
-        self._legacy_X = X
-        self._legacy_y = y
-        return self.trained_models
 
-    def rankFeatures(self):
-        """Deprecated in-sample ranking for preparation-file users."""
-        if not hasattr(self, "_legacy_X") or not hasattr(self, "_legacy_y"):
-            raise RuntimeError(
-                "[!] rankFeatures() has no retained training data. Supply separate "
-                "evaluation data with rank_features(X_eval, y_eval, scoring=...)."
-            )
-        warnings.warn(
-            "rankFeatures() performs in-sample ranking and is deprecated. "
-            "Use rank_features(X_eval, y_eval, scoring=...) with held-out data.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        scoring = "accuracy" if self.task == "clf" else "r2"
-        return self._rank_features(
-            self._legacy_X,
-            self._legacy_y,
-            scoring=scoring,
-            n_repeats=10,
-            random_state=42,
-            evaluation_mode="in_sample",
-        )
-
-
-def main() -> int:
-    """CLI entry point — parse arguments, run the ranking, and output results."""
+def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
             "Fit feature-ranking models on explicit training data and rank "
@@ -724,44 +604,29 @@ def main() -> int:
     parser.add_argument(
         "--task",
         choices=["clf", "reg"],
+        required=True,
         help="Task type: 'clf' for classification, 'reg' for regression.",
-    )
-    parser.add_argument(
-        "--prep-class",
-        default=None,
-        help=(
-            "Deprecated: feature-preparation class to instantiate. "
-            "Loaded from the file specified by --prep-file (or the default "
-            "featureCalc.py when --prep-file is omitted)."
-        ),
-    )
-    parser.add_argument(
-        "--prep-file",
-        default=None,
-        help=(
-            "Deprecated: path to a Python file containing the prep class."
-        ),
     )
     parser.add_argument(
         "--train-data",
         type=Path,
-        default=None,
+        required=True,
         help="CSV containing training features and target.",
     )
     parser.add_argument(
         "--eval-data",
         type=Path,
-        default=None,
+        required=True,
         help="CSV containing held-out evaluation features and target.",
     )
     parser.add_argument(
         "--target",
-        default=None,
+        required=True,
         help="Name of the target column in both CSV files.",
     )
     parser.add_argument(
         "--scoring",
-        default=None,
+        required=True,
         help="Scikit-learn scorer name, such as neg_mean_absolute_error.",
     )
     parser.add_argument(
@@ -801,134 +666,86 @@ def main() -> int:
             "When omitted, results are printed to stdout."
         ),
     )
-    args = parser.parse_args()
+    return parser
 
-    modern_mode = any(
-        value is not None
-        for value in (
-            args.train_data,
-            args.eval_data,
-            args.target,
-            args.scoring,
-            args.feature_groups,
+
+def _load_feature_groups(path: Optional[Path]) -> Optional[Dict[str, List[str]]]:
+    if path is None:
+        return None
+    with path.open("r", encoding="utf-8") as group_file:
+        feature_groups = yaml.safe_load(group_file)
+    if not isinstance(feature_groups, dict):
+        raise ValueError("[!] Feature groups YAML must contain a mapping.")
+    return feature_groups
+
+
+def _load_cli_inputs(args: argparse.Namespace) -> Dict[str, Any]:
+    """Load the CSV files and validate options before any model is fit."""
+    X_train, y_train, feature_names = _load_csv(args.train_data, args.target)
+    X_eval, y_eval, eval_names = _load_csv(args.eval_data, args.target)
+    if eval_names != feature_names:
+        raise ValueError(
+            "[!] Evaluation feature names and order must match training data."
         )
+    if args.task == "reg":
+        y_train, y_eval = _float_target(y_train), _float_target(y_eval)
+    feature_groups = _load_feature_groups(args.feature_groups)
+    # Fail fast: rank_features repeats these checks, but only after
+    # every model has been fit.
+    get_scorer(args.scoring)
+    if args.n_repeats < 1:
+        raise ValueError("[!] n_repeats must be a positive integer.")
+    _resolve_feature_groups(feature_names, feature_groups)
+    return {
+        "train": (X_train, y_train, feature_names),
+        "eval": (X_eval, y_eval),
+        "feature_groups": feature_groups,
+    }
+
+
+def _run_ranking(args: argparse.Namespace) -> Dict[str, Any]:
+    inputs = _load_cli_inputs(args)
+    ranker = FeatureRanker(task=args.task, group=args.group)
+    ranker.fit(*inputs["train"])
+    return ranker.rank_features(
+        *inputs["eval"],
+        scoring=args.scoring,
+        feature_groups=inputs["feature_groups"],
+        n_repeats=args.n_repeats,
+        random_state=args.random_state,
     )
-    if args.task is None:
-        if modern_mode:
-            parser.error("--task is required.")
-        # Show help when invoked with no arguments.
+
+
+def _write_report(results: Dict[str, Any], output_path: Optional[Path]) -> None:
+    output = json.dumps(results, indent=2)
+    if output_path is None:
+        print(output)
+        return
+    # Guarantee a .json extension when writing to disk.
+    if output_path.suffix.lower() != ".json":
+        output_path = output_path.with_suffix(".json")
+    output_path.write_text(output, encoding="utf-8")
+
+
+def main() -> int:
+    """CLI entry point — parse arguments, run the ranking, and output results."""
+    parser = _build_parser()
+    if len(sys.argv) == 1:
         parser.print_help()
         return 0
-
-    if modern_mode:
-        if args.prep_file is not None or args.prep_class is not None:
-            parser.error("Modern data options cannot be combined with prep options.")
-        missing = [
-            flag
-            for flag, value in (
-                ("--train-data", args.train_data),
-                ("--eval-data", args.eval_data),
-                ("--target", args.target),
-                ("--scoring", args.scoring),
-            )
-            if value is None
-        ]
-        if missing:
-            parser.error(
-                "Modern CLI mode requires " + ", ".join(missing) + "."
-            )
-        try:
-            X_train, y_train, feature_names = _load_csv(
-                args.train_data, args.target
-            )
-            X_eval, y_eval, eval_names = _load_csv(args.eval_data, args.target)
-            if eval_names != feature_names:
-                raise ValueError(
-                    "[!] Evaluation feature names and order must match training data."
-                )
-            if args.task == "reg":
-                y_train, y_eval = _float_target(y_train), _float_target(y_eval)
-            feature_groups = None
-            if args.feature_groups is not None:
-                with args.feature_groups.open("r", encoding="utf-8") as group_file:
-                    feature_groups = yaml.safe_load(group_file)
-                if not isinstance(feature_groups, dict):
-                    raise ValueError("[!] Feature groups YAML must contain a mapping.")
-            # Fail fast: rank_features repeats these checks, but only after
-            # every model has been fit.
-            get_scorer(args.scoring)
-            if args.n_repeats < 1:
-                raise ValueError("[!] n_repeats must be a positive integer.")
-            _resolve_feature_groups(feature_names, feature_groups)
-
-            ranker = FeatureRanker(task=args.task, group=args.group)
-            ranker.fit(X_train, y_train, feature_names)
-            results = ranker.rank_features(
-                X_eval,
-                y_eval,
-                scoring=args.scoring,
-                feature_groups=feature_groups,
-                n_repeats=args.n_repeats,
-                random_state=args.random_state,
-            )
-        except (
-            OSError,
-            ValueError,
-            TypeError,
-            RuntimeError,
-            yaml.YAMLError,
-        ) as error:
-            parser.error(str(error))
-    else:
-        ranker = build_ranker(
-            task=args.task,
-            group=args.group,
-            prep_class=args.prep_class or "prepFeature",
-            prep_file=args.prep_file,
-        )
-        results = ranker.rankFeatures()
-
-    output = json.dumps(results, indent=2)
-
-    if args.output:
-        # Guarantee a .json extension when writing to disk.
-        output_path = args.output
-        if output_path.suffix.lower() != ".json":
-            output_path = output_path.with_suffix(".json")
-        output_path.write_text(output, encoding="utf-8")
-    else:
-        print(output)
-
+    args = parser.parse_args()
+    try:
+        results = _run_ranking(args)
+    except (
+        OSError,
+        ValueError,
+        TypeError,
+        RuntimeError,
+        yaml.YAMLError,
+    ) as error:
+        parser.error(str(error))
+    _write_report(results, args.output)
     return 0
-
-
-def build_ranker(
-    task: Literal["clf", "reg"],
-    group: Literal["linear", "tree", "all"] = "all",
-    prep_file: Optional[str] = None,
-    prep_class: Any = "prepFeature",
-    **kwargs,
-) -> "FeatureRanker":
-    """
-    Convenience factory that creates and returns a fully initialized
-    FeatureRanker (features loaded, models trained, ready to rank).
-
-    Args:
-        task: Task type — "clf" or "reg".
-        group: Model family — "linear", "tree", or "all".
-        prep_file: Path to the Python file containing the prep class.
-        prep_class: Name of the prep class inside that file.
-
-    Returns:
-        A ready-to-use FeatureRanker instance.
-    """
-    return FeatureRanker(
-        task=task,
-        group=group,
-        prep_file=prep_file or "featureCalc.py",
-        prep_class=prep_class,
-        **kwargs,
-    )
 
 
 if __name__ == "__main__":
