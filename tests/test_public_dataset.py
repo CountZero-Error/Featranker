@@ -1,3 +1,5 @@
+import json
+
 import numpy as np
 from sklearn.datasets import load_diabetes, load_iris
 from sklearn.linear_model import Ridge
@@ -102,3 +104,17 @@ def test_diabetes_regression_with_shipped_registry():
 
     _assert_shipped_registry_report(report, dataset.data.shape[1])
     assert {"ridge_regression", "random_forest_regressor"} <= set(report["models"])
+
+
+def test_shipped_registry_reports_are_strict_json():
+    dataset = load_diabetes()
+    ranker = FeatureRanker(task="reg", group="all")
+    ranker.fit(dataset.data[:200], dataset.target[:200], list(dataset.feature_names))
+
+    report = ranker.rank_features(
+        dataset.data[200:], dataset.target[200:], scoring="r2", n_repeats=2,
+        random_state=0,
+    )
+
+    json.dumps(report, allow_nan=False)
+    assert all(m["params"] for m in report["models"].values())

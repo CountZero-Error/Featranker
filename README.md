@@ -100,6 +100,29 @@ print(report["consensus"])
 
 NumPy training matrices require `feature_names`. pandas DataFrames retain their column names.
 
+### Your own models
+
+Pass `models` to rank with your own estimators instead of the built-in registry. Estimators are cloned at `fit()`, so yours are never modified, and a `Pipeline` keeps its preprocessing fit on training data only. `models` cannot be combined with `group`; names must be non-empty strings other than `dummy_baseline`.
+
+```python
+from sklearn.linear_model import Ridge
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import StandardScaler
+from sklearn.ensemble import RandomForestRegressor
+
+ranker = FeatureRanker(
+    task="reg",
+    models={
+        "scaled_ridge": make_pipeline(StandardScaler(), Ridge(alpha=2.0)),
+        "forest": RandomForestRegressor(n_estimators=200, random_state=0),
+    },
+)
+```
+
+### Parallel models
+
+`FeatureRanker(..., n_jobs=2)` runs the per-model work in `fit()` and `rank_features()` in parallel with joblib (`None` is sequential, `-1` uses all cores). Reports are identical to `n_jobs=None` for the same `random_state`, with models in the same order. Per-model failures are recorded exactly as in the sequential path. Custom scorers and estimators must be picklable for `n_jobs > 1`.
+
 ### CLI
 
 The CLI accepts separate numeric training and evaluation CSV files. No preparation Python script is required.
@@ -141,6 +164,7 @@ featranker \
   --feature-groups groups.yaml \
   --n-repeats 20 \
   --random-state 42 \
+  --n-jobs 2 \
   --output report.json
 ```
 
@@ -163,8 +187,8 @@ FeatRanker does not implement cross-validation or site-grouped splitting. Those 
 
 ## How it works
 
-1. **Initialize** configured models for `task="clf"` or `task="reg"`.
-2. **Fit** each model on data supplied to `fit()`.
+1. **Initialize** configured models for `task="clf"` or `task="reg"`. Built-in linear models are wrapped in `make_pipeline(StandardScaler(), estimator)`; tree models and your own `models` are used as given.
+2. **Fit** each model on data supplied to `fit()`. Scalers are fit on training data only.
 3. **Score** each successful model, and a `DummyClassifier`/`DummyRegressor` baseline, on held-out evaluation data.
 4. **Permute** each feature group repeatedly and measure score degradation.
 5. **Rank** groups within each model using mean permutation importance.
@@ -213,7 +237,7 @@ Features omitted from `feature_groups` become singleton groups. Empty groups, un
 | `scoring` | scikit-learn scorer name or callable `(estimator, X, y) -> float`. |
 | `feature_groups` | Optional mapping of group names to fitted feature names. |
 
-FeatRanker does not impute, encode, scale, split, transform targets, or select features.
+FeatRanker does not impute, encode, split, transform targets, or select features. The only scaling it performs is the internal `StandardScaler` (training data only) in front of built-in linear models.
 
 Non-finite baseline, permuted, or derived importance values fail that model's ranking. They never enter successful reports or consensus.
 
@@ -234,10 +258,17 @@ The report preserves raw model evidence and keeps aggregation rank-based.
         "segment": ["segment_red", "segment_blue", "segment_other"]
     },
     "baseline_score": -14.7,
+    "provenance": {
+        "featranker": "0.4.0",
+        "python": "3.13.1",
+        "numpy": "2.2.0",
+        "scikit-learn": "1.7.1",
+    },
     "models": {
         "random_forest_regressor": {
             "evaluation_score": -8.2,
             "in_consensus": True,
+            "params": {"n_estimators": 200, "max_depth": None},
             "importance": {
                 "segment": {
                     "values": [1.1, 1.3],
@@ -272,6 +303,7 @@ The report preserves raw model evidence and keeps aggregation rank-based.
 - Failures contain `model`, `stage`, `error_type`, and `message`.
 - Failed models receive no zero placeholder and do not enter consensus.
 - `baseline_score` is the evaluation score of a default `DummyClassifier()` or `DummyRegressor()` fit on the same training data and scored with the same scorer. A model has `in_consensus: True` only if its `evaluation_score` is strictly greater than `baseline_score` (scikit-learn scorers are higher-is-better). Models at or below the baseline stay in `models` but do not vote in `consensus`.
+- `provenance` records the installed `featranker` version (`None` if the package is not installed), Python, NumPy and scikit-learn versions. Each model's `params` is its fitted estimator's `get_params(deep=True)` limited to strings, integers, booleans, `None` and finite floats, so nested estimator objects are omitted while pipeline entries such as `ridge__alpha` remain. Reports are valid strict JSON.
 - If no model beats the baseline, `consensus` is an empty list and a `UserWarning` is emitted; nothing is raised.
 - If the baseline cannot be fit or scored, `baseline_score` is `None`, every model has `in_consensus: True`, and `failures` gains an entry for model `dummy_baseline`.
 - `fit()` raises if no model fits; `rank_features()` raises if every model fails ranking.
@@ -281,7 +313,7 @@ The report preserves raw model evidence and keeps aggregation rank-based.
 
 ## Available models
 
-Model entries come directly from [`importance_config.yaml`](featranker/importance_config.yaml). Names in the **Key** column are used in reports and structured failures.
+Model entries come directly from [`importance_config.yaml`](featranker/importance_config.yaml). Names in the **Key** column are used in reports and structured failures. Built-in linear models are standardized internally (`StandardScaler` fit on training data only, inside a pipeline); tree models are not.
 
 <details>
 <summary><strong>Classification models — 23 configurations</strong></summary>
@@ -374,7 +406,7 @@ FeatRanker is a general-purpose feature-ranking package. Results depend on the e
 FeatRanker intentionally does not provide:
 
 - nested cross-validation or site-grouped splitting;
-- imputation, encoding, scaling, or target transformation;
+- imputation, encoding, or target transformation (the caller owns preprocessing; the one exception is that built-in linear models standardize internally using training data only);
 - automatic feature selection;
 - SHAP or model-specific attribution methods;
 - domain-specific modeling logic or a user interface.

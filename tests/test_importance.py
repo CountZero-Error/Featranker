@@ -1,14 +1,22 @@
+import importlib.metadata
 import json
+import platform
 from pathlib import Path
 import sys
 from types import SimpleNamespace
 
 import numpy as np
 import pytest
+import sklearn
 from sklearn.base import BaseEstimator, RegressorMixin
 from sklearn.dummy import DummyClassifier, DummyRegressor
-from sklearn.linear_model import LinearRegression
+from sklearn.exceptions import NotFittedError
+from sklearn.linear_model import Lasso, LinearRegression, Ridge
 from sklearn.metrics import get_scorer
+from sklearn.tree import DecisionTreeRegressor
+from sklearn.pipeline import Pipeline, make_pipeline
+from sklearn.preprocessing import StandardScaler
+from sklearn.utils.validation import check_is_fitted
 
 import featranker
 from featranker import FeatureRanker
@@ -624,8 +632,8 @@ def test_modern_cli_routes_train_and_eval_data(monkeypatch, tmp_path, capsys):
     calls = {}
 
     class RecordingRanker:
-        def __init__(self, task, group):
-            calls["constructor"] = (task, group)
+        def __init__(self, task, group, n_jobs):
+            calls["constructor"] = (task, group, n_jobs)
 
         def fit(self, X, y, feature_names):
             calls["fit"] = (X.copy(), y.copy(), list(feature_names))
@@ -659,12 +667,14 @@ def test_modern_cli_routes_train_and_eval_data(monkeypatch, tmp_path, capsys):
             "20",
             "--random-state",
             "42",
+            "--n-jobs",
+            "2",
         ],
     )
 
     assert importance_module.main() == 0
 
-    assert calls["constructor"] == ("reg", "tree")
+    assert calls["constructor"] == ("reg", "tree", 2)
     assert np.array_equal(calls["fit"][0], [[1, 2], [4, 5], [7, 8]])
     assert np.array_equal(calls["fit"][1], [3, 6, 9])
     assert calls["fit"][2] == ["a", "b"]
@@ -809,7 +819,7 @@ def test_regression_keeps_object_numeric_target_values(monkeypatch):
     ranker.fit(X_TRAIN, np.array([10, 20, 100, 200], dtype=object), ["a", "b", "c"])
 
     assert ranker.label_encoder is None
-    assert model.seen_y_.tolist() == [10.0, 20.0, 100.0, 200.0]
+    assert ranker.trained_models["ok"].seen_y_.tolist() == [10.0, 20.0, 100.0, 200.0]
 
 
 def test_regression_rejects_non_numeric_target(monkeypatch):
@@ -843,7 +853,7 @@ def test_classification_encodes_numeric_labels_from_zero(monkeypatch):
 
     ranker.fit(X_TRAIN, np.array([1, 2, 3, 3]), ["a", "b", "c"])
 
-    assert model.seen_y_.tolist() == [0, 1, 2, 2]
+    assert ranker.trained_models["ok"].seen_y_.tolist() == [0, 1, 2, 2]
 
 
 def test_failed_refit_leaves_ranker_unfitted(monkeypatch):
@@ -860,7 +870,7 @@ def test_modern_cli_accepts_eval_class_subset(monkeypatch, tmp_path, capsys):
     monkeypatch.setattr(
         importance_module,
         "FeatureRanker",
-        lambda task, group: clf_ranker_with_models(
+        lambda task, group, n_jobs: clf_ranker_with_models(
             monkeypatch, {"ok": RecordingClassifier()}
         ),
     )
@@ -917,7 +927,7 @@ def _modern_argv(tmp_path, *extra, train="a,target\n1,0\n2,1\n", eval_="a,target
 
 
 class NoFitRanker:
-    def __init__(self, task, group):
+    def __init__(self, task, group, n_jobs):
         pass
 
     def fit(self, X, y, feature_names):
@@ -1150,7 +1160,206 @@ def test_pre_1_8_sklearn_gets_penalty_from_l1_ratio(monkeypatch):
 
     models = FeatureRanker(task="clf", group="linear").models["clf"]["linear"]
 
-    assert models["logistic_regression_l1"].penalty == "l1"
-    assert models["logistic_regression_l2"].penalty == "l2"
-    assert models["logistic_regression_elasticnet"].penalty == "elasticnet"
-    assert models["logistic_regression_elasticnet"].l1_ratio == 0.5
+    def inner(name):  # the estimator wrapped by make_pipeline(StandardScaler(), ...)
+        return models[name].steps[-1][1]
+
+    assert inner("logistic_regression_l1").penalty == "l1"
+    assert inner("logistic_regression_l2").penalty == "l2"
+    assert inner("logistic_regression_elasticnet").penalty == "elasticnet"
+    assert inner("logistic_regression_elasticnet").l1_ratio == 0.5
+
+
+def test_user_models_replace_registry_and_are_not_mutated(monkeypatch):
+    def fail_init(self):
+        raise AssertionError("registry must not load when models= is given")
+
+    monkeypatch.setattr(FeatureRanker, "init_models", fail_init)
+    ridge = Ridge()
+    pipeline = make_pipeline(StandardScaler(), Ridge())
+    ranker = FeatureRanker(task="reg", models={"ridge": ridge, "pipe": pipeline})
+
+    ranker.fit(X_TRAIN, Y_TRAIN, ["a", "b", "c"])
+    report = ranker.rank_features(
+        X_EVAL, Y_EVAL, scoring="r2", n_repeats=2, random_state=0
+    )
+
+    assert set(report["models"]) == {"ridge", "pipe"}
+    assert ranker.trained_models["ridge"] is not ridge
+    for untouched in (ridge, pipeline):
+        with pytest.raises(NotFittedError):
+            check_is_fitted(untouched)
+
+
+@pytest.mark.parametrize(
+    ("models", "error", "message"),
+    [
+        ({}, ValueError, "non-empty"),
+        ([Ridge()], TypeError, "dict"),
+        ({"": Ridge()}, ValueError, "non-empty"),
+        ({1: Ridge()}, ValueError, "non-empty"),
+        ({"bad": object()}, TypeError, "fit"),
+        ({"dummy_baseline": Ridge()}, ValueError, "reserved"),
+    ],
+)
+def test_user_models_are_validated(models, error, message):
+    with pytest.raises(error, match=message):
+        FeatureRanker(task="reg", models=models)
+
+
+def test_user_models_reject_explicit_group():
+    with pytest.raises(ValueError, match="group"):
+        FeatureRanker(task="reg", group="linear", models={"ridge": Ridge()})
+
+
+@pytest.mark.parametrize("task", ["clf", "reg"])
+def test_builtin_linear_models_are_standardized_and_tree_models_are_not(task):
+    registry = FeatureRanker(task=task).models[task]
+
+    assert registry["linear"]
+    for model in registry["linear"].values():
+        assert isinstance(model, Pipeline)
+        assert isinstance(model.steps[0][1], StandardScaler)
+    for model in registry["tree"].values():
+        assert not isinstance(model, Pipeline)
+
+
+def _score_fails_for_trees(model, X, y):
+    if isinstance(model, DecisionTreeRegressor):
+        raise ValueError("tree scoring exploded")
+    return float(model.score(X, y))
+
+
+def _real_models():
+    return {
+        "ridge": Ridge(),
+        "lasso": Lasso(alpha=0.5),
+        "tree": DecisionTreeRegressor(max_depth=3, random_state=0),
+    }
+
+
+def _diabetes_split():
+    from sklearn.datasets import load_diabetes
+
+    data = load_diabetes()
+    return (
+        data.data[:80],
+        data.target[:80],
+        data.data[80:140],
+        data.target[80:140],
+        list(data.feature_names),
+    )
+
+
+def test_n_jobs_report_matches_sequential_report():
+    X_train, y_train, X_eval, y_eval, names = _diabetes_split()
+    reports = []
+    for n_jobs in (None, 2):
+        ranker = FeatureRanker(task="reg", models=_real_models(), n_jobs=n_jobs)
+        ranker.fit(X_train, y_train, names)
+        reports.append(
+            ranker.rank_features(
+                X_eval, y_eval, scoring="r2", n_repeats=3, random_state=0
+            )
+        )
+
+    assert reports[0] == reports[1]
+    assert list(reports[1]["models"]) == ["ridge", "lasso", "tree"]
+
+
+def test_n_jobs_keeps_per_model_failure_semantics():
+    X_train, y_train, X_eval, y_eval, names = _diabetes_split()
+    models = {"ok": Ridge(), "bad": Ridge(alpha=-1.0), "also_ok": Lasso(alpha=0.5)}
+    ranker = FeatureRanker(task="reg", models=models, n_jobs=2)
+
+    ranker.fit(X_train, y_train, names)
+
+    assert list(ranker.trained_models) == ["ok", "also_ok"]
+    assert [(f["model"], f["stage"]) for f in ranker.fit_failures_] == [
+        ("bad", "fit")
+    ]
+
+
+def test_n_jobs_keeps_per_model_ranking_failure_semantics():
+    X_train, y_train, X_eval, y_eval, names = _diabetes_split()
+    ranker = FeatureRanker(
+        task="reg", models={"ok": Ridge(), "tree": DecisionTreeRegressor()}, n_jobs=2
+    )
+    ranker.fit(X_train, y_train, names)
+
+    report = ranker.rank_features(
+        X_eval, y_eval, scoring=_score_fails_for_trees, n_repeats=2, random_state=0
+    )
+
+    assert list(report["models"]) == ["ok"]
+    assert [(f["model"], f["stage"]) for f in report["failures"]] == [
+        ("tree", "ranking")
+    ]
+
+
+class ParamsEstimator(BaseEstimator):
+    def __init__(
+        self, a=1, b=float("nan"), c=float("inf"), d="x", e=None, f=True,
+        g=(1, 2), inner=None,
+    ):
+        self.a, self.b, self.c, self.d = a, b, c, d
+        self.e, self.f, self.g, self.inner = e, f, g, inner
+
+
+def test_json_params_keeps_only_finite_scalars():
+    params = importance_module._json_params(ParamsEstimator(inner=Ridge(alpha=2.0)))
+
+    assert params["a"] == 1
+    assert params["d"] == "x"
+    assert params["e"] is None
+    assert params["f"] is True
+    assert params["inner__alpha"] == 2.0
+    assert not {"b", "c", "g", "inner"} & set(params)
+    json.dumps(params, allow_nan=False)
+
+
+def test_report_has_provenance_and_model_params(monkeypatch):
+    ranker = fitted_ranker(
+        monkeypatch, models={"pipe": make_pipeline(StandardScaler(), Ridge(alpha=3.0))}
+    )
+
+    report = ranker.rank_features(
+        X_EVAL, Y_EVAL, scoring="r2", n_repeats=2, random_state=0
+    )
+
+    provenance = report["provenance"]
+    assert set(provenance) == {"featranker", "python", "numpy", "scikit-learn"}
+    assert provenance["python"] == platform.python_version()
+    assert provenance["numpy"] == np.__version__
+    assert provenance["scikit-learn"] == sklearn.__version__
+    assert report["models"]["pipe"]["params"]["ridge__alpha"] == 3.0
+    json.dumps(report, allow_nan=False)
+
+
+def test_provenance_featranker_is_none_when_not_installed(monkeypatch):
+    def missing(name):
+        raise importlib.metadata.PackageNotFoundError(name)
+
+    monkeypatch.setattr(importance_module.importlib.metadata, "version", missing)
+
+    assert importance_module._provenance()["featranker"] is None
+
+
+class PlainMeanModel:
+    """Duck-typed estimator without get_params (not clonable by sklearn)."""
+
+    def fit(self, X, y):
+        self.mean_ = float(np.mean(y))
+        return self
+
+    def predict(self, X):
+        return np.full(len(X), self.mean_)
+
+
+def test_user_models_without_get_params_are_copied_not_rejected():
+    plain = PlainMeanModel()
+    ranker = FeatureRanker(task="reg", models={"plain": plain})
+
+    ranker.fit(X_TRAIN, Y_TRAIN, ["a", "b", "c"])
+
+    assert ranker.fit_failures_ == []
+    assert not hasattr(plain, "mean_")

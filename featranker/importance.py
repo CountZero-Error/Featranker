@@ -5,18 +5,24 @@ Feature importance ranking via permutation importance across multiple ML models.
 import argparse
 import csv
 import importlib
+import importlib.metadata
 import json
+import math
+import platform
 import sys
 import warnings
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Callable, Dict, List, Literal, Optional
 
 import numpy as np
 import sklearn
 import yaml
+from joblib import Parallel, delayed
+from sklearn.base import clone
 from sklearn.dummy import DummyClassifier, DummyRegressor
 from sklearn.metrics import get_scorer
-from sklearn.preprocessing import LabelEncoder
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.utils.fixes import parse_version
 from tqdm import tqdm
 
@@ -50,6 +56,21 @@ def _model_params(class_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
     if params["penalty"] == "elasticnet":
         params["l1_ratio"] = ratio
     return params
+
+
+def _validate_models(models: Any) -> Dict[str, Any]:
+    if not isinstance(models, dict):
+        raise TypeError("[!] models must be a dict of name -> estimator.")
+    if not models:
+        raise ValueError("[!] models must be a non-empty dict.")
+    for name, estimator in models.items():
+        if not isinstance(name, str) or not name:
+            raise ValueError("[!] Model names must be non-empty strings.")
+        if name == BASELINE_NAME:
+            raise ValueError(f"[!] Model name '{BASELINE_NAME}' is reserved.")
+        if not callable(getattr(estimator, "fit", None)):
+            raise TypeError(f"[!] Model '{name}' must have a callable fit().")
+    return dict(models)
 
 
 def _load_csv(
@@ -179,6 +200,31 @@ def _failure(model: str, stage: str, error: Exception) -> Dict[str, str]:
     }
 
 
+def _json_params(model: Any) -> Dict[str, Any]:
+    """Estimator params restricted to JSON-safe scalars (finite if float)."""
+    params = model.get_params(deep=True) if hasattr(model, "get_params") else {}
+    return {
+        key: value
+        for key, value in params.items()
+        if value is None
+        or isinstance(value, (str, int, bool))
+        or (isinstance(value, float) and math.isfinite(value))
+    }
+
+
+def _provenance() -> Dict[str, Optional[str]]:
+    try:
+        featranker_version = importlib.metadata.version("featranker")
+    except importlib.metadata.PackageNotFoundError:
+        featranker_version = None
+    return {
+        "featranker": featranker_version,
+        "python": platform.python_version(),
+        "numpy": np.__version__,
+        "scikit-learn": sklearn.__version__,
+    }
+
+
 def _finite_float(value: Any, label: str) -> float:
     result = float(value)
     if not np.isfinite(result):
@@ -286,11 +332,99 @@ def _build_consensus(model_reports: Dict[str, Any]) -> List[Dict[str, Any]]:
     )
 
 
+def _run_models(
+    worker: Callable[..., tuple], jobs: List[tuple], n_jobs: Optional[int], desc: str
+) -> List[tuple]:
+    """Run one worker per model, in order; sequentially unless n_jobs > 1 or -1."""
+    if n_jobs is None or n_jobs == 1:
+        return [worker(*job) for job in tqdm(jobs, desc=desc)]
+    return Parallel(n_jobs=n_jobs)(delayed(worker)(*job) for job in jobs)
+
+
+def _fit_model(
+    name: str, model: Any, X_values: np.ndarray, y_values: np.ndarray
+) -> tuple[str, Any, Optional[Dict[str, str]]]:
+    try:
+        return name, clone(model, safe=False).fit(X_values, y_values), None
+    except Exception as error:
+        return name, None, _failure(name, "fit", error)
+
+
+def _permutation_importances(
+    model: Any,
+    scorer: Any,
+    X_values: np.ndarray,
+    y_values: np.ndarray,
+    groups: Dict[str, List[int]],
+    n_repeats: int,
+    random_state: Optional[int],
+    baseline: float,
+) -> Dict[str, Dict[str, Any]]:
+    rng = np.random.default_rng(random_state)
+    # One scratch copy per model; only the group's columns are
+    # rewritten per repeat and restored after the group.
+    X_permuted = X_values.copy()
+    importances: Dict[str, Dict[str, Any]] = {}
+    for group_name, column_indices in groups.items():
+        values: List[float] = []
+        for _ in range(n_repeats):
+            row_order = rng.permutation(len(X_values))
+            X_permuted[:, column_indices] = X_values[np.ix_(row_order, column_indices)]
+            permuted_score = _finite_float(
+                scorer(model, X_permuted, y_values), "permuted score"
+            )
+            values.append(
+                _finite_float(baseline - permuted_score, "permutation importance")
+            )
+        X_permuted[:, column_indices] = X_values[:, column_indices]
+        importances[group_name] = {
+            "values": values,
+            "mean": _finite_float(np.mean(values), "importance mean"),
+            "std": _finite_float(np.std(values), "importance standard deviation"),
+        }
+    ranks = _assign_ranks(
+        {name: importance["mean"] for name, importance in importances.items()}
+    )
+    for group_name, rank in ranks.items():
+        importances[group_name]["rank"] = rank
+    return importances
+
+
+def _rank_model(
+    name: str,
+    model: Any,
+    scorer: Any,
+    X_values: np.ndarray,
+    y_values: np.ndarray,
+    groups: Dict[str, List[int]],
+    n_repeats: int,
+    random_state: Optional[int],
+    baseline_score: Optional[float],
+) -> tuple[str, Optional[Dict[str, Any]], Optional[Dict[str, str]]]:
+    try:
+        baseline = _finite_float(scorer(model, X_values, y_values), "baseline score")
+        importances = _permutation_importances(
+            model, scorer, X_values, y_values, groups, n_repeats, random_state,
+            baseline,
+        )
+        report = {
+            "evaluation_score": baseline,
+            "in_consensus": baseline_score is None or baseline > baseline_score,
+            "params": _json_params(model),
+            "importance": importances,
+        }
+        return name, report, None
+    except Exception as error:
+        return name, None, _failure(name, "ranking", error)
+
+
 class FeatureRanker:
     def __init__(
         self,
         task: Literal["clf", "reg"],
         group: Literal["linear", "tree", "all"] = "all",
+        models: Optional[Dict[str, Any]] = None,
+        n_jobs: Optional[int] = None,
     ) -> None:
         """
         Initialize configured models without loading or fitting data.
@@ -298,16 +432,24 @@ class FeatureRanker:
         Args:
             task: Task type — "clf" for classification or "reg" for regression.
             group: Model family — "linear", "tree", or "all" for both.
+            models: Optional name -> scikit-learn estimator mapping that
+                replaces the built-in registry. Estimators are cloned at fit().
+            n_jobs: Parallel workers over models in fit() and rank_features();
+                None means sequential, -1 means all cores.
         """
         if task not in {"clf", "reg"}:
             raise ValueError("[!] task must be 'clf' or 'reg'.")
         if group not in {"linear", "tree", "all"}:
             raise ValueError("[!] group must be 'linear', 'tree', or 'all'.")
+        if models is not None and group != "all":
+            raise ValueError("[!] group selects built-in models; omit it with models.")
         self.task = task
         self.group = group
+        self.n_jobs = n_jobs
         self.label_encoder = None
         self.initialization_failures_: List[Dict[str, str]] = []
-        self.models = self.init_models()
+        self.user_models = None if models is None else _validate_models(models)
+        self.models = {} if models is not None else self.init_models()
         self.trained_models: Dict[str, Any] = {}
         self.baseline_model_: Any = None
         self.fit_failures_: List[Dict[str, str]] = []
@@ -332,18 +474,24 @@ class FeatureRanker:
         else:
             y_values = _float_target(y_values)
 
-        groups = ["linear", "tree"] if self.group == "all" else [self.group]
         candidates: Dict[str, Any] = {}
-        for group in groups:
-            candidates.update(self.models.get(self.task, {}).get(group, {}))
+        if self.user_models is not None:
+            candidates.update(self.user_models)
+        else:
+            groups = ["linear", "tree"] if self.group == "all" else [self.group]
+            for group in groups:
+                candidates.update(self.models.get(self.task, {}).get(group, {}))
 
         self.trained_models = {}
         self.fit_failures_ = []
-        for model_name, model in tqdm(candidates.items(), desc="[*] Training models"):
-            try:
-                self.trained_models[model_name] = model.fit(X_values, y_values)
-            except Exception as error:
-                self.fit_failures_.append(_failure(model_name, "fit", error))
+        jobs = [(name, model, X_values, y_values) for name, model in candidates.items()]
+        for name, fitted, failure in _run_models(
+            _fit_model, jobs, self.n_jobs, "[*] Training models"
+        ):
+            if failure is None:
+                self.trained_models[name] = fitted
+            else:
+                self.fit_failures_.append(failure)
 
         if not self.trained_models:
             details = json.dumps(self.initialization_failures_ + self.fit_failures_)
@@ -406,57 +554,18 @@ class FeatureRanker:
         baseline_score = self._score_baseline(
             scorer, X_values, y_values, ranking_failures
         )
-        for model_name, model in self.trained_models.items():
-            try:
-                baseline = _finite_float(
-                    scorer(model, X_values, y_values), "baseline score"
-                )
-                rng = np.random.default_rng(random_state)
-                # One scratch copy per model; only the group's columns are
-                # rewritten per repeat and restored after the group.
-                X_permuted = X_values.copy()
-                importances: Dict[str, Dict[str, Any]] = {}
-                for group_name, column_indices in groups.items():
-                    values: List[float] = []
-                    for _ in range(n_repeats):
-                        row_order = rng.permutation(len(X_values))
-                        X_permuted[:, column_indices] = X_values[
-                            np.ix_(row_order, column_indices)
-                        ]
-                        permuted_score = _finite_float(
-                            scorer(model, X_permuted, y_values), "permuted score"
-                        )
-                        values.append(
-                            _finite_float(
-                                baseline - permuted_score,
-                                "permutation importance",
-                            )
-                        )
-                    X_permuted[:, column_indices] = X_values[:, column_indices]
-                    importances[group_name] = {
-                        "values": values,
-                        "mean": _finite_float(
-                            np.mean(values), "importance mean"
-                        ),
-                        "std": _finite_float(
-                            np.std(values), "importance standard deviation"
-                        ),
-                    }
-                ranks = _assign_ranks(
-                    {
-                        group_name: importance["mean"]
-                        for group_name, importance in importances.items()
-                    }
-                )
-                for group_name, rank in ranks.items():
-                    importances[group_name]["rank"] = rank
-                model_reports[model_name] = {
-                    "evaluation_score": baseline,
-                    "in_consensus": baseline_score is None or baseline > baseline_score,
-                    "importance": importances,
-                }
-            except Exception as error:
-                ranking_failures.append(_failure(model_name, "ranking", error))
+        jobs = [
+            (name, model, scorer, X_values, y_values, groups, n_repeats,
+             random_state, baseline_score)
+            for name, model in self.trained_models.items()
+        ]
+        for name, model_report, failure in _run_models(
+            _rank_model, jobs, self.n_jobs, "[*] Ranking models"
+        ):
+            if failure is None:
+                model_reports[name] = model_report
+            else:
+                ranking_failures.append(failure)
 
         if not model_reports:
             details = json.dumps(ranking_failures)
@@ -471,6 +580,7 @@ class FeatureRanker:
             "random_state": random_state,
             "feature_groups": named_groups,
             "baseline_score": baseline_score,
+            "provenance": _provenance(),
             "models": model_reports,
             "consensus": _build_consensus(model_reports),
             "failures": self.initialization_failures_
@@ -565,8 +675,13 @@ class FeatureRanker:
                             raise ValueError(
                                 f"Params must be a dict, got {type(params).__name__}"
                             )
-                        group_models[name] = model_class(
-                            **_model_params(class_name, params)
+                        estimator = model_class(**_model_params(class_name, params))
+                        # Linear models are scale-sensitive; the scaler is fit
+                        # on training data only, inside the pipeline.
+                        group_models[name] = (
+                            make_pipeline(StandardScaler(), estimator)
+                            if group_name == "linear"
+                            else estimator
                         )
                     except Exception as error:
                         self.initialization_failures_.append(
@@ -648,6 +763,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Optional random seed for reproducible permutations.",
     )
     parser.add_argument(
+        "--n-jobs",
+        type=int,
+        default=None,
+        help="Parallel workers over models (default: sequential; -1 uses all cores).",
+    )
+    parser.add_argument(
         "--group",
         choices=["linear", "tree", "all"],
         default="all",
@@ -705,7 +826,7 @@ def _load_cli_inputs(args: argparse.Namespace) -> Dict[str, Any]:
 
 def _run_ranking(args: argparse.Namespace) -> Dict[str, Any]:
     inputs = _load_cli_inputs(args)
-    ranker = FeatureRanker(task=args.task, group=args.group)
+    ranker = FeatureRanker(task=args.task, group=args.group, n_jobs=args.n_jobs)
     ranker.fit(*inputs["train"])
     return ranker.rank_features(
         *inputs["eval"],
