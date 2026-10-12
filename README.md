@@ -381,6 +381,8 @@ Model entries come directly from [`importance_config.yaml`](featranker/importanc
 
 Missing or broken optional libraries skip only affected models. Each skipped model produces a warning and structured initialization failure.
 
+**Known issue (CatBoost):** CatBoost 1.2.8 estimators do not define `__sklearn_tags__`. On scikit-learn 1.7, every scorer call on a CatBoost model emits a `DeprecationWarning` saying this becomes an error in scikit-learn 1.8. If that happens, CatBoost models appear in `failures` and the remaining models still rank. Install `featranker[catboost]` with scikit-learn < 1.8 if you need the CatBoost models.
+
 Model definitions live in [`featranker/importance_config.yaml`](featranker/importance_config.yaml).
 
 ## Removed in 0.4.0
