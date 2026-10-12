@@ -6,6 +6,8 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 from sklearn.base import BaseEstimator, RegressorMixin
+from sklearn.dummy import DummyClassifier, DummyRegressor
+from sklearn.linear_model import LinearRegression
 from sklearn.metrics import get_scorer
 
 from featranker import FeatureRanker, build_ranker
@@ -45,6 +47,16 @@ class FixedScoreRegressor(MeanRegressor):
         return self.score_value
 
 
+class ConstantRegressor(MeanRegressor):
+    """Predicts the training mean plus an offset; offset 0 ties the dummy."""
+
+    def __init__(self, offset=0.0):
+        self.offset = offset
+
+    def predict(self, X):
+        return np.full(len(X), self.mean_ + self.offset)
+
+
 def ranker_with_models(monkeypatch, models):
     def init_models(self):
         return {
@@ -66,7 +78,7 @@ Y_EVAL = np.array([2.0, 3.0, 3.0])
 
 def fitted_ranker(monkeypatch, X_train=None, names=None, models=None):
     ranker = ranker_with_models(
-        monkeypatch, models if models is not None else {"ok": MeanRegressor()}
+        monkeypatch, models if models is not None else {"ok": LinearRegression()}
     )
     ranker.fit(
         X_TRAIN if X_train is None else X_train,
@@ -220,7 +232,39 @@ def test_group_columns_share_each_row_permutation(monkeypatch):
         random_state=2,
     )
 
-    assert len(observed) == 7
+    assert len(observed) == 8  # dummy baseline + model baseline + 2 groups x 3
+
+
+def test_permutation_only_changes_group_columns_and_spares_input(monkeypatch):
+    seen = []
+
+    def scorer(model, X, y):
+        if not isinstance(model, DummyRegressor):
+            seen.append(X.copy())
+        return 0.0
+
+    X = np.column_stack([np.arange(8.0), np.arange(8.0) * 2, np.arange(8.0) * 3])
+    X_before = X.copy()
+    ranker = fitted_ranker(monkeypatch, X_train=X, names=["a", "b", "c"])
+
+    ranker.rank_features(
+        X,
+        np.arange(8.0),
+        scoring=scorer,
+        feature_groups={"ab": ["a", "b"]},
+        n_repeats=3,
+        random_state=3,
+    )
+
+    assert np.array_equal(X, X_before)
+    assert np.array_equal(seen[0], X)  # unpermuted baseline call
+    ab_calls, c_calls = seen[1:4], seen[4:7]
+    for call in ab_calls:
+        assert np.array_equal(call[:, 2], X[:, 2])
+        assert not np.array_equal(call[:, :2], X[:, :2])
+    for call in c_calls:  # earlier group's columns restored
+        assert np.array_equal(call[:, :2], X[:, :2])
+        assert not np.array_equal(call[:, 2], X[:, 2])
 
 
 def test_ungrouped_features_become_singletons(monkeypatch):
@@ -293,12 +337,14 @@ def test_ties_share_minimum_rank():
 def test_consensus_uses_model_ranks_not_raw_importance():
     model_reports = {
         "large_scale": {
+            "in_consensus": True,
             "importance": {
                 "a": {"mean": 1000.0, "rank": 1},
                 "b": {"mean": 999.0, "rank": 2},
             }
         },
         "small_scale": {
+            "in_consensus": True,
             "importance": {
                 "a": {"mean": 0.0, "rank": 2},
                 "b": {"mean": 1.0, "rank": 1},
@@ -321,8 +367,84 @@ def test_consensus_uses_model_ranks_not_raw_importance():
     assert "mean_importance" not in consensus["a"]
 
 
+def baseline_report(monkeypatch, models, scoring="r2"):
+    ranker = fitted_ranker(monkeypatch, models=models)
+    return ranker.rank_features(
+        X_EVAL, Y_EVAL, scoring=scoring, n_repeats=2, random_state=1
+    )
+
+
+def test_models_beating_dummy_baseline_join_consensus(monkeypatch):
+    report = baseline_report(
+        monkeypatch, {"good": LinearRegression(), "bad": ConstantRegressor(100.0)}
+    )
+
+    dummy = DummyRegressor().fit(X_TRAIN, Y_TRAIN)
+    assert report["baseline_score"] == get_scorer("r2")(dummy, X_EVAL, Y_EVAL)
+    assert report["models"]["good"]["in_consensus"] is True
+    assert report["models"]["bad"]["in_consensus"] is False
+    assert set(report["models"]) == {"good", "bad"}
+    assert all(row["n_models"] == 1 for row in report["consensus"])
+    assert len(report["consensus"]) == 3
+
+
+def test_no_model_beating_baseline_warns_and_empties_consensus(monkeypatch):
+    with pytest.warns(UserWarning, match="dummy baseline"):
+        report = baseline_report(
+            monkeypatch,
+            {"tie": ConstantRegressor(0.0), "bad": ConstantRegressor(100.0)},
+        )
+
+    assert report["consensus"] == []
+    assert not any(m["in_consensus"] for m in report["models"].values())
+    assert set(report["models"]) == {"tie", "bad"}
+
+
+def test_baseline_fit_failure_disables_gating(monkeypatch):
+    class FailFitDummy(DummyRegressor):
+        def fit(self, X, y, sample_weight=None):
+            raise ValueError("dummy fit exploded")
+
+    monkeypatch.setattr(importance_module, "DummyRegressor", FailFitDummy)
+
+    report = baseline_report(monkeypatch, {"bad": ConstantRegressor(100.0)})
+
+    assert report["baseline_score"] is None
+    assert report["models"]["bad"]["in_consensus"] is True
+    assert len(report["consensus"]) == 3
+    failures = [f for f in report["failures"] if f["model"] == "dummy_baseline"]
+    assert len(failures) == 1
+    assert failures[0]["message"] == "dummy fit exploded"
+
+
+def test_baseline_score_failure_disables_gating(monkeypatch):
+    def scorer(model, X, y):
+        if isinstance(model, DummyRegressor):
+            raise ValueError("dummy score exploded")
+        return model.score(X, y)
+
+    report = baseline_report(
+        monkeypatch, {"bad": ConstantRegressor(100.0)}, scoring=scorer
+    )
+
+    assert report["baseline_score"] is None
+    assert report["models"]["bad"]["in_consensus"] is True
+    assert len(report["consensus"]) == 3
+    failures = [f for f in report["failures"] if f["model"] == "dummy_baseline"]
+    assert [f["stage"] for f in failures] == ["ranking"]
+
+
+def test_classification_baseline_is_fit_on_encoded_labels(monkeypatch):
+    ranker = clf_ranker_with_models(monkeypatch, {"ok": RecordingClassifier()})
+
+    ranker.fit(X_TRAIN, np.array(["x", "y", "z", "z"]), ["a", "b", "c"])
+
+    assert isinstance(ranker.baseline_model_, DummyClassifier)
+    assert ranker.baseline_model_.classes_.tolist() == [0, 1, 2]
+
+
 def test_model_report_contains_raw_importance_and_rank(monkeypatch):
-    ranker = fitted_ranker(monkeypatch)
+    ranker = fitted_ranker(monkeypatch, models={"ok": LinearRegression()})
 
     report = ranker.rank_features(
         X_EVAL, Y_EVAL, scoring="r2", n_repeats=3, random_state=42
@@ -350,7 +472,7 @@ def test_fixed_seed_is_reproducible(monkeypatch):
 def test_partial_ranking_failure_is_reported_and_excluded(monkeypatch):
     ranker = fitted_ranker(
         monkeypatch,
-        models={"ok": MeanRegressor(), "bad": FailingScoreRegressor()},
+        models={"ok": LinearRegression(), "bad": FailingScoreRegressor()},
     )
 
     report = ranker.rank_features(
@@ -388,7 +510,7 @@ def test_non_finite_baseline_is_reported_and_excluded(monkeypatch, non_finite):
     ranker = fitted_ranker(
         monkeypatch,
         models={
-            "ok": MeanRegressor(),
+            "ok": LinearRegression(),
             "bad": FixedScoreRegressor(non_finite),
         },
     )
@@ -428,7 +550,7 @@ def test_non_finite_permuted_score_causes_zero_success_error(
     def scorer(model, X, y):
         nonlocal calls
         calls += 1
-        return 0.0 if calls == 1 else non_finite
+        return 0.0 if calls <= 2 else non_finite  # dummy, then model baseline
 
     ranker = fitted_ranker(monkeypatch, models={"bad": MeanRegressor()})
 
@@ -459,13 +581,13 @@ def test_load_csv_returns_features_target_and_names(tmp_path):
     assert y.tolist() == ["low", "high"]
 
 
-def test_load_csv_parses_numeric_target(tmp_path):
+def test_load_csv_keeps_raw_target_strings(tmp_path):
     path = tmp_path / "train.csv"
     path.write_text("a,target\n1,2.5\n3,4.5\n", encoding="utf-8")
 
     _, y, _ = importance_module._load_csv(path, "target")
 
-    assert np.array_equal(y, [2.5, 4.5])
+    assert y.tolist() == ["2.5", "4.5"]
 
 
 @pytest.mark.parametrize(
@@ -636,6 +758,191 @@ def test_modern_cli_rejects_mismatched_feature_order(
         importance_module.main()
 
     assert "names and order" in capsys.readouterr().err
+
+
+class RecordingRegressor(MeanRegressor):
+    def fit(self, X, y):
+        self.seen_y_ = np.asarray(y)
+        return super().fit(X, y)
+
+
+def test_regression_keeps_object_numeric_target_values(monkeypatch):
+    model = RecordingRegressor()
+    ranker = ranker_with_models(monkeypatch, {"ok": model})
+
+    ranker.fit(X_TRAIN, np.array([10, 20, 100, 200], dtype=object), ["a", "b", "c"])
+
+    assert ranker.label_encoder is None
+    assert model.seen_y_.tolist() == [10.0, 20.0, 100.0, 200.0]
+
+
+def test_regression_rejects_non_numeric_target(monkeypatch):
+    ranker = ranker_with_models(monkeypatch, {"ok": MeanRegressor()})
+
+    with pytest.raises(ValueError, match="numeric"):
+        ranker.fit(X_TRAIN, np.array(["a", "b", "c", "d"]), ["a", "b", "c"])
+
+
+class RecordingClassifier(BaseEstimator):
+    def fit(self, X, y):
+        self.seen_y_ = np.asarray(y)
+        self.classes_ = np.unique(y)
+        return self
+
+    def predict(self, X):
+        return np.full(len(X), self.classes_[0])
+
+
+def clf_ranker_with_models(monkeypatch, models):
+    def init_models(self):
+        return {"clf": {"linear": models, "tree": {}}, "reg": {}}
+
+    monkeypatch.setattr(FeatureRanker, "init_models", init_models)
+    return FeatureRanker(task="clf", group="linear")
+
+
+def test_classification_encodes_numeric_labels_from_zero(monkeypatch):
+    model = RecordingClassifier()
+    ranker = clf_ranker_with_models(monkeypatch, {"ok": model})
+
+    ranker.fit(X_TRAIN, np.array([1, 2, 3, 3]), ["a", "b", "c"])
+
+    assert model.seen_y_.tolist() == [0, 1, 2, 2]
+
+
+def test_failed_refit_leaves_ranker_unfitted(monkeypatch):
+    ranker = clf_ranker_with_models(monkeypatch, {"ok": RecordingClassifier()})
+    ranker.fit(X_TRAIN, np.array([0, 1, 1, 0]), ["a", "b", "c"])
+
+    with pytest.raises(TypeError):
+        ranker.fit(X_TRAIN, np.array(["a", 1, "b", 2], dtype=object), ["a", "b", "c"])
+
+    assert ranker.is_fitted_ is False
+
+
+def test_modern_cli_accepts_eval_class_subset(monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(
+        importance_module,
+        "FeatureRanker",
+        lambda task, group: clf_ranker_with_models(
+            monkeypatch, {"ok": RecordingClassifier()}
+        ),
+    )
+    argv = _modern_argv(
+        tmp_path,
+        "--task",
+        "clf",
+        "--scoring",
+        "accuracy",
+        train="a,target\n1,1\n2,other\n",
+        eval_="a,target\n3,1\n4,1\n",
+    )
+    monkeypatch.setattr(sys, "argv", argv)
+
+    assert importance_module.main() == 0
+    assert json.loads(capsys.readouterr().out)["evaluation_mode"] == "held_out"
+
+
+def test_load_csv_strips_utf8_bom(tmp_path):
+    path = tmp_path / "excel.csv"
+    path.write_text("target,a\n1,2\n3,4\n", encoding="utf-8-sig")
+
+    _, y, names = importance_module._load_csv(path, "target")
+
+    assert names == ["a"]
+    assert y.tolist() == ["1", "3"]
+
+
+def test_load_csv_skips_blank_lines(tmp_path):
+    path = tmp_path / "blank.csv"
+    path.write_text("a,target\n1,2\n\n3,4\n\n", encoding="utf-8")
+
+    X, y, _ = importance_module._load_csv(path, "target")
+
+    assert np.array_equal(X, [[1.0], [3.0]])
+    assert y.tolist() == ["2", "4"]
+
+
+def _modern_argv(tmp_path, *extra, train="a,target\n1,0\n2,1\n", eval_="a,target\n3,0\n4,1\n"):
+    train_path = tmp_path / "train.csv"
+    eval_path = tmp_path / "eval.csv"
+    train_path.write_text(train, encoding="utf-8")
+    eval_path.write_text(eval_, encoding="utf-8")
+    return [
+        "featranker",
+        "--train-data",
+        str(train_path),
+        "--eval-data",
+        str(eval_path),
+        "--target",
+        "target",
+        *extra,
+    ]
+
+
+class NoFitRanker:
+    def __init__(self, task, group):
+        pass
+
+    def fit(self, X, y, feature_names):
+        raise AssertionError("fit must not run on invalid CLI input")
+
+
+def test_modern_cli_rejects_non_numeric_regression_eval_target_before_fit(
+    monkeypatch, tmp_path, capsys
+):
+    monkeypatch.setattr(importance_module, "FeatureRanker", NoFitRanker)
+    argv = _modern_argv(
+        tmp_path,
+        "--task",
+        "reg",
+        "--scoring",
+        "r2",
+        eval_="a,target\n3,0\n4,NA\n",
+    )
+    monkeypatch.setattr(sys, "argv", argv)
+
+    with pytest.raises(SystemExit, match="2"):
+        importance_module.main()
+
+    assert "target" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    ("extra", "groups", "message"),
+    [
+        (["--scoring", "neg_mae"], None, "neg_mae"),
+        (["--scoring", "accuracy", "--n-repeats", "0"], None, "n_repeats"),
+        (["--scoring", "accuracy"], "g: [a, missing]\n", "unknown feature"),
+    ],
+)
+def test_modern_cli_validates_options_before_fit(
+    monkeypatch, tmp_path, capsys, extra, groups, message
+):
+    monkeypatch.setattr(importance_module, "FeatureRanker", NoFitRanker)
+    if groups is not None:
+        groups_path = tmp_path / "groups.yaml"
+        groups_path.write_text(groups, encoding="utf-8")
+        extra = [*extra, "--feature-groups", str(groups_path)]
+    monkeypatch.setattr(
+        sys, "argv", _modern_argv(tmp_path, "--task", "clf", *extra)
+    )
+
+    with pytest.raises(SystemExit, match="2"):
+        importance_module.main()
+
+    assert message in capsys.readouterr().err
+
+
+def test_modern_cli_requires_task(monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(
+        sys, "argv", _modern_argv(tmp_path, "--scoring", "accuracy")
+    )
+
+    with pytest.raises(SystemExit, match="2"):
+        importance_module.main()
+
+    assert "--task" in capsys.readouterr().err
 
 
 def test_legacy_prep_workflow_warns_and_marks_in_sample(monkeypatch, tmp_path):
@@ -869,3 +1176,14 @@ def test_optional_estimators_are_not_core_dependencies():
     assert 'catboost = ["catboost"]' in extras
     assert 'all = ["xgboost", "lightgbm", "catboost"]' in extras
     assert 'test = ["pytest", "pandas", "build"]' in extras
+
+
+def test_pre_1_8_sklearn_gets_penalty_from_l1_ratio(monkeypatch):
+    monkeypatch.setattr(importance_module, "SKLEARN_NEEDS_PENALTY", True)
+
+    models = FeatureRanker(task="clf", group="linear").models["clf"]["linear"]
+
+    assert models["logistic_regression_l1"].penalty == "l1"
+    assert models["logistic_regression_l2"].penalty == "l2"
+    assert models["logistic_regression_elasticnet"].penalty == "elasticnet"
+    assert models["logistic_regression_elasticnet"].l1_ratio == 0.5

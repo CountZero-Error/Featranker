@@ -63,9 +63,6 @@ classification:
     - name: naive_bayes_bernoulli
       import: sklearn.naive_bayes
       class: BernoulliNB
-    - name: pls_da
-      import: sklearn.cross_decomposition
-      class: PLSRegression
 
   tree:
     - name: decision_tree

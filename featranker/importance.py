@@ -13,9 +13,12 @@ from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional
 
 import numpy as np
+import sklearn
 import yaml
+from sklearn.dummy import DummyClassifier, DummyRegressor
 from sklearn.metrics import get_scorer
 from sklearn.preprocessing import LabelEncoder
+from sklearn.utils.fixes import parse_version
 from tqdm import tqdm
 
 task_map = {
@@ -27,18 +30,45 @@ task_map = {
 
 OPTIONAL_MODEL_MODULES = {"xgboost", "lightgbm", "catboost"}
 
+BASELINE_NAME = "dummy_baseline"
+
+# scikit-learn < 1.8 ignores LogisticRegression(l1_ratio=...) unless `penalty`
+# is set, so L1/elastic-net configs would silently run as L2.
+SKLEARN_NEEDS_PENALTY = parse_version(sklearn.__version__) < parse_version("1.8")
+
+
+def _model_params(class_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
+    params = dict(params)
+    if (
+        not SKLEARN_NEEDS_PENALTY
+        or class_name != "LogisticRegression"
+        or "l1_ratio" not in params
+        or "penalty" in params
+    ):
+        return params
+    ratio = params.pop("l1_ratio")
+    params["penalty"] = {0: "l2", 1: "l1"}.get(ratio, "elasticnet")
+    if params["penalty"] == "elasticnet":
+        params["l1_ratio"] = ratio
+    return params
+
 
 def _load_csv(
     path: Path, target: str
 ) -> tuple[np.ndarray, np.ndarray, List[str]]:
     """Load a numeric feature matrix and target column from a CSV file."""
-    with path.open("r", encoding="utf-8", newline="") as csv_file:
+    # utf-8-sig drops the BOM that Excel "CSV UTF-8" exports prepend.
+    with path.open("r", encoding="utf-8-sig", newline="") as csv_file:
         reader = csv.reader(csv_file)
         try:
             header = [name.strip() for name in next(reader)]
         except StopIteration as error:
             raise ValueError(f"[!] CSV '{path}' is empty.") from error
-        rows = list(reader)
+        rows = [
+            (row_number, row)
+            for row_number, row in enumerate(reader, start=2)
+            if row
+        ]
 
     if any(not name for name in header):
         raise ValueError("[!] CSV column names must be non-empty.")
@@ -55,7 +85,7 @@ def _load_csv(
     feature_indices = [index for index in range(len(header)) if index != target_index]
     features: List[List[float]] = []
     targets: List[str] = []
-    for row_number, row in enumerate(rows, start=2):
+    for row_number, row in rows:
         if len(row) != len(header):
             raise ValueError(
                 f"[!] CSV row {row_number} has {len(row)} columns; "
@@ -71,13 +101,11 @@ def _load_csv(
 
     if any(value == "" for value in targets):
         raise ValueError("[!] Target values must be non-empty.")
-    try:
-        y = np.asarray(targets, dtype=float)
-    except ValueError:
-        y = np.asarray(targets)
+    # Raw strings: FeatureRanker types the target by task, so train and eval
+    # labels stay comparable even when only one file looks numeric.
     return (
         np.asarray(features, dtype=float),
-        y,
+        np.asarray(targets),
         [header[index] for index in feature_indices],
     )
 
@@ -134,6 +162,13 @@ def _validate_y(y: Any, n_rows: int) -> np.ndarray:
     if len(values) == 0:
         raise ValueError("[!] y must contain at least one value.")
     return values
+
+
+def _float_target(values: np.ndarray) -> np.ndarray:
+    try:
+        return np.asarray(values, dtype=float)
+    except (TypeError, ValueError) as error:
+        raise ValueError("[!] Regression targets must be numeric.") from error
 
 
 def _failure(model: str, stage: str, error: Exception) -> Dict[str, str]:
@@ -218,8 +253,16 @@ def _assign_ranks(importance: Dict[str, float]) -> Dict[str, int]:
 
 
 def _build_consensus(model_reports: Dict[str, Any]) -> List[Dict[str, Any]]:
+    voters = [report for report in model_reports.values() if report["in_consensus"]]
+    if not voters:
+        warnings.warn(
+            "No model beat the dummy baseline, so the consensus is empty.",
+            UserWarning,
+            # caller -> rank_features -> _rank_features -> _build_consensus
+            stacklevel=4,
+        )
     ranks_by_group: Dict[str, List[int]] = {}
-    for model_report in model_reports.values():
+    for model_report in voters:
         for group_name, importance in model_report["importance"].items():
             ranks_by_group.setdefault(group_name, []).append(importance["rank"])
 
@@ -305,6 +348,7 @@ class FeatureRanker:
         self.initialization_failures_: List[Dict[str, str]] = []
         self.models = self.init_models()
         self.trained_models: Dict[str, Any] = {}
+        self.baseline_model_: Any = None
         self.fit_failures_: List[Dict[str, str]] = []
         self.is_fitted_ = False
         if prep_file is not None:
@@ -329,16 +373,20 @@ class FeatureRanker:
         feature_names: Optional[List[str]] = None,
     ) -> "FeatureRanker":
         """Fit configured models using training data only."""
+        self.is_fitted_ = False
         for attribute in ("_legacy_X", "_legacy_y"):
             if hasattr(self, attribute):
                 delattr(self, attribute)
         X_values, names = _validate_X(X, feature_names=feature_names)
         y_values = _validate_y(y, len(X_values))
 
-        self.label_encoder = None
-        if y_values.dtype.kind in ("U", "S", "O"):
-            self.label_encoder = LabelEncoder()
-            y_values = self.label_encoder.fit_transform(y_values)
+        # Encode every classification target to 0..n-1 (XGBoost requires it).
+        label_encoder = None
+        if self.task == "clf":
+            label_encoder = LabelEncoder()
+            y_values = label_encoder.fit_transform(y_values)
+        else:
+            y_values = _float_target(y_values)
 
         groups = ["linear", "tree"] if self.group == "all" else [self.group]
         candidates: Dict[str, Any] = {}
@@ -347,7 +395,6 @@ class FeatureRanker:
 
         self.trained_models = {}
         self.fit_failures_ = []
-        self.is_fitted_ = False
         for model_name, model in tqdm(candidates.items(), desc="[*] Training models"):
             try:
                 self.trained_models[model_name] = model.fit(X_values, y_values)
@@ -358,6 +405,15 @@ class FeatureRanker:
             details = json.dumps(self.initialization_failures_ + self.fit_failures_)
             raise RuntimeError(f"[!] No models fit successfully. Failures: {details}")
 
+        baseline_model = None
+        try:
+            dummy = DummyClassifier() if self.task == "clf" else DummyRegressor()
+            baseline_model = dummy.fit(X_values, y_values)
+        except Exception as error:
+            self.fit_failures_.append(_failure(BASELINE_NAME, "fit", error))
+
+        self.baseline_model_ = baseline_model
+        self.label_encoder = label_encoder
         self.feature_names_ = names
         self.n_features_in_ = len(names)
         self.is_fitted_ = True
@@ -414,6 +470,8 @@ class FeatureRanker:
         y_values = _validate_y(y_eval, len(X_values))
         if self.label_encoder is not None:
             y_values = self.label_encoder.transform(y_values)
+        else:
+            y_values = _float_target(y_values)
         groups = _resolve_feature_groups(self.feature_names_, feature_groups)
         named_groups = {
             name: [self.feature_names_[index] for index in indices]
@@ -422,20 +480,25 @@ class FeatureRanker:
 
         model_reports: Dict[str, Any] = {}
         ranking_failures: List[Dict[str, str]] = []
+        baseline_score = self._score_baseline(
+            scorer, X_values, y_values, ranking_failures
+        )
         for model_name, model in self.trained_models.items():
             try:
                 baseline = _finite_float(
                     scorer(model, X_values, y_values), "baseline score"
                 )
                 rng = np.random.default_rng(random_state)
+                # One scratch copy per model; only the group's columns are
+                # rewritten per repeat and restored after the group.
+                X_permuted = X_values.copy()
                 importances: Dict[str, Dict[str, Any]] = {}
                 for group_name, column_indices in groups.items():
                     values: List[float] = []
                     for _ in range(n_repeats):
                         row_order = rng.permutation(len(X_values))
-                        X_permuted = X_values.copy()
-                        X_permuted[:, column_indices] = X_values[row_order][
-                            :, column_indices
+                        X_permuted[:, column_indices] = X_values[
+                            np.ix_(row_order, column_indices)
                         ]
                         permuted_score = _finite_float(
                             scorer(model, X_permuted, y_values), "permuted score"
@@ -446,6 +509,7 @@ class FeatureRanker:
                                 "permutation importance",
                             )
                         )
+                    X_permuted[:, column_indices] = X_values[:, column_indices]
                     importances[group_name] = {
                         "values": values,
                         "mean": _finite_float(
@@ -465,6 +529,7 @@ class FeatureRanker:
                     importances[group_name]["rank"] = rank
                 model_reports[model_name] = {
                     "evaluation_score": baseline,
+                    "in_consensus": baseline_score is None or baseline > baseline_score,
                     "importance": importances,
                 }
             except Exception as error:
@@ -482,12 +547,31 @@ class FeatureRanker:
             "n_repeats": n_repeats,
             "random_state": random_state,
             "feature_groups": named_groups,
+            "baseline_score": baseline_score,
             "models": model_reports,
             "consensus": _build_consensus(model_reports),
             "failures": self.initialization_failures_
             + self.fit_failures_
             + ranking_failures,
         }
+
+    def _score_baseline(
+        self,
+        scorer: Any,
+        X_values: np.ndarray,
+        y_values: np.ndarray,
+        failures: List[Dict[str, str]],
+    ) -> Optional[float]:
+        """Score the dummy baseline; None (no gating) if it was unusable."""
+        if self.baseline_model_ is None:
+            return None
+        try:
+            return _finite_float(
+                scorer(self.baseline_model_, X_values, y_values), "baseline score"
+            )
+        except Exception as error:
+            failures.append(_failure(BASELINE_NAME, "ranking", error))
+            return None
 
     def init_models(self) -> Dict[str, Dict[str, Dict[str, Any]]]:
         """
@@ -558,7 +642,9 @@ class FeatureRanker:
                             raise ValueError(
                                 f"Params must be a dict, got {type(params).__name__}"
                             )
-                        group_models[name] = model_class(**dict(params))
+                        group_models[name] = model_class(
+                            **_model_params(class_name, params)
+                        )
                     except Exception as error:
                         self.initialization_failures_.append(
                             _failure(name, "initialization", error)
@@ -717,11 +803,6 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    # Show help when invoked with no arguments.
-    if args.task is None:
-        parser.print_help()
-        return 0
-
     modern_mode = any(
         value is not None
         for value in (
@@ -732,6 +813,13 @@ def main() -> int:
             args.feature_groups,
         )
     )
+    if args.task is None:
+        if modern_mode:
+            parser.error("--task is required.")
+        # Show help when invoked with no arguments.
+        parser.print_help()
+        return 0
+
     if modern_mode:
         if args.prep_file is not None or args.prep_class is not None:
             parser.error("Modern data options cannot be combined with prep options.")
@@ -758,25 +846,39 @@ def main() -> int:
                 raise ValueError(
                     "[!] Evaluation feature names and order must match training data."
                 )
+            if args.task == "reg":
+                y_train, y_eval = _float_target(y_train), _float_target(y_eval)
             feature_groups = None
             if args.feature_groups is not None:
                 with args.feature_groups.open("r", encoding="utf-8") as group_file:
                     feature_groups = yaml.safe_load(group_file)
                 if not isinstance(feature_groups, dict):
                     raise ValueError("[!] Feature groups YAML must contain a mapping.")
-        except (OSError, ValueError, yaml.YAMLError) as error:
-            parser.error(str(error))
+            # Fail fast: rank_features repeats these checks, but only after
+            # every model has been fit.
+            get_scorer(args.scoring)
+            if args.n_repeats < 1:
+                raise ValueError("[!] n_repeats must be a positive integer.")
+            _resolve_feature_groups(feature_names, feature_groups)
 
-        ranker = FeatureRanker(task=args.task, group=args.group)
-        ranker.fit(X_train, y_train, feature_names)
-        results = ranker.rank_features(
-            X_eval,
-            y_eval,
-            scoring=args.scoring,
-            feature_groups=feature_groups,
-            n_repeats=args.n_repeats,
-            random_state=args.random_state,
-        )
+            ranker = FeatureRanker(task=args.task, group=args.group)
+            ranker.fit(X_train, y_train, feature_names)
+            results = ranker.rank_features(
+                X_eval,
+                y_eval,
+                scoring=args.scoring,
+                feature_groups=feature_groups,
+                n_repeats=args.n_repeats,
+                random_state=args.random_state,
+            )
+        except (
+            OSError,
+            ValueError,
+            TypeError,
+            RuntimeError,
+            yaml.YAMLError,
+        ) as error:
+            parser.error(str(error))
     else:
         ranker = build_ranker(
             task=args.task,

@@ -37,6 +37,7 @@ Also included:
 - classification and regression model families;
 - scikit-learn scorer names or scorer-protocol callables;
 - per-model evaluation scores and raw repeat importances;
+- a dummy baseline that keeps models no better than chance out of the consensus;
 - structured initialization, fit, and ranking failures;
 - deterministic permutations and tie handling.
 
@@ -164,10 +165,10 @@ FeatRanker does not implement cross-validation or site-grouped splitting. Those 
 
 1. **Initialize** configured models for `task="clf"` or `task="reg"`.
 2. **Fit** each model on data supplied to `fit()`.
-3. **Score** each successful model on held-out evaluation data.
+3. **Score** each successful model, and a `DummyClassifier`/`DummyRegressor` baseline, on held-out evaluation data.
 4. **Permute** each feature group repeatedly and measure score degradation.
 5. **Rank** groups within each model using mean permutation importance.
-6. **Aggregate** model ranks into median- and mean-rank consensus.
+6. **Aggregate** the ranks of models that strictly beat the dummy baseline into median- and mean-rank consensus.
 
 Importance is always calculated with the same scorer:
 
@@ -232,9 +233,11 @@ The report preserves raw model evidence and keeps aggregation rank-based.
     "feature_groups": {
         "segment": ["segment_red", "segment_blue", "segment_other"]
     },
+    "baseline_score": -14.7,
     "models": {
         "random_forest_regressor": {
             "evaluation_score": -8.2,
+            "in_consensus": True,
             "importance": {
                 "segment": {
                     "values": [1.1, 1.3],
@@ -268,6 +271,9 @@ The report preserves raw model evidence and keeps aggregation rank-based.
 - Consensus sorts by `median_rank`, `mean_rank`, then group name.
 - Failures contain `model`, `stage`, `error_type`, and `message`.
 - Failed models receive no zero placeholder and do not enter consensus.
+- `baseline_score` is the evaluation score of a default `DummyClassifier()` or `DummyRegressor()` fit on the same training data and scored with the same scorer. A model has `in_consensus: True` only if its `evaluation_score` is strictly greater than `baseline_score` (scikit-learn scorers are higher-is-better). Models at or below the baseline stay in `models` but do not vote in `consensus`.
+- If no model beats the baseline, `consensus` is an empty list and a `UserWarning` is emitted; nothing is raised.
+- If the baseline cannot be fit or scored, `baseline_score` is `None`, every model has `in_consensus: True`, and `failures` gains an entry for model `dummy_baseline`.
 - `fit()` raises if no model fits; `rank_features()` raises if every model fails ranking.
 - `random_state` controls permutation reproducibility. Estimator randomness remains estimator-specific.
 
@@ -295,7 +301,6 @@ Model entries come directly from [`importance_config.yaml`](featranker/importanc
 | Linear | `qda` | `QuadraticDiscriminantAnalysis` |
 | Linear | `naive_bayes_gaussian` | `GaussianNB` |
 | Linear | `naive_bayes_bernoulli` | `BernoulliNB` |
-| Linear | `pls_da` | `PLSRegression` |
 | Tree | `decision_tree` | `DecisionTreeClassifier` |
 | Tree | `random_forest` | `RandomForestClassifier` |
 | Tree | `extra_trees` | `ExtraTreesClassifier` |
@@ -381,7 +386,7 @@ python -m pytest -q
 python -m build
 ```
 
-Continuous integration runs the core test suite on supported Python versions without optional estimator libraries.
+Continuous integration runs the core test suite, including end-to-end tests of the shipped model registry, on a matrix of Python and scikit-learn versions without optional estimator libraries.
 
 ## Scope
 
