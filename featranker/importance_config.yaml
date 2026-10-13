@@ -13,6 +13,7 @@ classification:
         l1_ratio: 1
         solver: saga
         max_iter: 5000
+        random_state: 42
     - name: logistic_regression_l2
       import: sklearn.linear_model
       class: LogisticRegression
@@ -27,20 +28,26 @@ classification:
         solver: saga
         l1_ratio: 0.5
         max_iter: 5000
+        random_state: 42
     - name: linear_svm
       import: sklearn.svm
       class: LinearSVC
       params:
         max_iter: 5000
+        random_state: 42
     - name: sgd_classifier
       import: sklearn.linear_model
       class: SGDClassifier
+      params:
+        random_state: 42
     - name: ridge_classifier
       import: sklearn.linear_model
       class: RidgeClassifier
     - name: perceptron
       import: sklearn.linear_model
       class: Perceptron
+      params:
+        random_state: 42
     - name: passive_aggressive
       import: sklearn.linear_model
       class: SGDClassifier
@@ -49,6 +56,7 @@ classification:
         penalty: null
         learning_rate: pa1
         eta0: 1.0
+        random_state: 42
     - name: lda
       import: sklearn.discriminant_analysis
       class: LinearDiscriminantAnalysis

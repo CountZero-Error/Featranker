@@ -204,7 +204,7 @@ cython_debug/
 
 # Local-only project files
 /.codegraph/
-/docs/
+/docs/superpowers/
 /CHANGELOG.md
 /MANIFEST.in
 .cursorignore

@@ -1,7 +1,7 @@
 import json
 
 import numpy as np
-from sklearn.datasets import load_diabetes, load_iris
+from sklearn.datasets import load_breast_cancer, load_diabetes, load_iris
 from sklearn.linear_model import Ridge
 from sklearn.model_selection import train_test_split
 
@@ -118,3 +118,18 @@ def test_shipped_registry_reports_are_strict_json():
 
     json.dumps(report, allow_nan=False)
     assert all(m["params"] for m in report["models"].values())
+
+
+def test_shipped_linear_classifiers_are_reproducible():
+    dataset = load_breast_cancer()
+    names = list(dataset.feature_names)
+
+    def run():
+        ranker = FeatureRanker(task="clf", group="linear")
+        ranker.fit(dataset.data[:400], dataset.target[:400], feature_names=names)
+        return ranker.rank_features(
+            dataset.data[400:], dataset.target[400:], scoring="accuracy",
+            n_repeats=2, random_state=0,
+        )
+
+    assert run()["models"] == run()["models"]
