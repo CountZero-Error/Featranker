@@ -290,6 +290,8 @@ def _build_consensus(model_reports: Dict[str, Any]) -> List[Dict[str, Any]]:
         )
     # group -> family -> member ranks; each family then casts one vote.
     ranks_by_group: Dict[str, Dict[str, List[int]]] = {}
+    # group -> family -> member above_shadow flags (only when shadows ran).
+    above_by_group: Dict[str, Dict[str, List[bool]]] = {}
     for model_name, model_report in model_reports.items():
         if not model_report["in_consensus"]:
             continue
@@ -298,6 +300,10 @@ def _build_consensus(model_reports: Dict[str, Any]) -> List[Dict[str, Any]]:
             ranks_by_group.setdefault(group_name, {}).setdefault(family, []).append(
                 importance["rank"]
             )
+            if "shadow_max" in model_report:
+                above_by_group.setdefault(group_name, {}).setdefault(
+                    family, []
+                ).append(importance["above_shadow"])
 
     consensus = []
     for group_name, by_family in ranks_by_group.items():
@@ -316,6 +322,10 @@ def _build_consensus(model_reports: Dict[str, Any]) -> List[Dict[str, Any]]:
                 "family_ranks": family_ranks,
             }
         )
+        if group_name in above_by_group:
+            consensus[-1]["above_shadow_share"] = float(
+                np.mean([np.mean(flags) for flags in above_by_group[group_name].values()])
+            )
     return sorted(
         consensus,
         key=lambda row: (
@@ -413,10 +423,16 @@ def _build_stability(
     """Aggregate each group's per-split consensus position into one row per group."""
     group_names = list(split_reports[0]["report"]["feature_groups"]) if split_reports else []
     split_ranks: Dict[str, List[Optional[int]]] = {name: [] for name in group_names}
+    shadow_shares: Dict[str, List[float]] = {}
     for entry in split_reports:
         by_group = _consensus_positions(entry["report"]["consensus"])
         for name in group_names:
             split_ranks[name].append(by_group.get(name))
+        for row in entry["report"]["consensus"]:
+            if "above_shadow_share" in row:
+                shadow_shares.setdefault(row["feature_group"], []).append(
+                    row["above_shadow_share"]
+                )
 
     if not any(entry["report"]["consensus"] for entry in split_reports):
         warnings.warn(
@@ -442,6 +458,8 @@ def _build_stability(
                 "top_k_share": sum(rank <= top_k for rank in ranked) / n_splits,
             }
         )
+        if name in shadow_shares:
+            rows[-1]["above_shadow_share"] = float(np.mean(shadow_shares[name]))
     return sorted(
         rows,
         key=lambda row: (row["median_rank"], -row["top_k_share"], row["feature_group"]),
@@ -461,6 +479,12 @@ def _run_models(
     return Parallel(n_jobs=n_jobs)(delayed(worker)(*job) for job in jobs)
 
 
+def _with_shadows(X_values: np.ndarray, seed: Any) -> np.ndarray:
+    """Real columns followed by a shadow block: the same rows in one shuffled order."""
+    row_order = np.random.default_rng(seed).permutation(len(X_values))
+    return np.hstack([X_values, X_values[row_order]])
+
+
 def _fit_model(
     name: str, model: Any, X_values: np.ndarray, y_values: np.ndarray
 ) -> tuple[str, Any, Optional[Dict[str, str]]]:
@@ -470,17 +494,16 @@ def _fit_model(
         return name, None, _failure(name, "fit", error)
 
 
-def _permutation_importances(
+def _group_importances(
     model: Any,
     scorer: Any,
     X_values: np.ndarray,
     y_values: np.ndarray,
     groups: Dict[str, List[int]],
     n_repeats: int,
-    random_state: Optional[int],
+    rng: np.random.Generator,
     baseline: float,
 ) -> Dict[str, Dict[str, Any]]:
-    rng = np.random.default_rng(random_state)
     # One scratch copy per model; only the group's columns are
     # rewritten per repeat and restored after the group.
     X_permuted = X_values.copy()
@@ -502,12 +525,38 @@ def _permutation_importances(
             "mean": _finite_float(np.mean(values), "importance mean"),
             "std": _finite_float(np.std(values), "importance standard deviation"),
         }
+    return importances
+
+
+def _permutation_importances(
+    model: Any,
+    scorer: Any,
+    X_values: np.ndarray,
+    y_values: np.ndarray,
+    groups: Dict[str, List[int]],
+    n_repeats: int,
+    random_state: Optional[int],
+    baseline: float,
+    shadow_groups: Optional[Dict[str, List[int]]] = None,
+) -> tuple[Dict[str, Dict[str, Any]], Optional[Dict[str, Dict[str, Any]]]]:
+    rng = np.random.default_rng(random_state)
+    importances = _group_importances(
+        model, scorer, X_values, y_values, groups, n_repeats, rng, baseline
+    )
+    # Real groups are ranked among themselves only; shadows are compared, not ranked.
     ranks = _assign_ranks(
         {name: importance["mean"] for name, importance in importances.items()}
     )
     for group_name, rank in ranks.items():
         importances[group_name]["rank"] = rank
-    return importances
+    # Shadows draw from the same stream after the real groups, so the real
+    # values match a run without shadows on the same matrix.
+    shadow = None
+    if shadow_groups is not None:
+        shadow = _group_importances(
+            model, scorer, X_values, y_values, shadow_groups, n_repeats, rng, baseline
+        )
+    return importances, shadow
 
 
 def _rank_model(
@@ -521,12 +570,13 @@ def _rank_model(
     random_state: Optional[int],
     baseline_score: Optional[float],
     family: str,
+    shadow_groups: Optional[Dict[str, List[int]]] = None,
 ) -> tuple[str, Optional[Dict[str, Any]], Optional[Dict[str, str]]]:
     try:
         baseline = _finite_float(scorer(model, X_values, y_values), "baseline score")
-        importances = _permutation_importances(
+        importances, shadow = _permutation_importances(
             model, scorer, X_values, y_values, groups, n_repeats, random_state,
-            baseline,
+            baseline, shadow_groups,
         )
         report = {
             "family": family,
@@ -535,6 +585,12 @@ def _rank_model(
             "params": _json_params(model),
             "importance": importances,
         }
+        if shadow is not None:
+            shadow_max = max(entry["mean"] for entry in shadow.values())
+            for entry in importances.values():
+                entry["above_shadow"] = entry["mean"] > shadow_max
+            report["shadow_importance"] = shadow
+            report["shadow_max"] = shadow_max
         return name, report, None
     except Exception as error:
         return name, None, _failure(name, "ranking", error)
@@ -548,6 +604,8 @@ class FeatureRanker:
         models: Optional[Dict[str, Any]] = None,
         n_jobs: Optional[int] = None,
         verbose: bool = True,
+        shadows: bool = False,
+        shadow_seed: Optional[int] = None,
     ) -> None:
         """
         Initialize configured models without loading or fitting data.
@@ -560,6 +618,9 @@ class FeatureRanker:
             n_jobs: Parallel workers over models in fit() and rank_features();
                 None means sequential, -1 means all cores.
             verbose: Show progress bars during initialization, fit, and ranking.
+            shadows: Train and rank with a shuffled shadow copy of every
+                feature, to check which groups beat noise.
+            shadow_seed: Seed for the shadow shuffles; None draws fresh entropy.
         """
         if task not in {"clf", "reg"}:
             raise ValueError("[!] task must be 'clf' or 'reg'.")
@@ -569,10 +630,21 @@ class FeatureRanker:
             raise ValueError("[!] group selects built-in models; omit it with models.")
         if not isinstance(verbose, bool):
             raise TypeError("[!] verbose must be True or False.")
+        if not isinstance(shadows, bool):
+            raise TypeError("[!] shadows must be True or False.")
+        if shadow_seed is not None and (
+            not isinstance(shadow_seed, int) or isinstance(shadow_seed, bool)
+        ):
+            raise TypeError("[!] shadow_seed must be an int or None.")
+        if shadow_seed is not None and shadow_seed < 0:
+            # NumPy generators only accept non-negative integer seeds.
+            raise ValueError("[!] shadow_seed must be non-negative.")
         self.task = task
         self.group = group
         self.n_jobs = n_jobs
         self.verbose = verbose
+        self.shadows = shadows
+        self.shadow_seed = shadow_seed
         self.label_encoder = None
         self.initialization_failures_: List[Dict[str, str]] = []
         # Built-in model name -> registry family; anything else is its own family.
@@ -588,6 +660,9 @@ class FeatureRanker:
         # Rankers pickled by 0.4 lack the attributes added in 0.5.
         self.__dict__.update(state)
         self.__dict__.setdefault("verbose", True)
+        # ... and those pickled by 0.6 lack the 0.7 shadow options.
+        self.__dict__.setdefault("shadows", False)
+        self.__dict__.setdefault("shadow_seed", None)
         if "model_families_" not in self.__dict__:
             self.model_families_ = (
                 _registry_families() if self.user_models is None else {}
@@ -622,7 +697,11 @@ class FeatureRanker:
 
         self.trained_models = {}
         self.fit_failures_ = []
-        jobs = [(name, model, X_values, y_values) for name, model in candidates.items()]
+        # Models see the shadow block too; the dummy below sees real columns only.
+        X_models = (
+            _with_shadows(X_values, self.shadow_seed) if self.shadows else X_values
+        )
+        jobs = [(name, model, X_models, y_values) for name, model in candidates.items()]
         for name, fitted, failure in _run_models(
             _fit_model, jobs, self.n_jobs, "[*] Training models", self.verbose
         ):
@@ -683,9 +762,20 @@ class FeatureRanker:
         baseline_score = self._score_baseline(
             scorer, X_values, y_values, ranking_failures
         )
+        X_models, shadow_groups = X_values, None
+        if self.shadows:
+            # An independent, reproducible shuffle of the evaluation rows.
+            eval_seed = None if self.shadow_seed is None else [self.shadow_seed, 1]
+            X_models = _with_shadows(X_values, eval_seed)
+            offset = len(self.feature_names_)
+            shadow_groups = {
+                name: [index + offset for index in indices]
+                for name, indices in groups.items()
+            }
         jobs = [
-            (name, model, scorer, X_values, y_values, groups, n_repeats,
-             random_state, baseline_score, self.model_families_.get(name, name))
+            (name, model, scorer, X_models, y_values, groups, n_repeats,
+             random_state, baseline_score, self.model_families_.get(name, name),
+             shadow_groups)
             for name, model in self.trained_models.items()
         ]
         for name, model_report, failure in _run_models(
@@ -702,7 +792,7 @@ class FeatureRanker:
                 f"[!] No models ranked successfully. Failures: {details}"
             )
 
-        return {
+        report = {
             "evaluation_mode": "held_out",
             "scoring": scoring_name,
             "n_repeats": n_repeats,
@@ -716,6 +806,10 @@ class FeatureRanker:
             + self.fit_failures_
             + ranking_failures,
         }
+        if self.shadows:
+            report["shadows"] = True
+            report["shadow_seed"] = self.shadow_seed
+        return report
 
     def rank_resampled(
         self,
@@ -760,6 +854,10 @@ class FeatureRanker:
                     models=self.user_models,
                     n_jobs=self.n_jobs,
                     verbose=self.verbose,
+                    shadows=self.shadows,
+                    shadow_seed=(
+                        None if self.shadow_seed is None else self.shadow_seed + index
+                    ),
                 )
                 ranker.fit(X_values[train], y_values[train], feature_names=names)
                 report = ranker.rank_features(
@@ -788,7 +886,7 @@ class FeatureRanker:
                 f"[!] No split ranked successfully. Failures: {json.dumps(failures)}"
             )
         first = split_reports[0]["report"]
-        return {
+        report = {
             "evaluation_mode": "resampled",
             "scoring": first["scoring"],
             "n_repeats": n_repeats,
@@ -801,6 +899,10 @@ class FeatureRanker:
             "stability": _build_stability(split_reports, len(splits), top_k),
             "failures": failures,
         }
+        if self.shadows:
+            report["shadows"] = True
+            report["shadow_seed"] = self.shadow_seed
+        return report
 
     def _score_baseline(
         self,

@@ -6,7 +6,7 @@
 
 The API is one class: `FeatureRanker(...)`, then `.fit(...)`, then `.rank_features(...)`. [`.rank_resampled(...)`](#resampled-ranking) repeats that over cross-validation splits, and [`summarize(report)`](#summarize) reads the result.
 
-### `FeatureRanker(task, group="all", models=None, n_jobs=None, verbose=True)`
+### `FeatureRanker(task, group="all", models=None, n_jobs=None, verbose=True, shadows=False, shadow_seed=None)`
 
 | Parameter | Default | Meaning |
 |---|---|---|
@@ -15,6 +15,8 @@ The API is one class: `FeatureRanker(...)`, then `.fit(...)`, then `.rank_featur
 | `models` | `None` | Non-empty dict of `{name: estimator}` to use instead of the built-in models. Names must be non-empty strings other than `dummy_baseline`. Cannot be combined with a `group` other than `"all"`. See [Your own models](#your-own-models). |
 | `n_jobs` | `None` | Parallel workers over models. `None` or `1` is sequential, `-1` uses all cores, `0` is invalid. See [Parallel models](#parallel-models). |
 | `verbose` | `True` | Show progress bars during model setup, `fit()`, and `rank_features()`. `False` hides them; warnings are still shown. |
+| `shadows` | `False` | Train and rank with a shuffled copy of every feature, to show which groups beat noise. See [Shadow features](#shadow-features). |
+| `shadow_seed` | `None` | Non-negative integer seed for the shadow shuffles, or `None` for different shadows on every run. |
 
 ### `.fit(X, y, feature_names=None)`
 
@@ -35,7 +37,7 @@ Returns the ranker itself. Raises if no model fits.
 | `scoring` | required, keyword-only | scikit-learn scorer name or a callable `(estimator, X, y) -> float` where higher is better. See [Choosing a scorer](#choosing-a-scorer). |
 | `feature_groups` | `None` | Dict of `{group_name: [feature, ...]}` to shuffle together. Ungrouped features are ranked on their own. See [Grouped permutation](#grouped-permutation). |
 | `n_repeats` | `10` | Shuffles per feature group; a positive integer. More repeats give a more precise average importance and take longer. |
-| `random_state` | `None` | Integer seed for the shuffles. Set it for reproducible reports. |
+| `random_state` | `None` | Integer seed for permutation-importance shuffles. Reproducible reports also require deterministic or seeded estimators and deterministic scoring; with shadows enabled, fix `shadow_seed` too. |
 
 Returns the report dict described in [Report](report.md). Raises if every model fails ranking.
 
@@ -89,7 +91,7 @@ ranker = FeatureRanker(
 
 `FeatureRanker(..., n_jobs=2)` runs the per-model work in `fit()` and `rank_features()` in parallel with joblib. `None` runs sequentially and `-1` uses all cores.
 
-- Reports match `n_jobs=None`, with models in the same order, when every estimator is deterministic or seeded, the scorer is deterministic, and `random_state` is a fixed integer. Every built-in model with randomness is seeded (`random_state=42`) since 0.4.1. An unseeded custom estimator, such as `RandomForestRegressor()` without `random_state`, can give different reports on every run, parallel or not.
+- Reports match `n_jobs=None`, with models in the same order, when every estimator is deterministic or seeded, the scorer is deterministic, and `random_state` is a fixed integer. Every built-in model with randomness is seeded (`random_state=42`) since 0.4.1. An unseeded custom estimator, such as `RandomForestRegressor()` without `random_state`, can give different reports on every run, parallel or not. With `shadows=True`, reproducibility also requires a fixed non-negative integer `shadow_seed`; fixing `random_state` alone does not seed shadow construction.
 - Per-model failures are recorded exactly as in the sequential path.
 - With any parallel setting (`n_jobs` other than `None` or `1`, including `-1`), custom scorers and estimators are sent to worker processes, so everything they hold must be serializable. Lambdas and local functions are fine.
 
@@ -205,6 +207,67 @@ Each split uses a new ranker with this ranker's settings, so the ranker you call
 >
 > Fit learned preprocessing within each training split. Put transformations compatible with FeatRanker's finite numeric input contract inside custom model pipelines. For raw missing or categorical data requiring learned preprocessing, use a manual split workflow; do not fit preprocessing on all development rows before this call.
 
+<a id="shadow-features"></a>
+
+## ▍ Shadow features
+
+A rank says a group is more important than others, not that it carries any signal. With `shadows=True`, every model also gets a *shadow* copy of all features: the same rows in a shuffled order. The shadow block preserves feature values and within-row relationships while randomly reassigning rows. It provides a randomized reference; a particular shuffle can retain chance association with the target. A real group is `above_shadow` in a model when its mean importance is greater than the strongest shadow's.
+
+```python
+import numpy as np
+from sklearn.datasets import load_diabetes
+from sklearn.model_selection import train_test_split
+
+from featranker import FeatureRanker, summarize
+
+data = load_diabetes()
+rng = np.random.default_rng(0)
+X = np.hstack([data.data, rng.normal(size=(len(data.data), 2))])  # two pure-noise columns
+names = list(data.feature_names) + ["noise_1", "noise_2"]
+X_train, X_eval, y_train, y_eval = train_test_split(
+    X, data.target, test_size=0.3, random_state=0
+)
+
+ranker = FeatureRanker(task="reg", shadows=True, shadow_seed=0, verbose=False)
+ranker.fit(X_train, y_train, feature_names=names)
+report = ranker.rank_features(
+    X_eval, y_eval, scoring="neg_mean_absolute_error", random_state=42
+)
+
+for row in report["consensus"]:
+    print(
+        f"{row['feature_group']:>7}  median rank {row['median_rank']:4.1f}  "
+        f"family-weighted shadow-hit share {row['above_shadow_share']:.0%}"
+    )
+```
+
+```text
+    bmi  median rank  1.2  family-weighted shadow-hit share 97%
+     s5  median rank  2.0  family-weighted shadow-hit share 100%
+     bp  median rank  3.2  family-weighted shadow-hit share 86%
+     s4  median rank  5.8  family-weighted shadow-hit share 47%
+     s3  median rank  6.0  family-weighted shadow-hit share 41%
+     s6  median rank  6.5  family-weighted shadow-hit share 31%
+     s1  median rank  7.0  family-weighted shadow-hit share 38%
+noise_2  median rank  7.0  family-weighted shadow-hit share 12%
+    sex  median rank  7.0  family-weighted shadow-hit share 12%
+     s2  median rank  8.5  family-weighted shadow-hit share 38%
+    age  median rank  9.5  family-weighted shadow-hit share 25%
+noise_1  median rank 10.2  family-weighted shadow-hit share 0%
+```
+
+Output shown with the `xgboost` and `catboost` extras installed. The two pure-noise columns have family-weighted shadow-hit shares of at most 12%; `bmi`, `s5`, and `bp` are at 86% or more.
+
+- `above_shadow_share` is family-weighted: each voting family contributes the fraction of its members in which the group beat the strongest shadow.
+- `above_shadow` is a relative comparison, not proof of useful signal. If `shadow_max` is negative, even negative real importance can beat it. Inspect the real mean, shuffle spread, and evaluation score alongside the share.
+- It is descriptive, not a p-value. Families and splits are not independent trials, and a share below 0.5 does not prove a group is useless.
+- Ranks still compare real groups only. Extra noise columns can still change how some models fit (for example, forests that sample a fraction of features per split), so ranks with shadows on can differ slightly from a run without them.
+- **Cost.** Models train on twice the columns and every group is permuted twice, so expect about double the time and memory.
+- `rank_resampled()` uses the same setting; split `i` uses `shadow_seed + i`, and each stability row gains the mean `above_shadow_share` over ranked splits.
+
+> [!WARNING]
+> Shadows only work if every model sees every column. A custom pipeline that drops columns, such as a positional `ColumnTransformer` with the default `remainder="drop"`, never sees the shadows, so every group trivially beats them. Shadow columns are appended after the real ones, so positional selectors of real columns still work.
+
 <a id="summarize"></a>
 
 ## ▍ Summarize a report
@@ -228,6 +291,7 @@ Each finding is a dict with `code`, `severity` (`"info"` or `"warning"`), `messa
 | `few_families` | warning | Fewer than 3 model families voted. |
 | `tied_groups` | info | Groups share the same `median_rank`; one finding per tie. `mean_rank` still orders them, and the finding does not measure ranking uncertainty. |
 | `within_noise` | info | In most voting models, the group's mean importance is no greater than its standard deviation across shuffles (`mean <= std`). This flags large relative spread or non-positive importance; it does not prove shuffling left the score unchanged. With `n_repeats=1` the spread is 0, so it only catches importances of 0 or less. |
+| `below_shadow` | info | With [shadows](#shadow-features) on, groups whose `above_shadow_share` is below 0.5. Descriptive, not a significance test. |
 
 An empty list means nothing stood out, not that the ranking is proven. The checks cover one evaluation set.
 

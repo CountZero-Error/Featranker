@@ -223,3 +223,29 @@ def test_missing_key_is_named():
 def test_resampled_report_is_rejected_with_guidance():
     with pytest.raises(ValueError, match="splits"):
         summarize({"evaluation_mode": "resampled", "splits": [], "stability": []})
+
+
+def test_below_shadow_lists_groups_under_half():
+    report = clean_report()
+    report["consensus"][0]["above_shadow_share"] = 1.0
+    report["consensus"][1]["above_shadow_share"] = 0.25
+
+    findings = [f for f in summarize(report) if f["code"] == "below_shadow"]
+
+    assert len(findings) == 1
+    assert findings[0]["severity"] == "info"
+    assert findings[0]["evidence"] == {"groups": {"b": 0.25}}
+
+
+def test_below_shadow_comes_after_within_noise():
+    report = clean_report()
+    report["models"]["m1"]["importance"]["b"].update(mean=0.0, std=0.1)
+    report["models"]["m2"]["importance"]["b"].update(mean=0.0, std=0.1)
+    for row in report["consensus"]:
+        row["above_shadow_share"] = 0.0
+
+    assert codes(summarize(report))[-2:] == ["within_noise", "below_shadow"]
+
+
+def test_no_below_shadow_without_shares():
+    assert "below_shadow" not in codes(summarize(clean_report()))

@@ -6,6 +6,8 @@ from typing import Any, Dict, List
 
 # A consensus resting on fewer families than this is flagged.
 MIN_FAMILIES = 3
+# Groups whose family-weighted above-shadow share is below this are listed.
+MIN_SHADOW_SHARE = 0.5
 
 REQUIRED_KEYS = ("baseline_score", "models", "consensus", "failures")
 FAILURE_STAGES = ("initialization", "fit", "ranking")
@@ -104,7 +106,27 @@ def _within_noise(report: Dict[str, Any]) -> List[Dict[str, Any]]:
     )]
 
 
-RULES = (_gate_off, _empty_consensus, _failures, _few_families, _tied_groups, _within_noise)
+def _below_shadow(report: Dict[str, Any]) -> List[Dict[str, Any]]:
+    below = {
+        row["feature_group"]: row["above_shadow_share"]
+        for row in report["consensus"]
+        if "above_shadow_share" in row and row["above_shadow_share"] < MIN_SHADOW_SHARE
+    }
+    if not below:
+        return []
+    return [_finding(
+        "below_shadow", "info",
+        f"{', '.join(below)} have a family-weighted above-shadow share below 0.5. "
+        "Each family contributes its fraction of voting members beating that "
+        "model's strongest shadow group. This is descriptive, not a significance test.",
+        {"groups": below},
+    )]
+
+
+RULES = (
+    _gate_off, _empty_consensus, _failures, _few_families, _tied_groups,
+    _within_noise, _below_shadow,
+)
 
 
 def summarize(report: Any) -> List[Dict[str, Any]]:

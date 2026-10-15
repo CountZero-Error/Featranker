@@ -60,7 +60,7 @@ FeatRanker trains a set of estimators on explicit training data, measures permut
     </td>
     <td width="33%" valign="top">
       <h4>▣ Parallel &amp; reproducible</h4>
-      <code>n_jobs</code> runs models in parallel with joblib. With seeded estimators and a fixed <code>random_state</code>, reports match the sequential run.
+      <code>n_jobs</code> runs models in parallel with joblib. With seeded estimators, a fixed <code>random_state</code> (and a fixed <code>shadow_seed</code> when shadows are on), reports match the sequential run.
     </td>
     <td width="33%" valign="top">
       <h4>▣ Auditable reports</h4>
@@ -159,7 +159,7 @@ Built-in linear models are wrapped in a `StandardScaler` pipeline fit on trainin
 
 | Page | Contents |
 |---|---|
-| [**Usage**](https://github.com/CountZero-Error/Featranker/blob/main/docs/usage.md) | API and defaults, choosing a scorer, your own models, parallel runs, the CLI, resampled ranking, `summarize`, labels, troubleshooting |
+| [**Usage**](https://github.com/CountZero-Error/Featranker/blob/main/docs/usage.md) | API and defaults, choosing a scorer, your own models, parallel runs, the CLI, resampled ranking, shadow features, `summarize`, labels, troubleshooting |
 | [**Report**](https://github.com/CountZero-Error/Featranker/blob/main/docs/report.md) | How to read the results, resampled (stability) reports, full report structure, ranking and failure rules |
 | [**Models**](https://github.com/CountZero-Error/Featranker/blob/main/docs/models.md) | All 40 built-in models, optional extras, known issues |
 

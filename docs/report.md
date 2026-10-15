@@ -28,11 +28,13 @@ Each model family casts one vote. Voting models are grouped by `family` (for exa
 | `n_families` | How many families voted. With fewer than 3, the consensus rests on very few independent views. |
 | `family_ranks` | Each voting family's rank for this group. Use it to see which families drive or disagree with the consensus. |
 | `n_models` | How many models voted. Every voting model ranks every group, so it is the same for all groups. It measures coverage, not confidence; `n_families` is the better count of independent views. |
+| `above_shadow_share` | Only with [shadows](usage.md#shadow-features) on. Each voting family contributes its fraction of members whose mean importance beat that model's strongest shadow group; this is their average. Near 1 means it beats the shuffled reference almost everywhere. It is relative and descriptive, not a p-value or proof of useful signal. |
 
 **5. Look at the importances behind a rank.** A rank is relative: it says a group's shuffle hurt the score more than other groups' shuffles did, not that it hurt a lot. For a group you care about, open `models[<name>]["importance"][<group>]` for a few models:
 
 - `mean` is the average score drop on this evaluation set with this scorer. Near 0 or negative means shuffling the group did not measurably hurt the score. That does not prove the model ignores the feature: a correlated feature can stand in for it (see the caveats below), or the scorer may not respond to the change.
 - `std` is the spread of the score drop across the `n_repeats` shuffles. A large spread relative to `mean` means individual shuffles disagree. More repeats make `mean` more precise but do not shrink this spread, and neither says whether the ranking holds on other data. To check that, rerun on a different evaluation split.
+- With shadows on, `above_shadow` says whether `mean` beat the model's `shadow_max`, the largest mean importance among the shuffled shadow groups. Each model's `shadow_importance` holds the shadow groups' `values`, `mean`, and `std` for comparison.
 
 ### Caveats
 
@@ -85,6 +87,7 @@ How to read `stability`, which is sorted by `median_rank`, then `top_k_share` (h
 | `min_rank`, `max_rank` | The best and worst place seen. A wide range means the position depends on which rows were used for evaluation. |
 | `top_k_share` | Fraction of attempted splits in which the group's place is at most `top_k`. Failed and empty-consensus splits contribute zero. Inspect `n_splits_ranked` and failures first: an intermediate share can reflect missing rankings, changing ranks, or both; no fixed band establishes statistical uncertainty. |
 | `n_splits_ranked` | How many splits produced a consensus. It is the same for every group. |
+| `above_shadow_share` | Only with shadows on: the mean of the group's per-split `above_shadow_share` over ranked splits. |
 
 Within each split, `rank_std` still measures disagreement between model families, not between splits; between-split variation is what `min_rank`, `max_rank`, and `top_k_share` show. With few splits (for example `cv=3`), these numbers are coarse. Every split also draws on the same data, so a stable ranking here is not a guarantee on new data.
 
@@ -93,6 +96,8 @@ Within each split, `rank_std` still measures disagreement between model families
 ## ▍ Structure
 
 `evaluation_mode` is always `"held_out"`. It names the workflow (scoring on data passed to `rank_features()`); FeatRanker cannot check that this data is really separate from the training data.
+
+With `shadows=True`, the report also has top-level `shadows: true` and `shadow_seed`; each model gains `shadow_importance` and `shadow_max`; each importance entry gains `above_shadow`; and each consensus row gains `above_shadow_share`. Without shadows, none of these keys appear.
 
 ```python
 {
