@@ -4,7 +4,7 @@
 
 ## ▍ API
 
-The API is one class: `FeatureRanker(...)`, then `.fit(...)`, then `.rank_features(...)`. [`.rank_resampled(...)`](#resampled-ranking) repeats that over cross-validation splits, and [`summarize(report)`](#summarize) reads the result.
+The API is one class: `FeatureRanker(...)`, then `.fit(...)`, then `.rank_features(...)`. [`.rank_resampled(...)`](#resampled-ranking) repeats that over cross-validation splits, [`ConsensusSelector`](#feature-selection) turns the ranking into a scikit-learn pipeline step, and [`summarize(report)`](#summarize) reads the result.
 
 ### `FeatureRanker(task, group="all", models=None, n_jobs=None, verbose=True, shadows=False, shadow_seed=None)`
 
@@ -267,6 +267,64 @@ Output shown with the `xgboost` and `catboost` extras installed. The two pure-no
 
 > [!WARNING]
 > Shadows only work if every model sees every column. A custom pipeline that drops columns, such as a positional `ColumnTransformer` with the default `remainder="drop"`, never sees the shadows, so every group trivially beats them. Shadow columns are appended after the real ones, so positional selectors of real columns still work.
+
+<a id="feature-selection"></a>
+
+## ▍ Feature selection in a pipeline
+
+Choosing features from a ranking of all your data and then cross-validating a model on them overstates its performance. `ConsensusSelector` avoids that by ranking inside `fit()`: as a `Pipeline` step under `cross_val_score` or `GridSearchCV`, it reranks on each training fold and never sees the rows it is scored on.
+
+```python
+from sklearn.datasets import load_diabetes
+from sklearn.linear_model import Ridge
+from sklearn.model_selection import cross_val_score
+from sklearn.pipeline import Pipeline
+
+from featranker import ConsensusSelector
+
+X, y = load_diabetes(return_X_y=True, as_frame=True)
+pipe = Pipeline([
+    ("select", ConsensusSelector(
+        "reg", "neg_mean_absolute_error", k=4, group="tree", cv=3, n_repeats=5,
+        random_state=0,
+    )),
+    ("model", Ridge()),
+])
+
+scores = cross_val_score(pipe, X, y, cv=5, scoring="neg_mean_absolute_error")
+print(f"nested-CV MAE: {-scores.mean():.1f} +/- {scores.std():.1f}")
+
+pipe.fit(X, y)  # final model on all development data
+print("selected:", pipe.named_steps["select"].selected_groups_)
+```
+
+```text
+nested-CV MAE: 49.9 +/- 2.3
+selected: ['s5', 'bmi', 'bp', 'sex']
+```
+
+Output shown with the `xgboost` and `catboost` extras installed. The score is honest because every outer fold chose its own four groups from its own training rows; the last line shows the groups chosen from all the data for the final model.
+
+### `ConsensusSelector(task, scoring, *, k=None, min_shadow_share=None, ...)`
+
+| Parameter | Default | Meaning |
+|---|---|---|
+| `task`, `scoring` | required | As in `FeatureRanker` and `rank_features()`. |
+| `k` | `None` | Keep the first `k` groups in the [stability](report.md#resampled-reports) order (or all groups if there are fewer). Python or NumPy integer. |
+| `min_shadow_share` | `None` | Keep groups whose stability `above_shadow_share` is at least this (0 to 1). Turns on [shadow features](#shadow-features). |
+| `group`, `models`, `n_jobs`, `shadow_seed` | as `FeatureRanker` | Passed to the ranker built in `fit()`. |
+| `feature_groups`, `cv`, `n_repeats`, `random_state` | as `rank_resampled()` | Passed to `rank_resampled()` on the data given to `fit()`. |
+| `verbose` | `False` | Progress bars; off by default because pipelines fit many times. |
+
+Set `k`, `min_shadow_share`, or both; with both, the shadow filter applies first, then the first `k` that pass. Invalid rules raise `ValueError` in `fit()`, before any ranking, following scikit-learn's convention that `__init__` only stores parameters (so `clone`, `set_params`, and `GridSearchCV` over `select__k` work).
+
+A selected group keeps all of its columns, in their original order. Feature names come from DataFrame columns; for arrays they are `x0`, `x1`, … and `feature_groups` must use those names. After `fit()`: `selected_groups_`, `report_` (the resampled report from this fit), `n_features_in_`, `feature_names_in_` (DataFrames), and the standard `get_support()` and `get_feature_names_out()`.
+
+- `report_` reflects only the data that particular fit saw. For the ranking of your whole development set, call `rank_resampled()` directly.
+- If no group passes, `fit()` warns and the selector keeps no columns, as scikit-learn's own selectors do. Most downstream estimators (such as `Ridge`) then fail on zero columns, so that pipeline fit errors out. Lower `min_shadow_share`, or use only the top-k rule by setting `min_shadow_share=None` and a positive `k`.
+- For a group-aware inner `cv` such as `GroupKFold`, pass row groups to `fit(X, y, groups=...)`; in a `Pipeline`, pass `select__groups=...` (for example `cross_val_score(..., params={"select__groups": groups})`, which slices them to each training fold).
+- DataFrame column labels are compared as strings, in `fit()` and `transform()`. A failed `fit()` clears any earlier fitted state.
+- **Cost.** Each `fit()` is one `rank_resampled()` run: `cv` rankings, doubled with shadows. Inside `cross_val_score(cv=n)` that is `n × cv` rankings; fitting the final pipeline afterwards adds one more run. `GridSearchCV` multiplies the cost by the number of candidates, plus its final refit. Use `group="tree"`, a small `cv`, and fewer `n_repeats` while searching.
 
 <a id="summarize"></a>
 
