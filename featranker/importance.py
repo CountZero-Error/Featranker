@@ -18,6 +18,7 @@ from joblib import Parallel, delayed
 from sklearn.base import clone
 from sklearn.dummy import DummyClassifier, DummyRegressor
 from sklearn.metrics import get_scorer
+from sklearn.model_selection import KFold, StratifiedKFold
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.utils.fixes import parse_version
@@ -160,7 +161,19 @@ def _float_target(values: np.ndarray) -> np.ndarray:
         raise ValueError("[!] Regression targets must be numeric.") from error
 
 
-def _failure(model: str, stage: str, error: Exception) -> Dict[str, str]:
+def _is_positive_int(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 1
+
+
+def _resolve_scorer(scoring: Any) -> tuple[Any, str]:
+    if isinstance(scoring, str):
+        return get_scorer(scoring), scoring
+    if callable(scoring):
+        return scoring, getattr(scoring, "__name__", type(scoring).__name__)
+    raise TypeError("[!] scoring must be a scikit-learn scorer name or callable.")
+
+
+def _failure(model: Optional[str], stage: str, error: Exception) -> Dict[str, Any]:
     return {
         "model": model,
         "stage": stage,
@@ -310,6 +323,128 @@ def _build_consensus(model_reports: Dict[str, Any]) -> List[Dict[str, Any]]:
             row["mean_rank"],
             row["feature_group"],
         ),
+    )
+
+
+CV_ERROR = (
+    "[!] cv must be an int >= 2, a splitter with split(), or an iterable of "
+    "(train_indices, eval_indices) pairs."
+)
+
+
+def _split_indices(indices: Any, n_rows: int) -> np.ndarray:
+    values = np.asarray(indices)
+    if (
+        values.ndim != 1
+        or len(values) == 0
+        or not np.issubdtype(values.dtype, np.integer)
+        or values.min() < 0
+        or values.max() >= n_rows
+    ):
+        raise ValueError(
+            "[!] Each split needs non-empty integer train and eval indices "
+            f"within 0..{n_rows - 1}."
+        )
+    return values.astype(int)
+
+
+def _resolve_splits(
+    cv: Any,
+    X_values: np.ndarray,
+    y_values: np.ndarray,
+    groups: Any,
+    task: str,
+    random_state: Optional[int],
+) -> List[tuple]:
+    """Materialize cv into validated (train, eval) index pairs before any fit."""
+    split_y = y_values
+    if isinstance(cv, (int, np.integer)) and not isinstance(cv, bool):
+        if cv < 2:
+            raise ValueError(CV_ERROR)
+        # Shuffled folds: unshuffled KFold on sorted data gives misleading splits.
+        splitter = StratifiedKFold if task == "clf" else KFold
+        cv = splitter(n_splits=int(cv), shuffle=True, random_state=random_state)
+        if task == "clf":
+            # Stratify on class codes: fit() accepts any labels (even 0.1/0.2),
+            # but StratifiedKFold rejects numeric labels it reads as continuous.
+            # Only the fold assignment sees these codes; each split still fits
+            # its own encoder on its training rows.
+            split_y = LabelEncoder().fit_transform(y_values)
+    if isinstance(cv, (str, bytes, bool)):  # str has .split(); reject it first
+        raise ValueError(CV_ERROR)
+    if callable(getattr(cv, "split", None)):
+        pairs = cv.split(X_values, split_y, groups)
+    elif not hasattr(cv, "__iter__"):
+        raise ValueError(CV_ERROR)
+    else:
+        pairs = cv
+
+    resolved = []
+    for pair in pairs:
+        try:
+            train, evaluation = pair
+        except (TypeError, ValueError) as error:
+            raise ValueError(CV_ERROR) from error
+        n_rows = len(X_values)
+        train, evaluation = _split_indices(train, n_rows), _split_indices(evaluation, n_rows)
+        if np.intersect1d(train, evaluation).size:
+            raise ValueError("[!] Train and eval indices overlap within a split.")
+        resolved.append((train, evaluation))
+    if not resolved:
+        raise ValueError("[!] cv produced no splits.")
+    return resolved
+
+
+def _consensus_positions(consensus: List[Dict[str, Any]]) -> Dict[str, int]:
+    """1-based place in a sorted consensus; equal (median_rank, mean_rank) share the better place."""
+    positions: Dict[str, int] = {}
+    previous_key = None
+    for index, row in enumerate(consensus, start=1):
+        key = (row["median_rank"], row["mean_rank"])
+        if key != previous_key:
+            position, previous_key = index, key
+        positions[row["feature_group"]] = position
+    return positions
+
+
+def _build_stability(
+    split_reports: List[Dict[str, Any]], n_splits: int, top_k: int
+) -> List[Dict[str, Any]]:
+    """Aggregate each group's per-split consensus position into one row per group."""
+    group_names = list(split_reports[0]["report"]["feature_groups"]) if split_reports else []
+    split_ranks: Dict[str, List[Optional[int]]] = {name: [] for name in group_names}
+    for entry in split_reports:
+        by_group = _consensus_positions(entry["report"]["consensus"])
+        for name in group_names:
+            split_ranks[name].append(by_group.get(name))
+
+    if not any(entry["report"]["consensus"] for entry in split_reports):
+        warnings.warn(
+            "No split produced a consensus, so the stability table is empty.",
+            UserWarning,
+            # caller -> rank_resampled -> _build_stability
+            stacklevel=3,
+        )
+        return []
+
+    rows = []
+    for name, ranks in split_ranks.items():
+        ranked = [rank for rank in ranks if rank is not None]
+        rows.append(
+            {
+                "feature_group": name,
+                "median_rank": float(np.median(ranked)),
+                "min_rank": min(ranked),
+                "max_rank": max(ranked),
+                "split_ranks": ranks,
+                "n_splits_ranked": len(ranked),
+                # Failed and consensus-less splits count as "not in top k".
+                "top_k_share": sum(rank <= top_k for rank in ranked) / n_splits,
+            }
+        )
+    return sorted(
+        rows,
+        key=lambda row: (row["median_rank"], -row["top_k_share"], row["feature_group"]),
     )
 
 
@@ -527,18 +662,9 @@ class FeatureRanker:
         """Rank feature groups on explicitly supplied evaluation data."""
         if not self.is_fitted_:
             raise RuntimeError("[!] Call fit() before rank_features().")
-        if not isinstance(n_repeats, int) or isinstance(n_repeats, bool) or n_repeats < 1:
+        if not _is_positive_int(n_repeats):
             raise ValueError("[!] n_repeats must be a positive integer.")
-        if isinstance(scoring, str):
-            scorer = get_scorer(scoring)
-            scoring_name = scoring
-        elif callable(scoring):
-            scorer = scoring
-            scoring_name = getattr(scoring, "__name__", type(scoring).__name__)
-        else:
-            raise TypeError(
-                "[!] scoring must be a scikit-learn scorer name or callable."
-            )
+        scorer, scoring_name = _resolve_scorer(scoring)
 
         X_values, _ = _validate_X(X_eval, expected_names=self.feature_names_)
         y_values = _validate_y(y_eval, len(X_values))
@@ -589,6 +715,91 @@ class FeatureRanker:
             "failures": self.initialization_failures_
             + self.fit_failures_
             + ranking_failures,
+        }
+
+    def rank_resampled(
+        self,
+        X: Any,
+        y: Any,
+        *,
+        scoring: Any,
+        cv: Any = 5,
+        groups: Any = None,
+        feature_names: Optional[List[str]] = None,
+        feature_groups: Optional[Dict[str, List[str]]] = None,
+        n_repeats: int = 10,
+        random_state: Optional[int] = None,
+        top_k: int = 5,
+    ) -> Dict[str, Any]:
+        """
+        Fit and rank on every cv split of X/y and report rank stability.
+
+        Each split uses a fresh ranker with this ranker's settings; this
+        ranker's own fitted state is not changed. Pass development data only,
+        never the final test set.
+        """
+        X_values, names = _validate_X(X, feature_names=feature_names)
+        y_values = _validate_y(y, len(X_values))
+        if not _is_positive_int(n_repeats):
+            raise ValueError("[!] n_repeats must be a positive integer.")
+        if not _is_positive_int(top_k):
+            raise ValueError("[!] top_k must be a positive integer.")
+        _resolve_scorer(scoring)
+        _resolve_feature_groups(names, feature_groups)
+        splits = _resolve_splits(
+            cv, X_values, y_values, groups, self.task, random_state
+        )
+
+        split_reports: List[Dict[str, Any]] = []
+        failures: List[Dict[str, Any]] = []
+        for index, (train, evaluation) in enumerate(splits):
+            try:
+                ranker = FeatureRanker(
+                    self.task,
+                    self.group,
+                    models=self.user_models,
+                    n_jobs=self.n_jobs,
+                    verbose=self.verbose,
+                )
+                ranker.fit(X_values[train], y_values[train], feature_names=names)
+                report = ranker.rank_features(
+                    X_values[evaluation],
+                    y_values[evaluation],
+                    scoring=scoring,
+                    feature_groups=feature_groups,
+                    n_repeats=n_repeats,
+                    random_state=None if random_state is None else random_state + index,
+                )
+            except Exception as error:
+                failures.append({"split": index, **_failure(None, "split", error)})
+                continue
+            split_reports.append(
+                {
+                    "split": index,
+                    "n_train": len(train),
+                    "n_eval": len(evaluation),
+                    "report": report,
+                }
+            )
+            failures.extend({"split": index, **f} for f in report["failures"])
+
+        if not split_reports:
+            raise RuntimeError(
+                f"[!] No split ranked successfully. Failures: {json.dumps(failures)}"
+            )
+        first = split_reports[0]["report"]
+        return {
+            "evaluation_mode": "resampled",
+            "scoring": first["scoring"],
+            "n_repeats": n_repeats,
+            "random_state": random_state,
+            "feature_groups": first["feature_groups"],
+            "provenance": _provenance(),
+            "top_k": top_k,
+            "n_splits": len(splits),
+            "splits": split_reports,
+            "stability": _build_stability(split_reports, len(splits), top_k),
+            "failures": failures,
         }
 
     def _score_baseline(

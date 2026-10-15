@@ -4,7 +4,7 @@
 
 ## ▍ API
 
-The API is one class with two methods, `FeatureRanker(...)`, then `.fit(...)`, then `.rank_features(...)`, plus [`summarize(report)`](#summarize) to read the result.
+The API is one class: `FeatureRanker(...)`, then `.fit(...)`, then `.rank_features(...)`. [`.rank_resampled(...)`](#resampled-ranking) repeats that over cross-validation splits, and [`summarize(report)`](#summarize) reads the result.
 
 ### `FeatureRanker(task, group="all", models=None, n_jobs=None, verbose=True)`
 
@@ -145,11 +145,71 @@ segment:
 
 </details>
 
+<a id="resampled-ranking"></a>
+
+## ▍ Resampled ranking
+
+One split gives one ranking. `rank_resampled()` fits and ranks on every cross-validation split of the data you pass, then reports how much each feature group's rank moves between splits.
+
+```python
+from sklearn.datasets import load_diabetes
+
+from featranker import FeatureRanker
+
+data = load_diabetes()
+ranker = FeatureRanker(task="reg", verbose=False)
+report = ranker.rank_resampled(
+    data.data,
+    data.target,
+    feature_names=list(data.feature_names),
+    scoring="neg_mean_absolute_error",
+    cv=5,
+    random_state=0,
+    top_k=3,
+)
+
+for row in report["stability"][:4]:
+    print(
+        f"{row['feature_group']:>4}  median place {row['median_rank']:g}  "
+        f"range {row['min_rank']}-{row['max_rank']}  "
+        f"top 3 in {row['top_k_share']:.0%} of splits"
+    )
+```
+
+```text
+  s5  median place 1  range 1-2  top 3 in 100% of splits
+ bmi  median place 2  range 1-2  top 3 in 100% of splits
+  bp  median place 3  range 3-3  top 3 in 100% of splits
+  s3  median place 4  range 4-7  top 3 in 0% of splits
+```
+
+Output shown with the `xgboost` and `catboost` extras installed. A group's *place* in a split is its position in that split's sorted consensus. `s5` and `bmi` swap first and second place, `bp` is third in every split, and `s3` moves between fourth and seventh.
+
+### `.rank_resampled(X, y, *, scoring, cv=5, groups=None, feature_names=None, feature_groups=None, n_repeats=10, random_state=None, top_k=5)`
+
+| Parameter | Default | Meaning |
+|---|---|---|
+| `X`, `y`, `feature_names` | | All development data, with the same rules as `fit()`. Each split takes its own training and evaluation rows from it. |
+| `scoring`, `feature_groups`, `n_repeats` | | Same as `rank_features()`. |
+| `cv` | `5` | An integer number of folds (shuffled; stratified for `task="clf"`), any scikit-learn splitter such as `RepeatedKFold` or `GroupKFold`, or a list of `(train_indices, eval_indices)` pairs. |
+| `groups` | `None` | Passed to the splitter's `split()`, for example row groups for `GroupKFold`. |
+| `random_state` | `None` | Seeds integer-`cv` shuffling. Split `i` uses permutation seed `random_state + i`. |
+| `top_k` | `5` | For `top_k_share`: a group counts as top in a split when its place in that split's consensus is at most `top_k`. Groups tied on both `median_rank` and `mean_rank` share the better place, so a split can have more than `top_k` top groups. |
+
+Each split uses a new ranker with this ranker's settings, so the ranker you call it on is not changed. A split that fails entirely is recorded in `failures` with `stage: "split"` and the run continues; it raises only if no split ranks. Invalid `cv`, `top_k`, scorer, `n_repeats`, or feature groups raise before any model is fit. See [Resampled reports](report.md#resampled-reports) for the output.
+
+**Cost.** One call costs about `n_splits` times a normal `fit()` plus `rank_features()`. With `group="all"` and `cv=10`, that is ten full runs; start with `cv=5`, a smaller `group`, or fewer `n_repeats`.
+
+> [!IMPORTANT]
+> Pass development data only and keep your final test set out. The splits here are internal validation. Choosing features from these results and then scoring a model on the same data overstates its performance.
+>
+> Fit learned preprocessing within each training split. Put transformations compatible with FeatRanker's finite numeric input contract inside custom model pipelines. For raw missing or categorical data requiring learned preprocessing, use a manual split workflow; do not fit preprocessing on all development rows before this call.
+
 <a id="summarize"></a>
 
 ## ▍ Summarize a report
 
-`summarize(report)` applies the [reading guide](report.md#reading-the-report) for you. It returns a list of findings and does not change the report. It works on the dict from `rank_features()` or on a report loaded from the CLI's JSON.
+`summarize(report)` applies the [reading guide](report.md#reading-the-report) for you. It returns a list of findings and does not change the report. It works on the dict from `rank_features()` or on a report loaded from the CLI's JSON. For a resampled report, summarize each `report["splits"][i]["report"]`; passing the resampled report itself raises `ValueError`.
 
 ```python
 from featranker import summarize
@@ -192,7 +252,7 @@ Features left out of `feature_groups` become singleton groups. Empty groups, unk
 
 ## ▍ Data handling and labels
 
-FeatRanker does not impute, encode features, split, or select features. It changes the data in two places only:
+FeatRanker does not impute, encode features, or select features. It changes data values in two places only:
 
 - **Linear scaling.** Built-in linear models sit behind a `StandardScaler` fit on training data only. Tree models and your own models get the data as given.
 - **Classification labels.** For `task="clf"`, `fit()` encodes the labels to `0..n_classes-1` with a `LabelEncoder`, because some estimators (XGBoost) require it. Every estimator and scorer, including your own, sees the encoded labels. `ranker.label_encoder.classes_` maps each code back to the original label; code `i` is `classes_[i]`.

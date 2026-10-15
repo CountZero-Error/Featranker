@@ -40,6 +40,56 @@ Each model family casts one vote. Voting models are grouped by `family` (for exa
 - **Rankings depend on the evaluation data and scorer.** A different split or metric can reorder close groups. Treat groups with similar `median_rank` as tied.
 - **Use rankings inside validation only.** Pick or drop features using inner-fold results, never the final test set. See the [leakage warning](../README.md#-03--how-it-works).
 
+<a id="resampled-reports"></a>
+
+## ▍ Resampled reports
+
+[`rank_resampled()`](usage.md#resampled-ranking) returns a report with `evaluation_mode: "resampled"`:
+
+```python
+{
+    "evaluation_mode": "resampled",
+    "scoring": "neg_mean_absolute_error",
+    "n_repeats": 10,
+    "random_state": 0,
+    "feature_groups": {"bmi": ["bmi"], "...": ["..."]},
+    "provenance": {"featranker": "0.6.0", "...": "..."},
+    "top_k": 3,
+    "n_splits": 5,
+    "splits": [
+        {"split": 0, "n_train": 353, "n_eval": 89, "report": {...}},  # a normal report
+    ],
+    "stability": [
+        {
+            "feature_group": "bmi",
+            "median_rank": 2.0,
+            "min_rank": 1,
+            "max_rank": 2,
+            "split_ranks": [2, 1, 1, 2, 2],
+            "n_splits_ranked": 5,
+            "top_k_share": 1.0,
+        }
+    ],
+    "failures": [],
+}
+```
+
+Each `splits[i]["report"]` is an ordinary report for that split; read it with the guide above or [`summarize()`](usage.md#summarize).
+
+How to read `stability`, which is sorted by `median_rank`, then `top_k_share` (higher first), then name:
+
+| Field | How to read it |
+|---|---|
+| `split_ranks` | The group's place in each split's sorted consensus (1 = first), in split order; `null` where that split had an empty consensus. Groups tied on both `median_rank` and `mean_rank` share the better place. |
+| `median_rank` | The median place across ranked splits. Use it for the overall order. |
+| `min_rank`, `max_rank` | The best and worst place seen. A wide range means the position depends on which rows were used for evaluation. |
+| `top_k_share` | Fraction of attempted splits in which the group's place is at most `top_k`. Failed and empty-consensus splits contribute zero. Inspect `n_splits_ranked` and failures first: an intermediate share can reflect missing rankings, changing ranks, or both; no fixed band establishes statistical uncertainty. |
+| `n_splits_ranked` | How many splits produced a consensus. It is the same for every group. |
+
+Within each split, `rank_std` still measures disagreement between model families, not between splits; between-split variation is what `min_rank`, `max_rank`, and `top_k_share` show. With few splits (for example `cv=3`), these numbers are coarse. Every split also draws on the same data, so a stable ranking here is not a guarantee on new data.
+
+`failures` holds every split's failures, each with a `split` index. A split that failed entirely appears with `"model": null` and `"stage": "split"`.
+
 ## ▍ Structure
 
 `evaluation_mode` is always `"held_out"`. It names the workflow (scoring on data passed to `rank_features()`); FeatRanker cannot check that this data is really separate from the training data.

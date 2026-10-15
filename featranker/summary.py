@@ -116,6 +116,11 @@ def summarize(report: Any) -> List[Dict[str, Any]]:
     """
     if not isinstance(report, dict):
         raise TypeError("[!] summarize() expects a report dict.")
+    if report.get("evaluation_mode") == "resampled":
+        raise ValueError(
+            "[!] summarize() reads single-split reports; for a resampled report, "
+            "summarize each report['splits'][i]['report'] instead."
+        )
     for key in REQUIRED_KEYS:
         if key not in report:
             raise ValueError(f"[!] Report is missing required key '{key}'.")

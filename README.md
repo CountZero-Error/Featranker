@@ -148,6 +148,8 @@ importance = model_score - model_score_after_shuffling
 
 Every model uses the same scorer. In the report, the unshuffled score is each model's `evaluation_score`; `baseline_score` is the dummy's score, used only for the vote.
 
+To see how stable a ranking is, `rank_resampled()` repeats this over cross-validation splits and reports each group's rank range and how often it lands in the top *k* ([details](https://github.com/CountZero-Error/Featranker/blob/main/docs/usage.md#resampled-ranking)).
+
 Built-in linear models are wrapped in a `StandardScaler` pipeline fit on training data only; tree models and your own models are used as given.
 
 > [!IMPORTANT]
@@ -157,15 +159,15 @@ Built-in linear models are wrapped in a `StandardScaler` pipeline fit on trainin
 
 | Page | Contents |
 |---|---|
-| [**Usage**](https://github.com/CountZero-Error/Featranker/blob/main/docs/usage.md) | API and defaults, choosing a scorer, your own models, parallel runs, the CLI, `summarize`, labels, troubleshooting |
-| [**Report**](https://github.com/CountZero-Error/Featranker/blob/main/docs/report.md) | How to read the results, full report structure, ranking and failure rules |
+| [**Usage**](https://github.com/CountZero-Error/Featranker/blob/main/docs/usage.md) | API and defaults, choosing a scorer, your own models, parallel runs, the CLI, resampled ranking, `summarize`, labels, troubleshooting |
+| [**Report**](https://github.com/CountZero-Error/Featranker/blob/main/docs/report.md) | How to read the results, resampled (stability) reports, full report structure, ranking and failure rules |
 | [**Models**](https://github.com/CountZero-Error/Featranker/blob/main/docs/models.md) | All 40 built-in models, optional extras, known issues |
 
 Upgrading from 0.3? The preparation-file workflow was removed in 0.4.0; see the [release notes](https://github.com/CountZero-Error/Featranker/releases/tag/v0.4.0).
 
 ## ▍ Scope
 
-FeatRanker intentionally does **not** do cross-validation, imputation, feature encoding, automatic feature selection, or SHAP-style attribution. The one target change it makes is encoding classification labels to `0..n_classes-1` internally (see [Usage](https://github.com/CountZero-Error/Featranker/blob/main/docs/usage.md#labels)). Results depend on the evaluation sample, scorer, estimators, correlated predictors, and permutation design.
+FeatRanker intentionally does **not** do imputation, feature encoding, automatic feature selection, model tuning, or SHAP-style attribution. `rank_resampled()` splits data only to measure ranking stability; it does not evaluate a final model. The one target change it makes is encoding classification labels to `0..n_classes-1` internally (see [Usage](https://github.com/CountZero-Error/Featranker/blob/main/docs/usage.md#labels)). Results depend on the evaluation sample, scorer, estimators, correlated predictors, and permutation design.
 
 ## ▍ Development
 

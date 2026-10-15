@@ -136,3 +136,22 @@ def test_shipped_linear_classifiers_are_reproducible():
         )
 
     assert run()["models"] == run()["models"]
+
+
+def test_diabetes_resampled_ranking_with_shipped_registry():
+    dataset = load_diabetes()
+    ranker = FeatureRanker(task="reg", group="tree", verbose=False)
+
+    report = ranker.rank_resampled(
+        dataset.data, dataset.target, feature_names=list(dataset.feature_names),
+        scoring="r2", cv=3, n_repeats=2, random_state=0, top_k=3,
+    )
+
+    assert report["n_splits"] == 3 and len(report["splits"]) == 3
+    assert {row["feature_group"] for row in report["stability"]} == set(
+        dataset.feature_names
+    )
+    top = report["stability"][0]
+    assert 0.0 <= top["top_k_share"] <= 1.0
+    assert top["n_splits_ranked"] == 3
+    json.dumps(report, allow_nan=False)

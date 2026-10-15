@@ -218,3 +218,8 @@ def test_rejects_non_dict():
 def test_missing_key_is_named():
     with pytest.raises(ValueError, match="baseline_score"):
         summarize({"models": {}})
+
+
+def test_resampled_report_is_rejected_with_guidance():
+    with pytest.raises(ValueError, match="splits"):
+        summarize({"evaluation_mode": "resampled", "splits": [], "stability": []})
