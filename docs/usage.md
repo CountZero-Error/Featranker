@@ -4,7 +4,7 @@
 
 ## ▍ API
 
-The API is one class: `FeatureRanker(...)`, then `.fit(...)`, then `.rank_features(...)`. [`.rank_resampled(...)`](#resampled-ranking) repeats that over cross-validation splits, [`ConsensusSelector`](#feature-selection) turns the ranking into a scikit-learn pipeline step, and [`summarize(report)`](#summarize) reads the result.
+The API is one class: `FeatureRanker(...)`, then `.fit(...)`, then `.rank_features(...)`. [`.rank_resampled(...)`](#resampled-ranking) repeats that over cross-validation splits, [`ConsensusSelector`](#feature-selection) turns the ranking into a scikit-learn pipeline step, [`summarize(report)`](#summarize) reads the result, and [`to_prompt` / `explain`](#llm-interpretation) hand it to an LLM with checked citations.
 
 ### `FeatureRanker(task, group="all", models=None, n_jobs=None, verbose=True, shadows=False, shadow_seed=None)`
 
@@ -352,6 +352,104 @@ Each finding is a dict with `code`, `severity` (`"info"` or `"warning"`), `messa
 | `below_shadow` | info | With [shadows](#shadow-features) on, groups whose `above_shadow_share` is below 0.5. Descriptive, not a significance test. |
 
 An empty list means nothing stood out, not that the ranking is proven. The checks cover one evaluation set.
+
+<a id="llm-interpretation"></a>
+
+## ▍ LLM interpretation
+
+FeatRanker can hand a report to any LLM you choose and check the numbers in the reply. It never calls a model, holds an API key, or imports an LLM library itself.
+
+- `to_prompt(report, *, anonymize=False)` returns a prompt string: FeatRanker's interpretation rules (no causal claims, equal `median_rank` ties only the primary score, low importance is not proof of non-use, votes are not independent confirmations, shares are not p-values), the [`summarize()`](#summarize) findings, a compact JSON view of the report (without per-repeat values or fitted params), and a required JSON reply format in which every claim cites the data it uses. Paste it into any chat, or send it yourself. It works for single-split and [resampled](#resampled-ranking) reports.
+- `explain(report, llm, *, anonymize=False)` builds the same prompt, calls `llm(prompt)` once, where `llm` is any function you write that takes the prompt string and returns the reply string, and checks every cited value.
+
+```python
+import json
+
+from sklearn.datasets import load_diabetes
+from sklearn.model_selection import train_test_split
+
+from featranker import FeatureRanker, explain
+
+data = load_diabetes()
+X_train, X_eval, y_train, y_eval = train_test_split(
+    data.data, data.target, test_size=0.3, random_state=0
+)
+ranker = FeatureRanker(task="reg", group="tree", verbose=False)
+ranker.fit(X_train, y_train, feature_names=list(data.feature_names))
+report = ranker.rank_features(
+    X_eval, y_eval, scoring="neg_mean_absolute_error", random_state=42
+)
+
+
+def stand_in_llm(prompt: str) -> str:
+    # A real LLM reads the prompt; this fixed reply just shows the checking.
+    return json.dumps({
+        "summary": "bmi and s5 share first place; bp follows.",
+        "claims": [
+            {"text": "bmi and s5 are tied at median rank 1.5.", "evidence": [
+                {"path": "consensus[0].median_rank", "value": 1.5},
+                {"path": "consensus[1].median_rank", "value": 1.5},
+            ]},
+            {"text": "bp is third with median rank 3.25.", "evidence": [
+                {"path": "consensus[2].feature_group", "value": "bp"},
+                {"path": "consensus[2].median_rank", "value": 3.25},
+            ]},
+            {"text": "Nine models vote.", "evidence": [
+                {"path": "consensus[0].n_models", "value": 9},
+            ]},
+        ],
+    })
+
+
+result = explain(report, stand_in_llm)
+for claim in result["claims"]:
+    print("verified    " if claim["verified"] else "NOT verified", claim["text"])
+print("all_verified:", result["all_verified"])
+```
+
+```text
+verified     bmi and s5 are tied at median rank 1.5.
+verified     bp is third with median rank 3.25.
+NOT verified Nine models vote.
+all_verified: False
+```
+
+The stand-in returns a fixed reply so the example runs without a model. The third claim cites `n_models` as 9; the report says 7, so it is flagged.
+
+`explain()` returns `{"summary": ..., "claims": [{"text": ..., "evidence": [{"path", "value", "verified"}], "verified": ...}], "all_verified": ...}`. A cited value is verified when its path into the prompt's DATA section exists and the value matches. Paths use dot keys and `[i]` indices (`consensus[0].median_rank`), or a JSON Pointer for keys containing `.`, `[`, or `/` (`/models/model.v1/importance/lab[0]/mean`, with `~1` for `/`). Numbers may differ by up to 0.01 or 1% (so rounding to two decimals passes); other values must match exactly and in type, so `true` never matches `1`. Values must be a number, string, boolean, or null. Verification uses a copy taken when the prompt was built, so changing the report during the `llm` call cannot affect it. A claim is verified only if it cites at least one value and every cited value checks out. A reply that is not the requested JSON raises `ValueError` with its first 200 characters.
+
+> [!WARNING]
+> Verified numbers do not make a reading correct. A claim can cite true values and still overstate what they mean; the prompt's rules guide the wording, but only the numbers are checked. Read the claims against [Reading the report](report.md#reading-the-report).
+
+**With Claude.** A minimal `llm` function using Anthropic's official Python SDK (`pip install anthropic`, your own API key):
+
+```python
+import anthropic
+
+from featranker import explain
+
+client = anthropic.Anthropic()  # reads ANTHROPIC_API_KEY or an `ant auth login` profile
+
+
+def claude(prompt: str) -> str:
+    response = client.beta.messages.create(
+        model="claude-opus-5-5",
+        max_tokens=16000,
+        betas=["server-side-fallback-2026-07-01"],
+        fallbacks="default",  # a declined request is retried on Anthropic's recommended fallback model
+        messages=[{"role": "user", "content": prompt}],
+    )
+    if response.stop_reason == "refusal":
+        raise RuntimeError(f"Request declined: {response.stop_details}")
+    return next(block.text for block in response.content if block.type == "text")
+
+
+result = explain(report, claude, anonymize=True)
+```
+
+This recipe is not run by FeatRanker's tests, because it needs your key and network access. It opts into server-side fallback (`fallbacks="default"`), so a declined request is retried on Anthropic's recommended fallback model, and it raises if the request is still declined. For a local model, write the same kind of function around your model's client; FeatRanker only needs a string back.
+
+**Privacy.** Only the compact report view and the `summarize()` findings are sent: scores, ranks, importances, family and shadow fields, and failure model, stage, and error type. Failure messages are never sent, because exceptions can quote feature names or data values, and a custom exception's class name is sent as `CustomError` (built-in names such as `ValueError` stay); no data rows are sent. Identifiers are included unless you pass `anonymize=True`, which replaces feature groups with `g1`, `g2`, …, columns with `c1`, `c2`, …, your own model and family names with `m1`, `f1`, …, and a custom scorer's name with `custom_scorer`. Built-in model, family, and scorer names stay readable. The prompt then asks the model to wrap those aliases as `[[g1]]`-style markers and keep built-in names as they are, and only the markers are mapped back in the returned text; evidence paths and values are returned as cited. Anonymization covers identifiers, not fixed vocabulary: a feature named `fit` still shares its spelling with the failure stage `"fit"`.
 
 <a id="grouped-permutation"></a>
 
