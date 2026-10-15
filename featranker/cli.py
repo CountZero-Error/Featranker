@@ -144,9 +144,14 @@ def _build_parser() -> argparse.ArgumentParser:
         choices=["linear", "tree", "all"],
         default="all",
         help=(
-            "Model family: 'linear' (linear models only), "
+            "Built-in model group: 'linear' (linear models only), "
             "'tree' (tree/ensemble models only), or 'all' (both)."
         ),
+    )
+    parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help="Hide progress bars (warnings and errors are still shown).",
     )
     parser.add_argument(
         "--output",
@@ -197,7 +202,9 @@ def _load_cli_inputs(args: argparse.Namespace) -> Dict[str, Any]:
 
 def _run_ranking(args: argparse.Namespace) -> Dict[str, Any]:
     inputs = _load_cli_inputs(args)
-    ranker = FeatureRanker(task=args.task, group=args.group, n_jobs=args.n_jobs)
+    ranker = FeatureRanker(
+        task=args.task, group=args.group, n_jobs=args.n_jobs, verbose=not args.quiet
+    )
     ranker.fit(*inputs["train"])
     return ranker.rank_features(
         *inputs["eval"],

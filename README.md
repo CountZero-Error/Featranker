@@ -50,7 +50,7 @@ FeatRanker trains a set of estimators on explicit training data, measures permut
     </td>
     <td width="33%" valign="top">
       <h4>▣ Rank consensus</h4>
-      Aggregate per-model <i>ranks</i>, not incomparable raw importance magnitudes.
+      Aggregate <i>ranks</i>, not incomparable raw importance magnitudes. Each model family gets one vote, so near-duplicate models cannot outvote the rest.
     </td>
   </tr>
   <tr>
@@ -136,7 +136,8 @@ fit()            train every model + a dummy baseline on the training data
 rank_features()  score every model on the evaluation data
                  shuffle each feature group n_repeats times, measure the score drop
                  rank the groups within each model
-                 models that beat the dummy vote  ->  median / mean rank consensus
+                 models that beat the dummy vote, one vote per model family
+                 ->  median / mean rank consensus
 ```
 
 For each model, a feature group's importance is how much that model's score drops when the group is shuffled:
@@ -156,7 +157,7 @@ Built-in linear models are wrapped in a `StandardScaler` pipeline fit on trainin
 
 | Page | Contents |
 |---|---|
-| [**Usage**](https://github.com/CountZero-Error/Featranker/blob/main/docs/usage.md) | API and defaults, choosing a scorer, your own models, parallel runs, the CLI, labels, troubleshooting |
+| [**Usage**](https://github.com/CountZero-Error/Featranker/blob/main/docs/usage.md) | API and defaults, choosing a scorer, your own models, parallel runs, the CLI, `summarize`, labels, troubleshooting |
 | [**Report**](https://github.com/CountZero-Error/Featranker/blob/main/docs/report.md) | How to read the results, full report structure, ranking and failure rules |
 | [**Models**](https://github.com/CountZero-Error/Featranker/blob/main/docs/models.md) | All 40 built-in models, optional extras, known issues |
 

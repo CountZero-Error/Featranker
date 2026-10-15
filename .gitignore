@@ -204,6 +204,7 @@ cython_debug/
 
 # Local-only project files
 /.codegraph/
+/_legacy/
 /docs/superpowers/
 /CHANGELOG.md
 /MANIFEST.in

@@ -88,6 +88,9 @@ def test_iris_classification_with_shipped_registry():
 
     _assert_shipped_registry_report(report, dataset.data.shape[1])
     assert {"logistic_regression", "random_forest"} <= set(report["models"])
+    families = {name: m["family"] for name, m in report["models"].items()}
+    assert families["logistic_regression_l1"] == families["logistic_regression"]
+    assert families["logistic_regression"] != families["random_forest"]
 
 
 def test_diabetes_regression_with_shipped_registry():

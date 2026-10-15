@@ -85,8 +85,9 @@ def test_modern_cli_routes_train_and_eval_data(monkeypatch, tmp_path, capsys):
     calls = {}
 
     class RecordingRanker:
-        def __init__(self, task, group, n_jobs):
+        def __init__(self, task, group, n_jobs, verbose):
             calls["constructor"] = (task, group, n_jobs)
+            calls["verbose"] = verbose
 
         def fit(self, X, y, feature_names):
             calls["fit"] = (X.copy(), y.copy(), list(feature_names))
@@ -128,6 +129,7 @@ def test_modern_cli_routes_train_and_eval_data(monkeypatch, tmp_path, capsys):
     assert cli_module.main() == 0
 
     assert calls["constructor"] == ("reg", "tree", 2)
+    assert calls["verbose"] is True
     assert np.array_equal(calls["fit"][0], [[1, 2], [4, 5], [7, 8]])
     assert np.array_equal(calls["fit"][1], [3, 6, 9])
     assert calls["fit"][2] == ["a", "b"]
@@ -220,6 +222,34 @@ def test_cli_end_to_end_with_real_ranker_and_registry(monkeypatch, tmp_path):
     assert not [f for f in report["failures"] if f["stage"] in {"fit", "ranking"}]
 
 
+def test_cli_quiet_writes_report_without_progress(monkeypatch, tmp_path, capsys):
+    train, evaluation = tmp_path / "train.csv", tmp_path / "eval.csv"
+    rows = "\n".join(f"{i},{i % 3},{2 * i}" for i in range(8))
+    train.write_text("a,b,target\n" + rows + "\n", encoding="utf-8")
+    evaluation.write_text("a,b,target\n" + rows + "\n", encoding="utf-8")
+    output = tmp_path / "report.json"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "featranker", "--task", "reg", "--group", "linear",
+            "--train-data", str(train), "--eval-data", str(evaluation),
+            "--target", "target", "--scoring", "r2", "--n-repeats", "1",
+            "--quiet", "--output", str(output),
+        ],
+    )
+
+    import warnings
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        assert cli_module.main() == 0
+
+    err = capsys.readouterr().err
+    assert "[*]" not in err and "it/s" not in err
+    assert json.loads(output.read_text(encoding="utf-8"))["consensus"]
+
+
 def test_modern_cli_rejects_mismatched_feature_order(
     monkeypatch, tmp_path, capsys
 ):
@@ -256,7 +286,7 @@ def test_modern_cli_accepts_eval_class_subset(monkeypatch, tmp_path, capsys):
     monkeypatch.setattr(
         cli_module,
         "FeatureRanker",
-        lambda task, group, n_jobs: clf_ranker_with_models(
+        lambda task, group, n_jobs, verbose: clf_ranker_with_models(
             monkeypatch, {"ok": RecordingClassifier()}
         ),
     )
@@ -313,7 +343,7 @@ def _modern_argv(tmp_path, *extra, train="a,target\n1,0\n2,1\n", eval_="a,target
 
 
 class NoFitRanker:
-    def __init__(self, task, group, n_jobs):
+    def __init__(self, task, group, n_jobs, verbose):
         pass
 
     def fit(self, X, y, feature_names):
@@ -383,7 +413,7 @@ def test_cli_rejects_unseen_longer_eval_label_with_full_name(
     monkeypatch.setattr(
         cli_module,
         "FeatureRanker",
-        lambda task, group, n_jobs: clf_ranker_with_models(
+        lambda task, group, n_jobs, verbose: clf_ranker_with_models(
             monkeypatch, {"ok": RecordingClassifier()}
         ),
     )

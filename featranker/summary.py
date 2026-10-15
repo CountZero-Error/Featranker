@@ -1,0 +1,122 @@
+"""
+Deterministic findings for a FeatRanker report (the reading guide as code).
+"""
+
+from typing import Any, Dict, List
+
+# A consensus resting on fewer families than this is flagged.
+MIN_FAMILIES = 3
+
+REQUIRED_KEYS = ("baseline_score", "models", "consensus", "failures")
+FAILURE_STAGES = ("initialization", "fit", "ranking")
+
+
+def _finding(code: str, severity: str, message: str, evidence: Dict[str, Any]) -> Dict[str, Any]:
+    return {"code": code, "severity": severity, "message": message, "evidence": evidence}
+
+
+def _gate_off(report: Dict[str, Any]) -> List[Dict[str, Any]]:
+    if report["baseline_score"] is not None:
+        return []
+    dummy_failures = [f for f in report["failures"] if f.get("model") == "dummy_baseline"]
+    return [_finding(
+        "gate_off", "warning",
+        "The dummy baseline could not be scored, so every ranked model voted "
+        "whether or not it beat the dummy.",
+        {"dummy_failures": dummy_failures},
+    )]
+
+
+def _empty_consensus(report: Dict[str, Any]) -> List[Dict[str, Any]]:
+    if report["consensus"]:
+        return []
+    return [_finding(
+        "empty_consensus", "warning",
+        "No model beat the dummy baseline, so there is no consensus ranking.",
+        {"n_ranked_models": len(report["models"])},
+    )]
+
+
+def _failures(report: Dict[str, Any]) -> List[Dict[str, Any]]:
+    findings = []
+    for stage in FAILURE_STAGES:
+        models = [f["model"] for f in report["failures"] if f.get("stage") == stage]
+        if not models:
+            continue
+        severity = "info" if stage == "initialization" else "warning"
+        findings.append(_finding(
+            "failures", severity,
+            f"{len(models)} model(s) failed at {stage}: {', '.join(models)}.",
+            {"stage": stage, "models": models},
+        ))
+    return findings
+
+
+def _few_families(report: Dict[str, Any]) -> List[Dict[str, Any]]:
+    consensus = report["consensus"]
+    # Reports from before 0.5 have no n_families; skip rather than guess.
+    if not consensus or "n_families" not in consensus[0]:
+        return []
+    n_families = consensus[0]["n_families"]
+    if n_families >= MIN_FAMILIES:
+        return []
+    return [_finding(
+        "few_families", "warning",
+        f"The consensus rests on {n_families} model "
+        f"famil{'y' if n_families == 1 else 'ies'}; treat it as weak evidence.",
+        {"n_families": n_families, "n_models": consensus[0]["n_models"]},
+    )]
+
+
+def _tied_groups(report: Dict[str, Any]) -> List[Dict[str, Any]]:
+    by_rank: Dict[float, List[str]] = {}
+    for row in report["consensus"]:
+        by_rank.setdefault(row["median_rank"], []).append(row["feature_group"])
+    return [
+        _finding(
+            "tied_groups", "info",
+            f"{', '.join(groups)} share median rank {rank:g}; mean_rank breaks any "
+            "remaining ordering tie. This finding does not assess ranking uncertainty.",
+            {"median_rank": rank, "groups": groups},
+        )
+        for rank, groups in sorted(by_rank.items())
+        if len(groups) > 1
+    ]
+
+
+def _within_noise(report: Dict[str, Any]) -> List[Dict[str, Any]]:
+    voters = [m for m in report["models"].values() if m.get("in_consensus")]
+    noisy: Dict[str, Dict[str, int]] = {}
+    for row in report["consensus"]:
+        group = row["feature_group"]
+        importances = [m["importance"][group] for m in voters if group in m["importance"]]
+        count = sum(1 for imp in importances if imp["mean"] <= imp["std"])
+        if importances and 2 * count > len(importances):
+            noisy[group] = {"within_noise": count, "voting_models": len(importances)}
+    if not noisy:
+        return []
+    return [_finding(
+        "within_noise", "info",
+        f"For {', '.join(noisy)}, mean importance is no greater than the shuffle "
+        "standard deviation in most voting models. This flags large relative spread "
+        "or non-positive importance; it does not establish absence of a score drop.",
+        {"groups": noisy},
+    )]
+
+
+RULES = (_gate_off, _empty_consensus, _failures, _few_families, _tied_groups, _within_noise)
+
+
+def summarize(report: Any) -> List[Dict[str, Any]]:
+    """
+    Return structured findings for a report from FeatureRanker.rank_features().
+
+    Each finding is a dict with code, severity ("info" or "warning"), message,
+    and JSON-safe evidence. The report is not modified.
+    """
+    if not isinstance(report, dict):
+        raise TypeError("[!] summarize() expects a report dict.")
+    for key in REQUIRED_KEYS:
+        if key not in report:
+            raise ValueError(f"[!] Report is missing required key '{key}'.")
+    return [finding for rule in RULES for finding in rule(report)]

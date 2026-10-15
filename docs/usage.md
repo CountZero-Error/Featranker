@@ -4,16 +4,17 @@
 
 ## ▍ API
 
-The whole API is one class with two methods: `FeatureRanker(...)`, then `.fit(...)`, then `.rank_features(...)`.
+The API is one class with two methods, `FeatureRanker(...)`, then `.fit(...)`, then `.rank_features(...)`, plus [`summarize(report)`](#summarize) to read the result.
 
-### `FeatureRanker(task, group="all", models=None, n_jobs=None)`
+### `FeatureRanker(task, group="all", models=None, n_jobs=None, verbose=True)`
 
 | Parameter | Default | Meaning |
 |---|---|---|
 | `task` | required | `"clf"` for classification or `"reg"` for regression. |
-| `group` | `"all"` | Built-in model family: `"linear"`, `"tree"`, or `"all"`. See [Models](models.md). |
+| `group` | `"all"` | Built-in model group: `"linear"`, `"tree"`, or `"all"`. Groups select estimators; model families determine consensus votes. See [Models](models.md). |
 | `models` | `None` | Non-empty dict of `{name: estimator}` to use instead of the built-in models. Names must be non-empty strings other than `dummy_baseline`. Cannot be combined with a `group` other than `"all"`. See [Your own models](#your-own-models). |
 | `n_jobs` | `None` | Parallel workers over models. `None` or `1` is sequential, `-1` uses all cores, `0` is invalid. See [Parallel models](#parallel-models). |
+| `verbose` | `True` | Show progress bars during model setup, `fit()`, and `rank_features()`. `False` hides them; warnings are still shown. |
 
 ### `.fit(X, y, feature_names=None)`
 
@@ -111,7 +112,7 @@ featranker \
   --output report.json
 ```
 
-Both CSV files need headers, the same feature columns in the same order, and the target column. Feature values must be numeric; targets may be numeric or strings. Run `featranker --help` for every flag.
+Both CSV files need headers, the same feature columns in the same order, and the target column. Feature values must be numeric; targets may be numeric or strings. Add `--quiet` to hide progress bars. Run `featranker --help` for every flag.
 
 <details>
 <summary><b>Example input files</b></summary>
@@ -143,6 +144,32 @@ segment:
 ```
 
 </details>
+
+<a id="summarize"></a>
+
+## ▍ Summarize a report
+
+`summarize(report)` applies the [reading guide](report.md#reading-the-report) for you. It returns a list of findings and does not change the report. It works on the dict from `rank_features()` or on a report loaded from the CLI's JSON.
+
+```python
+from featranker import summarize
+
+for finding in summarize(report):
+    print(finding["severity"], finding["code"], "-", finding["message"])
+```
+
+Each finding is a dict with `code`, `severity` (`"info"` or `"warning"`), `message`, and JSON-safe `evidence`. Findings come in this order:
+
+| Code | Severity | When |
+|---|---|---|
+| `gate_off` | warning | The dummy baseline failed, so every model voted. |
+| `empty_consensus` | warning | No model beat the dummy. |
+| `failures` | warning for `fit` and `ranking`; info for `initialization` (usually a missing optional library) | One finding per failed stage, listing the models. |
+| `few_families` | warning | Fewer than 3 model families voted. |
+| `tied_groups` | info | Groups share the same `median_rank`; one finding per tie. `mean_rank` still orders them, and the finding does not measure ranking uncertainty. |
+| `within_noise` | info | In most voting models, the group's mean importance is no greater than its standard deviation across shuffles (`mean <= std`). This flags large relative spread or non-positive importance; it does not prove shuffling left the score unchanged. With `n_repeats=1` the spread is 0, so it only catches importances of 0 or less. |
+
+An empty list means nothing stood out, not that the ranking is proven. The checks cover one evaluation set.
 
 <a id="grouped-permutation"></a>
 

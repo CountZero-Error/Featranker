@@ -8,7 +8,7 @@
 
 ## ▍ Reading the report
 
-Check these in order.
+Check these in order. `featranker.summarize(report)` runs the same checks and returns them as structured findings; see [Summarize a report](usage.md#summarize).
 
 **1. Was the dummy gate active?** `baseline_score` is the score of a dummy model that ignores the features. If it is `None` and `failures` has an entry for `dummy_baseline`, the gate was off: every model that ranked has `in_consensus: True`, whether or not it beat the dummy. Treat that consensus with extra caution.
 
@@ -18,12 +18,16 @@ Check these in order.
 
 **4. Read the consensus.** `consensus` is sorted from most to least important. Rank 1 is the most important.
 
+Each model family casts one vote. Voting models are grouped by `family` (for example, the four logistic regressions form one family). A family's rank for a group is the median of its members' ranks, and the consensus combines those family ranks. A family with five members therefore counts as much as a family with one. Your own models are each their own family.
+
 | Field | How to read it |
 |---|---|
-| `median_rank` | The main ranking. The middle rank across voting models, so one odd model cannot move it much. |
-| `mean_rank` | Breaks ties in `median_rank`. A big gap from `median_rank` means a few models rank this group very differently. |
-| `rank_std` | How much the voting models disagree about this group's position. Near 0 means they agree. It does not measure sampling uncertainty: a different evaluation set can move a group even when models agree. |
-| `n_models` | How many models voted. Every voting model ranks every group, so it is the same for all groups. It measures coverage, not confidence: built-in models include close variants that tend to agree, so many votes are not many independent confirmations. |
+| `median_rank` | The main ranking: the median of the family ranks, averaging the middle two for an even count. With one or two voting families, it offers little protection against an unusual family rank. |
+| `mean_rank` | Breaks ties in `median_rank`. A big gap from `median_rank` means a few families rank this group very differently. |
+| `rank_std` | How much the families disagree about this group's position. Near 0 means they agree. It does not measure sampling uncertainty: a different evaluation set can move a group even when families agree. |
+| `n_families` | How many families voted. With fewer than 3, the consensus rests on very few independent views. |
+| `family_ranks` | Each voting family's rank for this group. Use it to see which families drive or disagree with the consensus. |
+| `n_models` | How many models voted. Every voting model ranks every group, so it is the same for all groups. It measures coverage, not confidence; `n_families` is the better count of independent views. |
 
 **5. Look at the importances behind a rank.** A rank is relative: it says a group's shuffle hurt the score more than other groups' shuffles did, not that it hurt a lot. For a group you care about, open `models[<name>]["importance"][<group>]` for a few models:
 
@@ -51,13 +55,14 @@ Check these in order.
     },
     "baseline_score": -14.7,
     "provenance": {
-        "featranker": "0.4.0",
+        "featranker": "0.5.0",
         "python": "3.13.1",
         "numpy": "2.2.0",
         "scikit-learn": "1.7.1",
     },
     "models": {
         "random_forest_regressor": {
+            "family": "bagging",
             "evaluation_score": -8.2,
             "in_consensus": True,
             "params": {"n_estimators": 200, "max_depth": None},
@@ -78,6 +83,8 @@ Check these in order.
             "mean_rank": 1.0,
             "rank_std": 0.0,
             "n_models": 1,
+            "n_families": 1,
+            "family_ranks": {"bagging": 1.0},
         }
     ],
     "failures": [],
@@ -88,6 +95,8 @@ Check these in order.
 
 - Raw importance values stay model-specific and are never averaged into the primary consensus.
 - Exactly equal mean importances share the minimum rank. Group names give a deterministic output order.
+- Each voting model's rank is first combined within its family (median), then across families: `median_rank`, `mean_rank`, and `rank_std` are the median, mean, and population standard deviation of the family ranks.
+- Built-in families are listed in [Models](models.md). Each model passed through `models=` is its own family, so with your own models every model votes separately.
 - The consensus sorts by `median_rank`, then `mean_rank`, then group name.
 
 ## ▍ Dummy baseline

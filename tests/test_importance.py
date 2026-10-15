@@ -370,6 +370,8 @@ def test_consensus_uses_model_ranks_not_raw_importance():
         "mean_rank": 1.5,
         "rank_std": 0.5,
         "n_models": 2,
+        "n_families": 2,
+        "family_ranks": {"large_scale": 1.0, "small_scale": 2.0},
     }
     assert consensus["b"]["mean_rank"] == 1.5
     assert "mean_importance" not in consensus["a"]
@@ -1037,3 +1039,47 @@ def test_non_finite_features_are_rejected_in_fit_and_rank(monkeypatch, bad):
     X_eval_bad[0, 0] = bad
     with pytest.raises(ValueError, match="finite"):
         fitted.rank_features(X_eval_bad, Y_EVAL, scoring="r2")
+
+
+def _run_shipped_linear(verbose):
+    import warnings
+
+    kwargs = {} if verbose is None else {"verbose": verbose}
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        ranker = FeatureRanker(task="reg", group="linear", **kwargs)
+        ranker.fit(X_TRAIN, Y_TRAIN, ["a", "b", "c"])
+        ranker.rank_features(X_EVAL, Y_EVAL, scoring="r2", n_repeats=1, random_state=0)
+
+
+def test_verbose_false_writes_no_progress(capsys):
+    _run_shipped_linear(verbose=False)
+
+    err = capsys.readouterr().err
+    assert "[*]" not in err and "it/s" not in err
+
+
+def test_progress_is_shown_by_default(capsys):
+    _run_shipped_linear(verbose=None)
+
+    err = capsys.readouterr().err
+    for step in ("[*] Initialize", "[*] Training models", "[*] Ranking models"):
+        assert step in err
+
+
+def test_verbose_must_be_bool():
+    with pytest.raises(TypeError, match="verbose"):
+        FeatureRanker(task="reg", verbose="no")
+
+
+def test_quiet_run_still_warns_on_empty_consensus():
+    ranker = FeatureRanker(
+        task="reg", models={"tie": ConstantRegressor(0.0)}, verbose=False
+    )
+    ranker.fit(X_TRAIN, Y_TRAIN, ["a", "b", "c"])
+
+    with pytest.warns(UserWarning, match="dummy baseline"):
+        report = ranker.rank_features(
+            X_EVAL, Y_EVAL, scoring="r2", n_repeats=1, random_state=0
+        )
+    assert report["consensus"] == []

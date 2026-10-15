@@ -34,6 +34,8 @@ OPTIONAL_MODEL_MODULES = {"xgboost", "lightgbm", "catboost"}
 
 BASELINE_NAME = "dummy_baseline"
 
+CONFIG_PATH = Path(__file__).with_name("importance_config.yaml")
+
 # scikit-learn < 1.8 ignores LogisticRegression(l1_ratio=...) unless `penalty`
 # is set, so L1/elastic-net configs would silently run as L2.
 SKLEARN_NEEDS_PENALTY = parse_version(sklearn.__version__) < parse_version("1.8")
@@ -53,6 +55,18 @@ def _model_params(class_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
     if params["penalty"] == "elasticnet":
         params["l1_ratio"] = ratio
     return params
+
+
+def _registry_families() -> Dict[str, str]:
+    """Built-in model name -> family, read from the shipped registry."""
+    with CONFIG_PATH.open("r", encoding="utf-8") as config_file:
+        config = yaml.safe_load(config_file) or {}
+    return {
+        entry["name"]: str(entry.get("family") or entry["name"])
+        for groups in config.values()
+        for entries in groups.values()
+        for entry in entries
+    }
 
 
 def _validate_models(models: Any) -> Dict[str, Any]:
@@ -261,20 +275,32 @@ def _build_consensus(model_reports: Dict[str, Any]) -> List[Dict[str, Any]]:
             # caller -> rank_features -> _build_consensus
             stacklevel=3,
         )
-    ranks_by_group: Dict[str, List[int]] = {}
-    for model_report in voters:
+    # group -> family -> member ranks; each family then casts one vote.
+    ranks_by_group: Dict[str, Dict[str, List[int]]] = {}
+    for model_name, model_report in model_reports.items():
+        if not model_report["in_consensus"]:
+            continue
+        family = model_report.get("family", model_name)
         for group_name, importance in model_report["importance"].items():
-            ranks_by_group.setdefault(group_name, []).append(importance["rank"])
+            ranks_by_group.setdefault(group_name, {}).setdefault(family, []).append(
+                importance["rank"]
+            )
 
     consensus = []
-    for group_name, ranks in ranks_by_group.items():
+    for group_name, by_family in ranks_by_group.items():
+        family_ranks = {
+            family: float(np.median(ranks)) for family, ranks in sorted(by_family.items())
+        }
+        votes = list(family_ranks.values())
         consensus.append(
             {
                 "feature_group": group_name,
-                "median_rank": float(np.median(ranks)),
-                "mean_rank": float(np.mean(ranks)),
-                "rank_std": float(np.std(ranks)),
-                "n_models": len(ranks),
+                "median_rank": float(np.median(votes)),
+                "mean_rank": float(np.mean(votes)),
+                "rank_std": float(np.std(votes)),
+                "n_models": sum(len(ranks) for ranks in by_family.values()),
+                "n_families": len(family_ranks),
+                "family_ranks": family_ranks,
             }
         )
     return sorted(
@@ -288,11 +314,15 @@ def _build_consensus(model_reports: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 
 def _run_models(
-    worker: Callable[..., tuple], jobs: List[tuple], n_jobs: Optional[int], desc: str
+    worker: Callable[..., tuple],
+    jobs: List[tuple],
+    n_jobs: Optional[int],
+    desc: str,
+    verbose: bool,
 ) -> List[tuple]:
     """Run one worker per model, in order; sequentially unless n_jobs > 1 or -1."""
     if n_jobs is None or n_jobs == 1:
-        return [worker(*job) for job in tqdm(jobs, desc=desc)]
+        return [worker(*job) for job in tqdm(jobs, desc=desc, disable=not verbose)]
     return Parallel(n_jobs=n_jobs)(delayed(worker)(*job) for job in jobs)
 
 
@@ -355,6 +385,7 @@ def _rank_model(
     n_repeats: int,
     random_state: Optional[int],
     baseline_score: Optional[float],
+    family: str,
 ) -> tuple[str, Optional[Dict[str, Any]], Optional[Dict[str, str]]]:
     try:
         baseline = _finite_float(scorer(model, X_values, y_values), "baseline score")
@@ -363,6 +394,7 @@ def _rank_model(
             baseline,
         )
         report = {
+            "family": family,
             "evaluation_score": baseline,
             "in_consensus": baseline_score is None or baseline > baseline_score,
             "params": _json_params(model),
@@ -380,17 +412,19 @@ class FeatureRanker:
         group: Literal["linear", "tree", "all"] = "all",
         models: Optional[Dict[str, Any]] = None,
         n_jobs: Optional[int] = None,
+        verbose: bool = True,
     ) -> None:
         """
         Initialize configured models without loading or fitting data.
 
         Args:
             task: Task type — "clf" for classification or "reg" for regression.
-            group: Model family — "linear", "tree", or "all" for both.
+            group: Built-in model group — "linear", "tree", or "all" for both.
             models: Optional name -> scikit-learn estimator mapping that
                 replaces the built-in registry. Estimators are cloned at fit().
             n_jobs: Parallel workers over models in fit() and rank_features();
                 None means sequential, -1 means all cores.
+            verbose: Show progress bars during initialization, fit, and ranking.
         """
         if task not in {"clf", "reg"}:
             raise ValueError("[!] task must be 'clf' or 'reg'.")
@@ -398,17 +432,31 @@ class FeatureRanker:
             raise ValueError("[!] group must be 'linear', 'tree', or 'all'.")
         if models is not None and group != "all":
             raise ValueError("[!] group selects built-in models; omit it with models.")
+        if not isinstance(verbose, bool):
+            raise TypeError("[!] verbose must be True or False.")
         self.task = task
         self.group = group
         self.n_jobs = n_jobs
+        self.verbose = verbose
         self.label_encoder = None
         self.initialization_failures_: List[Dict[str, str]] = []
+        # Built-in model name -> registry family; anything else is its own family.
+        self.model_families_: Dict[str, str] = {}
         self.user_models = None if models is None else _validate_models(models)
         self.models = {} if models is not None else self.init_models()
         self.trained_models: Dict[str, Any] = {}
         self.baseline_model_: Any = None
         self.fit_failures_: List[Dict[str, str]] = []
         self.is_fitted_ = False
+
+    def __setstate__(self, state: Dict[str, Any]) -> None:
+        # Rankers pickled by 0.4 lack the attributes added in 0.5.
+        self.__dict__.update(state)
+        self.__dict__.setdefault("verbose", True)
+        if "model_families_" not in self.__dict__:
+            self.model_families_ = (
+                _registry_families() if self.user_models is None else {}
+            )
 
     def fit(
         self,
@@ -441,7 +489,7 @@ class FeatureRanker:
         self.fit_failures_ = []
         jobs = [(name, model, X_values, y_values) for name, model in candidates.items()]
         for name, fitted, failure in _run_models(
-            _fit_model, jobs, self.n_jobs, "[*] Training models"
+            _fit_model, jobs, self.n_jobs, "[*] Training models", self.verbose
         ):
             if failure is None:
                 self.trained_models[name] = fitted
@@ -511,11 +559,11 @@ class FeatureRanker:
         )
         jobs = [
             (name, model, scorer, X_values, y_values, groups, n_repeats,
-             random_state, baseline_score)
+             random_state, baseline_score, self.model_families_.get(name, name))
             for name, model in self.trained_models.items()
         ]
         for name, model_report, failure in _run_models(
-            _rank_model, jobs, self.n_jobs, "[*] Ranking models"
+            _rank_model, jobs, self.n_jobs, "[*] Ranking models", self.verbose
         ):
             if failure is None:
                 model_reports[name] = model_report
@@ -572,8 +620,7 @@ class FeatureRanker:
             Nested dict keyed by [task][group][model_name] → model instance.
         """
         # Load the YAML config that ships alongside this module.
-        config_path = Path(__file__).with_name("importance_config.yaml")
-        with config_path.open("r", encoding="utf-8") as config_file:
+        with CONFIG_PATH.open("r", encoding="utf-8") as config_file:
             config = yaml.safe_load(config_file) or {}
 
         models: Dict[str, Dict[str, Dict[str, Any]]] = {
@@ -605,6 +652,7 @@ class FeatureRanker:
                 for model in tqdm(
                     model_configs,
                     desc=f"[*] Initialize {task_name}-{group_name} models",
+                    disable=not self.verbose,
                 ):
                     if not isinstance(model, dict):
                         continue
@@ -638,6 +686,7 @@ class FeatureRanker:
                             if group_name == "linear"
                             else estimator
                         )
+                        self.model_families_[name] = str(model.get("family") or name)
                     except Exception as error:
                         self.initialization_failures_.append(
                             _failure(name, "initialization", error)

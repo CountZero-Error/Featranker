@@ -1,12 +1,14 @@
 classification:
   linear:
     - name: logistic_regression
+      family: logistic
       import: sklearn.linear_model
       class: LogisticRegression
       params:
         l1_ratio: 0
         max_iter: 2000
     - name: logistic_regression_l1
+      family: logistic
       import: sklearn.linear_model
       class: LogisticRegression
       params:
@@ -15,6 +17,7 @@ classification:
         max_iter: 5000
         random_state: 42
     - name: logistic_regression_l2
+      family: logistic
       import: sklearn.linear_model
       class: LogisticRegression
       params:
@@ -22,6 +25,7 @@ classification:
         solver: lbfgs
         max_iter: 2000
     - name: logistic_regression_elasticnet
+      family: logistic
       import: sklearn.linear_model
       class: LogisticRegression
       params:
@@ -30,25 +34,30 @@ classification:
         max_iter: 5000
         random_state: 42
     - name: linear_svm
+      family: linear_margin
       import: sklearn.svm
       class: LinearSVC
       params:
         max_iter: 5000
         random_state: 42
     - name: sgd_classifier
+      family: linear_margin
       import: sklearn.linear_model
       class: SGDClassifier
       params:
         random_state: 42
     - name: ridge_classifier
+      family: linear_margin
       import: sklearn.linear_model
       class: RidgeClassifier
     - name: perceptron
+      family: linear_margin
       import: sklearn.linear_model
       class: Perceptron
       params:
         random_state: 42
     - name: passive_aggressive
+      family: linear_margin
       import: sklearn.linear_model
       class: SGDClassifier
       params:
@@ -58,63 +67,76 @@ classification:
         eta0: 1.0
         random_state: 42
     - name: lda
+      family: discriminant
       import: sklearn.discriminant_analysis
       class: LinearDiscriminantAnalysis
     - name: qda
+      family: discriminant
       import: sklearn.discriminant_analysis
       class: QuadraticDiscriminantAnalysis
       params:
         reg_param: 0.1
     - name: naive_bayes_gaussian
+      family: naive_bayes
       import: sklearn.naive_bayes
       class: GaussianNB
     - name: naive_bayes_bernoulli
+      family: naive_bayes
       import: sklearn.naive_bayes
       class: BernoulliNB
 
   tree:
     - name: decision_tree
+      family: single_tree
       import: sklearn.tree
       class: DecisionTreeClassifier
       params:
         random_state: 42
     - name: random_forest
+      family: bagging
       import: sklearn.ensemble
       class: RandomForestClassifier
       params:
         random_state: 42
     - name: extra_trees
+      family: bagging
       import: sklearn.ensemble
       class: ExtraTreesClassifier
       params:
         random_state: 42
     - name: bagging_tree
+      family: bagging
       import: sklearn.ensemble
       class: BaggingClassifier
       params:
         random_state: 42
     - name: adaboost
+      family: boosting
       import: sklearn.ensemble
       class: AdaBoostClassifier
       params:
         random_state: 42
     - name: gradient_boosting
+      family: boosting
       import: sklearn.ensemble
       class: GradientBoostingClassifier
       params:
         random_state: 42
     - name: hist_gradient_boosting
+      family: boosting
       import: sklearn.ensemble
       class: HistGradientBoostingClassifier
       params:
         random_state: 42
     - name: xgboost
+      family: boosting
       import: xgboost
       class: XGBClassifier
       params:
         random_state: 42
         eval_metric: logloss
     - name: catboost
+      family: boosting
       import: catboost
       class: CatBoostClassifier
       params:
@@ -124,87 +146,105 @@ classification:
 regression:
   linear:
     - name: linear_regression
+      family: linear
       import: sklearn.linear_model
       class: LinearRegression
     - name: ridge_regression
+      family: linear
       import: sklearn.linear_model
       class: Ridge
     - name: lasso_regression
+      family: linear
       import: sklearn.linear_model
       class: Lasso
       params:
         random_state: 42
         max_iter: 2000
     - name: elasticnet_regression
+      family: linear
       import: sklearn.linear_model
       class: ElasticNet
       params:
         random_state: 42
         max_iter: 2000
     - name: elasticnet_cv_regression
+      family: linear
       import: sklearn.linear_model
       class: ElasticNetCV
       params:
         random_state: 42
         max_iter: 2000
     - name: pls_regression
+      family: linear
       import: sklearn.cross_decomposition
       class: PLSRegression
     - name: huber_regression
+      family: linear
       import: sklearn.linear_model
       class: HuberRegressor
       params:
         max_iter: 2000
     - name: ransac_regression
+      family: linear
       import: sklearn.linear_model
       class: RANSACRegressor
       params:
         random_state: 42
     - name: kernel_ridge_regression
+      family: linear
       import: sklearn.kernel_ridge
       class: KernelRidge
     - name: svr_regression
+      family: kernel
       import: sklearn.svm
       class: SVR
 
   tree:
     - name: decision_tree_regressor
+      family: single_tree
       import: sklearn.tree
       class: DecisionTreeRegressor
       params:
         random_state: 42
     - name: random_forest_regressor
+      family: bagging
       import: sklearn.ensemble
       class: RandomForestRegressor
       params:
         random_state: 42
     - name: extra_trees_regressor
+      family: bagging
       import: sklearn.ensemble
       class: ExtraTreesRegressor
       params:
         random_state: 42
     - name: adaboost_regressor
+      family: boosting
       import: sklearn.ensemble
       class: AdaBoostRegressor
       params:
         random_state: 42
     - name: gradient_boosting_regressor
+      family: boosting
       import: sklearn.ensemble
       class: GradientBoostingRegressor
       params:
         random_state: 42
     - name: hist_gradient_boosting_regressor
+      family: boosting
       import: sklearn.ensemble
       class: HistGradientBoostingRegressor
       params:
         random_state: 42
     - name: xgboost_regressor
+      family: boosting
       import: xgboost
       class: XGBRegressor
       params:
         random_state: 42
         eval_metric: rmse
     - name: catboost_regressor
+      family: boosting
       import: catboost
       class: CatBoostRegressor
       params:

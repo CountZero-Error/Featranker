@@ -1,0 +1,39 @@
+schema: spec-driven
+
+context: |
+  FeatRanker: Python >=3.10 library + CLI (PyPI "featranker") for leakage-safe,
+  model-agnostic feature ranking. Fits many scikit-learn-compatible estimators on
+  training data, measures (grouped) permutation importance on a separate
+  evaluation set, ranks groups per model, and builds a median-rank consensus
+  gated on a dummy baseline. Reports are strict-JSON dicts.
+
+  Code: featranker/importance.py (FeatureRanker), featranker/cli.py,
+  featranker/importance_config.yaml (built-in model registry). Tests: pytest in
+  tests/. Docs: README.md + docs/ (usage, report, models). Deps: numpy,
+  scikit-learn, pyyaml, tqdm; optional xgboost/lightgbm/catboost.
+
+  Principles: trustworthy over clever; every claim in docs verified against code;
+  no network calls or API keys in the core package; keep the API small; the
+  report dict shape is public API (additive changes only before 1.0).
+  Conventional commits. Maintainer reviews and commits; releases are tagged
+  vX.Y.Z with a GitHub release; maintainer uploads to PyPI.
+
+  Roadmap to 1.0 (thesis: which features matter, how sure, and a leakage-safe
+  way to use the answer):
+    0.5  family-aware consensus, verbose flag, deterministic report summary
+    0.6  stability: resampled ranking across splits
+    0.7  significance: shadow features
+    0.8  ConsensusSelector (scikit-learn SelectorMixin, nested-CV safe)
+    0.9  LLM interpretation: to_prompt() + explain(report, llm=callable),
+         provider-neutral, no SDK dependency
+    1.0  report object + plots, py.typed, trusted publishing, API freeze
+
+rules:
+  proposal:
+    - Include a Non-goals section
+    - State any change to the public report schema explicitly
+  design:
+    - Prefer the smallest design that works; justify any new dependency
+  tasks:
+    - Every behavior change has a test task written before the implementation task
+    - Include a docs task whenever user-visible behavior changes
