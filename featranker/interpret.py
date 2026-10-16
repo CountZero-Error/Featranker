@@ -42,7 +42,7 @@ PUBLIC_ERROR_TYPES = frozenset(
 
 
 def _model_view(model: Dict[str, Any]) -> Dict[str, Any]:
-    view = {
+    view: Dict[str, Any] = {
         key: model[key]
         for key in ("family", "evaluation_score", "in_consensus", "shadow_max")
         if key in model
@@ -56,7 +56,7 @@ def _model_view(model: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _failure_view(failure: Dict[str, Any]) -> Dict[str, Any]:
-    view = {
+    view: Dict[str, Any] = {
         key: failure[key]
         for key in ("split", "model", "stage", "error_type")
         if key in failure
@@ -68,7 +68,7 @@ def _failure_view(failure: Dict[str, Any]) -> Dict[str, Any]:
 
 def _data_view(report: Dict[str, Any]) -> Dict[str, Any]:
     """The compact JSON the model sees; evidence paths are checked against it."""
-    shared = {
+    shared: Dict[str, Any] = {
         key: report[key]
         for key in ("evaluation_mode", "scoring", "n_repeats", "feature_groups", "shadows")
         if key in report

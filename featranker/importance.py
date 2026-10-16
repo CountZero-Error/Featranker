@@ -24,6 +24,8 @@ from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.utils.fixes import parse_version
 from tqdm import tqdm
 
+from .report import Report
+
 task_map = {
     "classification": "clf",
     "regression": "reg",
@@ -509,17 +511,18 @@ def _group_importances(
     X_permuted = X_values.copy()
     importances: Dict[str, Dict[str, Any]] = {}
     for group_name, column_indices in groups.items():
+        columns = np.asarray(column_indices, dtype=np.intp)
         values: List[float] = []
         for _ in range(n_repeats):
             row_order = rng.permutation(len(X_values))
-            X_permuted[:, column_indices] = X_values[np.ix_(row_order, column_indices)]
+            X_permuted[:, columns] = X_values[np.ix_(row_order, columns)]
             permuted_score = _finite_float(
                 scorer(model, X_permuted, y_values), "permuted score"
             )
             values.append(
                 _finite_float(baseline - permuted_score, "permutation importance")
             )
-        X_permuted[:, column_indices] = X_values[:, column_indices]
+        X_permuted[:, columns] = X_values[:, columns]
         importances[group_name] = {
             "values": values,
             "mean": _finite_float(np.mean(values), "importance mean"),
@@ -737,7 +740,7 @@ class FeatureRanker:
         feature_groups: Optional[Dict[str, List[str]]] = None,
         n_repeats: int = 10,
         random_state: Optional[int] = None,
-    ) -> Dict[str, Any]:
+    ) -> Report:
         """Rank feature groups on explicitly supplied evaluation data."""
         if not self.is_fitted_:
             raise RuntimeError("[!] Call fit() before rank_features().")
@@ -809,7 +812,7 @@ class FeatureRanker:
         if self.shadows:
             report["shadows"] = True
             report["shadow_seed"] = self.shadow_seed
-        return report
+        return Report(report)
 
     def rank_resampled(
         self,
@@ -824,7 +827,7 @@ class FeatureRanker:
         n_repeats: int = 10,
         random_state: Optional[int] = None,
         top_k: int = 5,
-    ) -> Dict[str, Any]:
+    ) -> Report:
         """
         Fit and rank on every cv split of X/y and report rank stability.
 
@@ -886,7 +889,7 @@ class FeatureRanker:
                 f"[!] No split ranked successfully. Failures: {json.dumps(failures)}"
             )
         first = split_reports[0]["report"]
-        report = {
+        result = {
             "evaluation_mode": "resampled",
             "scoring": first["scoring"],
             "n_repeats": n_repeats,
@@ -900,9 +903,9 @@ class FeatureRanker:
             "failures": failures,
         }
         if self.shadows:
-            report["shadows"] = True
-            report["shadow_seed"] = self.shadow_seed
-        return report
+            result["shadows"] = True
+            result["shadow_seed"] = self.shadow_seed
+        return Report(result)
 
     def _score_baseline(
         self,

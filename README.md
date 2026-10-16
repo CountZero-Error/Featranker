@@ -77,7 +77,7 @@ Ships with **40 built-in models** (22 classification, 18 regression), or bring y
 pip install featranker
 ```
 
-Requires **Python ≥ 3.10**. Optional extras: `featranker[xgboost]`, `[lightgbm]`, `[catboost]`, or `[all]`.
+Requires **Python ≥ 3.10**. Optional extras: `featranker[xgboost]`, `[catboost]`, `[all]` (both), or `[plot]` (matplotlib, for `report.plot()`). The `lightgbm` extra was removed in 1.0; install `lightgbm` directly for custom LightGBM estimators. `[all]` now installs only XGBoost and CatBoost.
 
 ## ▍ 02 · Quick start
 
@@ -159,15 +159,16 @@ Built-in linear models are wrapped in a `StandardScaler` pipeline fit on trainin
 
 | Page | Contents |
 |---|---|
-| [**Usage**](https://github.com/CountZero-Error/Featranker/blob/main/docs/usage.md) | API and defaults, choosing a scorer, your own models, parallel runs, the CLI, resampled ranking, shadow features, pipeline feature selection, `summarize`, LLM interpretation, labels, troubleshooting |
+| [**Usage**](https://github.com/CountZero-Error/Featranker/blob/main/docs/usage.md) | API and defaults, working with reports (`summary`, `to_frame`, `plot`), choosing a scorer, your own models, parallel runs, the CLI, resampled ranking, shadow features, pipeline feature selection, `summarize`, LLM interpretation, labels, troubleshooting |
 | [**Report**](https://github.com/CountZero-Error/Featranker/blob/main/docs/report.md) | How to read the results, resampled (stability) reports, full report structure, ranking and failure rules |
 | [**Models**](https://github.com/CountZero-Error/Featranker/blob/main/docs/models.md) | All 40 built-in models, optional extras, known issues |
+| [**API**](https://github.com/CountZero-Error/Featranker/blob/main/docs/api.md) | Public API, stability policy, typing, releases |
 
 Upgrading from 0.3? The preparation-file workflow was removed in 0.4.0; see the [release notes](https://github.com/CountZero-Error/Featranker/releases/tag/v0.4.0).
 
 ## ▍ Scope
 
-FeatRanker intentionally does **not** do imputation, feature encoding, automatic feature selection, model tuning, or SHAP-style attribution. `rank_resampled()` splits data only to measure ranking stability; it does not evaluate a final model. The one target change it makes is encoding classification labels to `0..n_classes-1` internally (see [Usage](https://github.com/CountZero-Error/Featranker/blob/main/docs/usage.md#labels)). Results depend on the evaluation sample, scorer, estimators, correlated predictors, and permutation design.
+`FeatureRanker` does not impute or encode features, tune models, or provide SHAP-style attribution. `ConsensusSelector` performs feature selection inside validation. `rank_resampled()` splits data only to measure ranking stability; it does not evaluate a final model. The one target change it makes is encoding classification labels to `0..n_classes-1` internally (see [Usage](https://github.com/CountZero-Error/Featranker/blob/main/docs/usage.md#labels)). Results depend on the evaluation sample, scorer, estimators, correlated predictors, and permutation design.
 
 ## ▍ Development
 

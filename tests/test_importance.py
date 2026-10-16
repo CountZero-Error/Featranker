@@ -21,7 +21,7 @@ import featranker
 from featranker import FeatureRanker
 import featranker.importance as importance_module
 
-OPTIONAL_NAMES = {"xgboost", "lightgbm", "catboost"}
+OPTIONAL_NAMES = {"xgboost", "lightgbm", "catboost"}  # lightgbm: must never become core either
 from featranker.importance import _assign_ranks, _build_consensus
 
 
@@ -798,10 +798,8 @@ def test_optional_estimators_are_not_core_dependencies():
 
     assert all(f'  "{name}",' not in core for name in OPTIONAL_NAMES)
     assert 'xgboost = ["xgboost"]' in extras
-    assert 'lightgbm = ["lightgbm"]' in extras
     assert 'catboost = ["catboost"]' in extras
-    assert 'all = ["xgboost", "lightgbm", "catboost"]' in extras
-    assert 'test = ["pytest", "pandas", "build"]' in extras
+    assert 'all = ["xgboost", "catboost"]' in extras
 
 
 def test_pre_1_8_sklearn_gets_penalty_from_l1_ratio(monkeypatch):

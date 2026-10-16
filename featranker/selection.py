@@ -5,7 +5,7 @@ scikit-learn feature selector built on FeatureRanker.rank_resampled().
 import math
 import numbers
 import warnings
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional, Union
 
 import numpy as np
 from sklearn.base import BaseEstimator
@@ -51,12 +51,12 @@ class ConsensusSelector(SelectorMixin, BaseEstimator):
 
     def __init__(
         self,
-        task: str,
+        task: Literal["clf", "reg"],
         scoring: Any,
         *,
-        k: Optional[int] = None,
+        k: Optional[Union[int, "np.integer[Any]"]] = None,
         min_shadow_share: Optional[float] = None,
-        group: str = "all",
+        group: Literal["linear", "tree", "all"] = "all",
         models: Optional[Dict[str, Any]] = None,
         feature_groups: Optional[Dict[str, List[str]]] = None,
         cv: Any = 5,

@@ -4,12 +4,30 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "featranker"
-version = "0.9.0"
+version = "1.0.0"
 description = "Rank feature importance across multiple ML models."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
 authors = [{ name = "CountZero" }]
+keywords = [
+  "feature importance", "feature selection", "permutation importance",
+  "scikit-learn", "machine learning", "model-agnostic",
+]
+classifiers = [
+  "Development Status :: 5 - Production/Stable",
+  "Intended Audience :: Science/Research",
+  "Intended Audience :: Developers",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+  "Typing :: Typed",
+]
 dependencies = [
   "numpy",
   "scikit-learn",
@@ -17,12 +35,18 @@ dependencies = [
   "tqdm",
 ]
 
+[project.urls]
+Homepage = "https://github.com/CountZero-Error/Featranker"
+Documentation = "https://github.com/CountZero-Error/Featranker/tree/main/docs"
+Releases = "https://github.com/CountZero-Error/Featranker/releases"
+Issues = "https://github.com/CountZero-Error/Featranker/issues"
+
 [project.optional-dependencies]
 xgboost = ["xgboost"]
-lightgbm = ["lightgbm"]
 catboost = ["catboost"]
-all = ["xgboost", "lightgbm", "catboost"]
-test = ["pytest", "pandas", "build"]
+all = ["xgboost", "catboost"]
+plot = ["matplotlib"]
+test = ["pytest", "pandas", "matplotlib", "build", "mypy", "types-PyYAML"]
 
 [project.scripts]
 featranker = "featranker.cli:main"
@@ -32,7 +56,16 @@ packages = ["featranker"]
 include-package-data = true
 
 [tool.setuptools.package-data]
-featranker = ["importance_config.yaml"]
+featranker = ["importance_config.yaml", "py.typed"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.10"
+warn_unused_ignores = true
+
+[[tool.mypy.overrides]]
+# These ship no type information.
+module = ["sklearn.*", "joblib.*", "tqdm.*", "pandas.*", "matplotlib.*", "xgboost.*", "catboost.*"]
+ignore_missing_imports = true

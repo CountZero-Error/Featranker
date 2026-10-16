@@ -1,8 +1,8 @@
 # FEATRANKER ▍ REPORT
 
-<sub><a href="../README.md">◂ README</a> &nbsp;│&nbsp; <a href="README.md">Docs</a> &nbsp;│&nbsp; <a href="usage.md">Usage</a> &nbsp;│&nbsp; <b>Report</b> &nbsp;│&nbsp; <a href="models.md">Models</a></sub>
+<sub><a href="../README.md">◂ README</a> &nbsp;│&nbsp; <a href="README.md">Docs</a> &nbsp;│&nbsp; <a href="usage.md">Usage</a> &nbsp;│&nbsp; <b>Report</b> &nbsp;│&nbsp; <a href="models.md">Models</a> &nbsp;│&nbsp; <a href="api.md">API</a></sub>
 
-`rank_features()` returns a dict that keeps the raw evidence from each model and builds the consensus from ranks only. The CLI writes the same structure as JSON.
+`rank_features()` returns a [`Report`](usage.md#working-with-reports), a `dict` subclass, that keeps the raw evidence from each model and builds the consensus from ranks only. The CLI writes the same structure as JSON.
 
 <a id="reading-the-report"></a>
 

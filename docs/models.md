@@ -1,6 +1,6 @@
 # FEATRANKER ▍ MODELS
 
-<sub><a href="../README.md">◂ README</a> &nbsp;│&nbsp; <a href="README.md">Docs</a> &nbsp;│&nbsp; <a href="usage.md">Usage</a> &nbsp;│&nbsp; <a href="report.md">Report</a> &nbsp;│&nbsp; <b>Models</b></sub>
+<sub><a href="../README.md">◂ README</a> &nbsp;│&nbsp; <a href="README.md">Docs</a> &nbsp;│&nbsp; <a href="usage.md">Usage</a> &nbsp;│&nbsp; <a href="report.md">Report</a> &nbsp;│&nbsp; <b>Models</b> &nbsp;│&nbsp; <a href="api.md">API</a></sub>
 
 Model entries come from [`importance_config.yaml`](../featranker/importance_config.yaml). Names in the **Key** column appear in reports and structured failures. Select a **Group** with `group="linear"`, `group="tree"`, or `group="all"` (the default). The **Family** column groups close variants; each family casts one vote in the consensus (see [Report](report.md#reading-the-report)).
 
@@ -61,7 +61,6 @@ Built-in linear models are standardized internally (a `StandardScaler` fit on tr
 | Extra | Install | Default model configured? |
 |---|---|:---:|
 | XGBoost | `pip install 'featranker[xgboost]'` | ✔ |
-| LightGBM | `pip install 'featranker[lightgbm]'` | ✘ |
 | CatBoost | `pip install 'featranker[catboost]'` | ✔ |
 
 Missing or broken optional libraries skip only the affected models. Each skipped model produces a warning and a structured initialization failure.

@@ -1,10 +1,10 @@
 # FEATRANKER ▍ USAGE
 
-<sub><a href="../README.md">◂ README</a> &nbsp;│&nbsp; <a href="README.md">Docs</a> &nbsp;│&nbsp; <b>Usage</b> &nbsp;│&nbsp; <a href="report.md">Report</a> &nbsp;│&nbsp; <a href="models.md">Models</a></sub>
+<sub><a href="../README.md">◂ README</a> &nbsp;│&nbsp; <a href="README.md">Docs</a> &nbsp;│&nbsp; <b>Usage</b> &nbsp;│&nbsp; <a href="report.md">Report</a> &nbsp;│&nbsp; <a href="models.md">Models</a> &nbsp;│&nbsp; <a href="api.md">API</a></sub>
 
 ## ▍ API
 
-The API is one class: `FeatureRanker(...)`, then `.fit(...)`, then `.rank_features(...)`. [`.rank_resampled(...)`](#resampled-ranking) repeats that over cross-validation splits, [`ConsensusSelector`](#feature-selection) turns the ranking into a scikit-learn pipeline step, [`summarize(report)`](#summarize) reads the result, and [`to_prompt` / `explain`](#llm-interpretation) hand it to an LLM with checked citations.
+The API is one class: `FeatureRanker(...)`, then `.fit(...)`, then `.rank_features(...)`, which returns a [`Report`](#working-with-reports). [`.rank_resampled(...)`](#resampled-ranking) repeats that over cross-validation splits, [`ConsensusSelector`](#feature-selection) turns the ranking into a scikit-learn pipeline step, [`summarize(report)`](#summarize) reads the result, and [`to_prompt` / `explain`](#llm-interpretation) hand it to an LLM with checked citations.
 
 ### `FeatureRanker(task, group="all", models=None, n_jobs=None, verbose=True, shadows=False, shadow_seed=None)`
 
@@ -40,6 +40,52 @@ Returns the ranker itself. Raises if no model fits.
 | `random_state` | `None` | Integer seed for permutation-importance shuffles. Reproducible reports also require deterministic or seeded estimators and deterministic scoring; with shadows enabled, fix `shadow_seed` too. |
 
 Returns the report dict described in [Report](report.md). Raises if every model fails ranking.
+
+<a id="working-with-reports"></a>
+
+## ▍ Working with reports
+
+`rank_features()` and `rank_resampled()` return a `Report`. It is a plain `dict` (indexing, `json.dumps`, pickling, and comparison with dicts all work as before) with three helpers:
+
+- `report.summary()`: the [`summarize()`](#summarize) findings (single-split reports).
+- `report.to_frame()`: the consensus table, or the stability table for a resampled report, as a pandas DataFrame (needs pandas).
+- `report.plot(ax=None)`: returns a matplotlib `Axes` (needs `pip install 'featranker[plot]'`). For a single-split report it shows each voting family's rank per group with the median marked; for a resampled report, each group's range of places across splits with the median marked. The most important group is at the top.
+
+```python
+import matplotlib
+
+matplotlib.use("Agg")  # no window; remove in a notebook
+
+from sklearn.datasets import load_diabetes
+from sklearn.model_selection import train_test_split
+
+from featranker import FeatureRanker
+
+data = load_diabetes()
+X_train, X_eval, y_train, y_eval = train_test_split(
+    data.data, data.target, test_size=0.3, random_state=0
+)
+ranker = FeatureRanker(task="reg", group="tree", verbose=False)
+ranker.fit(X_train, y_train, feature_names=list(data.feature_names))
+report = ranker.rank_features(
+    X_eval, y_eval, scoring="neg_mean_absolute_error", random_state=42
+)
+
+print(report.to_frame()[["feature_group", "median_rank", "n_families"]].head(4).to_string(index=False))
+print([finding["code"] for finding in report.summary()])
+report.plot().figure.savefig("ranking.png", bbox_inches="tight")
+```
+
+```text
+feature_group  median_rank  n_families
+          bmi         1.50           2
+           s5         1.50           2
+           bp         3.25           2
+           s2         3.75           2
+['few_families', 'tied_groups', 'tied_groups', 'within_noise']
+```
+
+Output shown with the `xgboost` and `catboost` extras installed. `ranking.png` shows `bmi` and `s5` sharing the top, with the bagging and boosting families' ranks as dots around each median.
 
 <a id="choosing-a-scorer"></a>
 
@@ -472,7 +518,7 @@ Features left out of `feature_groups` become singleton groups. Empty groups, unk
 
 ## ▍ Data handling and labels
 
-FeatRanker does not impute, encode features, or select features. It changes data values in two places only:
+`FeatureRanker` does not impute, encode features, or select features; `ConsensusSelector` selects feature groups. The ranker changes data values in two places only:
 
 - **Linear scaling.** Built-in linear models sit behind a `StandardScaler` fit on training data only. Tree models and your own models get the data as given.
 - **Classification labels.** For `task="clf"`, `fit()` encodes the labels to `0..n_classes-1` with a `LabelEncoder`, because some estimators (XGBoost) require it. Every estimator and scorer, including your own, sees the encoded labels. `ranker.label_encoder.classes_` maps each code back to the original label; code `i` is `classes_[i]`.
