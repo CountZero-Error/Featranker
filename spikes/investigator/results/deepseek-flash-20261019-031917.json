@@ -1,0 +1,2347 @@
+{
+  "model": "deepseek-flash",
+  "base_url": "https://api.deepseek.com",
+  "seeds_requested": [
+    5,
+    6,
+    7,
+    8,
+    9
+  ],
+  "arms": [
+    "narrator",
+    "evidence",
+    "investigator"
+  ],
+  "commit": "8e7c2bfd3881e2672b6f71298070f7c2c64d77ab",
+  "spike_dirty": true,
+  "spike_sha256": "b90a37cd4c12e7a1a6485c5056475fd3129ccf9903caf811d48e47c1d0cc54e4",
+  "started": "20261019-031917",
+  "seeds": [
+    {
+      "seed": 5,
+      "roles": {
+        "linear": "f1",
+        "nonlinear": "f8",
+        "interaction": [
+          "f9",
+          "f4"
+        ],
+        "correlated": [
+          "f3",
+          "f7"
+        ],
+        "noise": [
+          "f0",
+          "f2",
+          "f5",
+          "f6"
+        ]
+      },
+      "scores": {
+        "ridge": {
+          "train_r2": 0.505,
+          "eval_r2": 0.551
+        },
+        "random_forest": {
+          "train_r2": 0.9344,
+          "eval_r2": 0.5381
+        },
+        "hist_gb": {
+          "train_r2": 0.9534,
+          "eval_r2": 0.7548
+        },
+        "decision_tree": {
+          "train_r2": 1.0,
+          "eval_r2": 0.1178
+        }
+      },
+      "arms": {
+        "narrator": {
+          "findings": [
+            {
+              "features": [
+                "f1"
+              ],
+              "mechanism": "linear",
+              "reason": "Ridge and tree models all assign f1 high importance, consistent with a strong straight-line effect."
+            },
+            {
+              "features": [
+                "f3"
+              ],
+              "mechanism": "linear",
+              "reason": "Ridge importance is far higher than tree-model importance, indicating a straight-line effect that trees approximate less efficiently."
+            },
+            {
+              "features": [
+                "f7"
+              ],
+              "mechanism": "linear",
+              "reason": "Ridge ranks f7 highly while tree-based models rank it much lower, consistent with a linear effect."
+            },
+            {
+              "features": [
+                "f8"
+              ],
+              "mechanism": "nonlinear",
+              "reason": "Tree-based models give f8 relatively more importance than ridge does, indicating a curved or threshold effect."
+            },
+            {
+              "features": [
+                "f4",
+                "f9"
+              ],
+              "mechanism": "interaction",
+              "reason": "Both f4 and f9 are strongly important only in hist_gb and near zero in ridge, consistent with a joint effect that depends on their values together."
+            },
+            {
+              "features": [
+                "f0"
+              ],
+              "mechanism": "noise",
+              "reason": "Importance is near zero across all models and within one standard deviation of zero."
+            },
+            {
+              "features": [
+                "f2"
+              ],
+              "mechanism": "noise",
+              "reason": "Importance is small across all models and not distinguishable from zero."
+            },
+            {
+              "features": [
+                "f5"
+              ],
+              "mechanism": "noise",
+              "reason": "Importance is near zero across all models and within one standard deviation of zero."
+            },
+            {
+              "features": [
+                "f6"
+              ],
+              "mechanism": "noise",
+              "reason": "Importance is near zero in three models and only weakly nonzero in decision_tree, consistent with no robust effect."
+            }
+          ],
+          "trail": [],
+          "calls": 1,
+          "recall": 0.6,
+          "matched": [
+            "interaction:f4+f9",
+            "linear:f1",
+            "nonlinear:f8"
+          ],
+          "false_findings": 0,
+          "invalid_final": false
+        },
+        "evidence": {
+          "findings": [
+            {
+              "features": [
+                "f1"
+              ],
+              "mechanism": "linear",
+              "reason": "f1 has consistently high positive importance and SHAP direction across all models, indicating a strong straight-line effect."
+            },
+            {
+              "features": [
+                "f8"
+              ],
+              "mechanism": "nonlinear",
+              "reason": "f8 has high importance overall but notably stronger SHAP magnitude in tree models than in ridge, consistent with a curved or threshold effect."
+            },
+            {
+              "features": [
+                "f4",
+                "f9"
+              ],
+              "mechanism": "interaction",
+              "reason": "f4 and f9 both have low ridge importance but large hist_gb importance, and hist_gb substantially outperforms the additive ridge model, supporting an interaction."
+            },
+            {
+              "features": [
+                "f3",
+                "f7"
+              ],
+              "mechanism": "correlated",
+              "reason": "f3 and f7 have an extremely high Pearson correlation of 0.9948, carrying nearly the same information."
+            },
+            {
+              "features": [],
+              "model": "decision_tree",
+              "mechanism": "overfit",
+              "reason": "The decision_tree fits the training data perfectly (R\u00b2 1.0) but generalizes poorly (evaluation R\u00b2 0.1178)."
+            },
+            {
+              "features": [
+                "f0"
+              ],
+              "mechanism": "noise",
+              "reason": "f0 has negligible importance and very low SHAP magnitude across models, indicating no reliable effect."
+            },
+            {
+              "features": [
+                "f2"
+              ],
+              "mechanism": "noise",
+              "reason": "f2 has negligible importance and very low SHAP magnitude across models, indicating no reliable effect."
+            },
+            {
+              "features": [
+                "f5"
+              ],
+              "mechanism": "noise",
+              "reason": "f5 has negligible importance and very low SHAP magnitude across models, indicating no reliable effect."
+            },
+            {
+              "features": [
+                "f6"
+              ],
+              "mechanism": "noise",
+              "reason": "f6 has negligible ranked importance and very low SHAP magnitude across the main models, indicating no reliable effect."
+            }
+          ],
+          "trail": [],
+          "calls": 1,
+          "recall": 1.0,
+          "matched": [
+            "correlated:f3+f7",
+            "interaction:f4+f9",
+            "linear:f1",
+            "nonlinear:f8",
+            "overfit:decision_tree"
+          ],
+          "false_findings": 0,
+          "invalid_final": false
+        },
+        "investigator": {
+          "findings": [
+            {
+              "features": [
+                "f1"
+              ],
+              "mechanism": "linear",
+              "reason": "f1 has the highest consensus importance and a strong positive ridge SHAP effect, indicating a straight-line relationship."
+            },
+            {
+              "features": [
+                "f3"
+              ],
+              "mechanism": "linear",
+              "reason": "f3 has the largest ridge SHAP attribution and a consistent positive direction across models, supporting a straight-line effect."
+            },
+            {
+              "features": [
+                "f8"
+              ],
+              "mechanism": "linear",
+              "reason": "f8 has high importance in ridge as well as tree models and a positive ridge SHAP direction, supporting a linear effect."
+            },
+            {
+              "features": [
+                "f9"
+              ],
+              "mechanism": "nonlinear",
+              "reason": "HistGradientBoosting SHAP dependence for f9 is poorly fit by a straight line (linearity R\u00b2=0.24)."
+            },
+            {
+              "features": [
+                "f4"
+              ],
+              "mechanism": "nonlinear",
+              "reason": "HistGradientBoosting SHAP dependence for f4 is poorly fit by a straight line (linearity R\u00b2=0.07)."
+            },
+            {
+              "features": [
+                "f3",
+                "f7"
+              ],
+              "mechanism": "correlated",
+              "reason": "f3 and f7 have Pearson r=0.9948, so they carry nearly identical information."
+            },
+            {
+              "features": [],
+              "model": "decision_tree",
+              "mechanism": "overfit",
+              "reason": "Decision tree train R\u00b2=1.000 versus evaluation R\u00b2=0.118."
+            },
+            {
+              "features": [],
+              "model": "random_forest",
+              "mechanism": "overfit",
+              "reason": "Random forest train R\u00b2=0.934 versus evaluation R\u00b2=0.538."
+            },
+            {
+              "features": [],
+              "model": "hist_gb",
+              "mechanism": "overfit",
+              "reason": "HistGradientBoosting train R\u00b2=0.953 versus evaluation R\u00b2=0.755."
+            },
+            {
+              "features": [
+                "f0"
+              ],
+              "mechanism": "noise",
+              "reason": "f0 has low importance and low SHAP attribution across models."
+            },
+            {
+              "features": [
+                "f2"
+              ],
+              "mechanism": "noise",
+              "reason": "f2 has low importance and low SHAP attribution across models."
+            },
+            {
+              "features": [
+                "f5"
+              ],
+              "mechanism": "noise",
+              "reason": "f5 has low importance and low SHAP attribution across models."
+            },
+            {
+              "features": [
+                "f6"
+              ],
+              "mechanism": "noise",
+              "reason": "f6 has low importance in most models and low, inconsistent SHAP attribution."
+            }
+          ],
+          "trail": [
+            {
+              "turn": 1,
+              "hypothesis": "f9 has a nonlinear effect, so its SHAP dependence should be poorly fit by a straight line.",
+              "claim": {
+                "features": [
+                  "f9"
+                ],
+                "mechanism": "nonlinear",
+                "reason": "HistGradientBoosting gives f9 high attribution despite low ridge importance, suggesting a curved or threshold effect."
+              },
+              "prediction": {
+                "path": "linearity_r2",
+                "op": "<",
+                "value": 0.8
+              },
+              "action": {
+                "name": "shap_dependence",
+                "model": "hist_gb",
+                "feature": "f9"
+              },
+              "result": {
+                "bins": [
+                  {
+                    "x_mid": -1.8278,
+                    "mean_shap": -1.1035
+                  },
+                  {
+                    "x_mid": -1.1009,
+                    "mean_shap": -0.4479
+                  },
+                  {
+                    "x_mid": -0.7302,
+                    "mean_shap": -0.2559
+                  },
+                  {
+                    "x_mid": -0.3484,
+                    "mean_shap": 0.0811
+                  },
+                  {
+                    "x_mid": -0.0128,
+                    "mean_shap": -0.0181
+                  },
+                  {
+                    "x_mid": 0.3197,
+                    "mean_shap": -0.0831
+                  },
+                  {
+                    "x_mid": 0.561,
+                    "mean_shap": 0.074
+                  },
+                  {
+                    "x_mid": 0.8479,
+                    "mean_shap": 0.3103
+                  },
+                  {
+                    "x_mid": 1.1581,
+                    "mean_shap": 0.1634
+                  },
+                  {
+                    "x_mid": 1.7905,
+                    "mean_shap": 0.3433
+                  }
+                ],
+                "linearity_r2": 0.2396
+              },
+              "verdict": "confirmed"
+            },
+            {
+              "turn": 2,
+              "hypothesis": "f4 has a nonlinear effect, so its SHAP dependence should be poorly fit by a straight line.",
+              "claim": {
+                "features": [
+                  "f4"
+                ],
+                "mechanism": "nonlinear",
+                "reason": "HistGradientBoosting gives f4 high attribution while ridge gives it low attribution, suggesting a curved or threshold effect."
+              },
+              "prediction": {
+                "path": "linearity_r2",
+                "op": "<",
+                "value": 0.8
+              },
+              "action": {
+                "name": "shap_dependence",
+                "model": "hist_gb",
+                "feature": "f4"
+              },
+              "result": {
+                "bins": [
+                  {
+                    "x_mid": -1.8773,
+                    "mean_shap": -0.3212
+                  },
+                  {
+                    "x_mid": -1.0691,
+                    "mean_shap": -0.3094
+                  },
+                  {
+                    "x_mid": -0.6494,
+                    "mean_shap": -0.2522
+                  },
+                  {
+                    "x_mid": -0.3029,
+                    "mean_shap": 0.0185
+                  },
+                  {
+                    "x_mid": -0.0757,
+                    "mean_shap": -0.0401
+                  },
+                  {
+                    "x_mid": 0.1874,
+                    "mean_shap": 0.0585
+                  },
+                  {
+                    "x_mid": 0.5205,
+                    "mean_shap": 0.1247
+                  },
+                  {
+                    "x_mid": 0.8832,
+                    "mean_shap": 0.3136
+                  },
+                  {
+                    "x_mid": 1.2498,
+                    "mean_shap": 0.0425
+                  },
+                  {
+                    "x_mid": 1.8313,
+                    "mean_shap": 0.3883
+                  }
+                ],
+                "linearity_r2": 0.0726
+              },
+              "verdict": "confirmed"
+            },
+            {
+              "turn": 3,
+              "hypothesis": "f8 and f9 have an interaction effect, so their SHAP interaction strength should be non-trivial.",
+              "claim": {
+                "features": [
+                  "f8",
+                  "f9"
+                ],
+                "mechanism": "interaction",
+                "reason": "HistGradientBoosting's high importance for f8 and f9 and their moderate SHAP direction correlations suggest their effect is non-additive."
+              },
+              "prediction": {
+                "path": "share",
+                "op": ">",
+                "value": 0.05
+              },
+              "action": {
+                "name": "shap_interaction",
+                "model": "hist_gb",
+                "features": [
+                  "f8",
+                  "f9"
+                ]
+              },
+              "result": {
+                "strength": 0.1145,
+                "share": 0.0143
+              },
+              "verdict": "refuted"
+            }
+          ],
+          "calls": 4,
+          "recall": 0.6,
+          "matched": [
+            "correlated:f3+f7",
+            "linear:f1",
+            "overfit:decision_tree"
+          ],
+          "false_findings": 1,
+          "invalid_final": false,
+          "confirmed_false": 0
+        }
+      }
+    },
+    {
+      "seed": 6,
+      "roles": {
+        "linear": "f7",
+        "nonlinear": "f6",
+        "interaction": [
+          "f3",
+          "f8"
+        ],
+        "correlated": [
+          "f1",
+          "f9"
+        ],
+        "noise": [
+          "f0",
+          "f2",
+          "f4",
+          "f5"
+        ]
+      },
+      "scores": {
+        "ridge": {
+          "train_r2": 0.5726,
+          "eval_r2": 0.648
+        },
+        "random_forest": {
+          "train_r2": 0.9376,
+          "eval_r2": 0.6907
+        },
+        "hist_gb": {
+          "train_r2": 0.9724,
+          "eval_r2": 0.8112
+        },
+        "decision_tree": {
+          "train_r2": 1.0,
+          "eval_r2": 0.3546
+        }
+      },
+      "arms": {
+        "narrator": {
+          "findings": [
+            {
+              "features": [
+                "f7"
+              ],
+              "mechanism": "linear",
+              "reason": "f7 is ranked first by every model and has the largest ridge importance, indicating a strong straight-line effect."
+            },
+            {
+              "features": [
+                "f6"
+              ],
+              "mechanism": "linear",
+              "reason": "f6 has consistently high ridge and tree importance across all models, supporting a linear effect."
+            },
+            {
+              "features": [
+                "f9"
+              ],
+              "mechanism": "linear",
+              "reason": "f9 has high ridge importance and ranks highly across tree models, supporting a linear effect."
+            },
+            {
+              "features": [
+                "f1"
+              ],
+              "mechanism": "linear",
+              "reason": "f1 has stable moderate positive importance across ridge and tree models, supporting a linear effect."
+            },
+            {
+              "features": [
+                "f8"
+              ],
+              "mechanism": "nonlinear",
+              "reason": "f8 has near-zero ridge importance but non-negligible tree-model importance, especially in hist_gb, indicating a nonlinear effect."
+            },
+            {
+              "features": [
+                "f3",
+                "f8"
+              ],
+              "mechanism": "interaction",
+              "reason": "f3 and f8 both have near-zero ridge importance but high hist_gb importance, and hist_gb substantially outperforms ridge, indicating their joint effect."
+            },
+            {
+              "features": [
+                "f0"
+              ],
+              "mechanism": "noise",
+              "reason": "f0 has near-zero importance across all models and ranks at the bottom."
+            },
+            {
+              "features": [
+                "f2"
+              ],
+              "mechanism": "noise",
+              "reason": "f2 has near-zero importance across all models and ranks low."
+            },
+            {
+              "features": [
+                "f4"
+              ],
+              "mechanism": "noise",
+              "reason": "f4 has near-zero importance across all models and ranks near the bottom."
+            },
+            {
+              "features": [
+                "f5"
+              ],
+              "mechanism": "noise",
+              "reason": "f5 has near-zero importance across all models and ranks low."
+            }
+          ],
+          "trail": [],
+          "calls": 1,
+          "recall": 0.4,
+          "matched": [
+            "interaction:f3+f8",
+            "linear:f7"
+          ],
+          "false_findings": 1,
+          "invalid_final": false
+        },
+        "evidence": {
+          "findings": [
+            {
+              "features": [
+                "f7"
+              ],
+              "mechanism": "linear",
+              "reason": "f7 has the strongest consistent monotone effect, ranking first across all models with a near-unit SHAP direction."
+            },
+            {
+              "features": [
+                "f6"
+              ],
+              "mechanism": "nonlinear",
+              "reason": "f6 has a strong effect but tree models increase its SHAP importance and show a less-than-unit monotone direction, indicating curvature beyond a straight line."
+            },
+            {
+              "features": [
+                "f1",
+                "f9"
+              ],
+              "mechanism": "correlated",
+              "reason": "f1 and f9 have Pearson r=0.995 and both carry high positive importance, indicating redundant information."
+            },
+            {
+              "features": [
+                "f3",
+                "f8"
+              ],
+              "mechanism": "interaction",
+              "reason": "f3 and f8 have near-zero ridge importance but large hist_gb SHAP/importance with weak individual directions, consistent with a joint conditional effect."
+            },
+            {
+              "features": [
+                "f0"
+              ],
+              "mechanism": "noise",
+              "reason": "f0 has near-zero ridge importance, inconsistent SHAP direction, and bottom consensus ranks."
+            },
+            {
+              "features": [
+                "f2"
+              ],
+              "mechanism": "noise",
+              "reason": "f2 has negligible ridge importance, weak inconsistent SHAP effects, and bottom consensus ranks across models."
+            },
+            {
+              "features": [
+                "f4"
+              ],
+              "mechanism": "noise",
+              "reason": "f4 has negligible linear importance, small unstable SHAP effects, and bottom consensus ranks."
+            },
+            {
+              "features": [
+                "f5"
+              ],
+              "mechanism": "noise",
+              "reason": "f5 has negligible ridge importance, small unstable SHAP effects, and consistently low consensus ranks."
+            },
+            {
+              "features": [],
+              "model": "decision_tree",
+              "mechanism": "overfit",
+              "reason": "decision_tree has train R\u00b2=1.0 versus evaluation R\u00b2=0.3546, an extremely large generalization gap."
+            }
+          ],
+          "trail": [],
+          "calls": 1,
+          "recall": 1.0,
+          "matched": [
+            "correlated:f1+f9",
+            "interaction:f3+f8",
+            "linear:f7",
+            "nonlinear:f6",
+            "overfit:decision_tree"
+          ],
+          "false_findings": 0,
+          "invalid_final": false
+        },
+        "investigator": {
+          "findings": [
+            {
+              "features": [
+                "f6"
+              ],
+              "mechanism": "linear",
+              "reason": "f6 is highly important in the linear ridge model with positive SHAP direction, supporting a straight-line effect."
+            },
+            {
+              "features": [
+                "f7"
+              ],
+              "mechanism": "linear",
+              "reason": "f7 ranks first across all models with strong positive SHAP, consistent with a linear effect."
+            },
+            {
+              "features": [
+                "f9"
+              ],
+              "mechanism": "linear",
+              "reason": "f9 has strong positive SHAP and high ridge importance, supporting a linear effect."
+            },
+            {
+              "features": [
+                "f3"
+              ],
+              "mechanism": "nonlinear",
+              "reason": "The SHAP dependence for f3 has very low linearity R\u00b2 (0.0206) and is important mainly in flexible tree models."
+            },
+            {
+              "features": [
+                "f8"
+              ],
+              "mechanism": "nonlinear",
+              "reason": "The SHAP dependence for f8 has very low linearity R\u00b2 (0.0367) and is important mainly in flexible tree models."
+            },
+            {
+              "features": [
+                "f1",
+                "f9"
+              ],
+              "mechanism": "correlated",
+              "reason": "f1 and f9 have Pearson r=0.9951 and share similar high importance and SHAP direction."
+            },
+            {
+              "features": [],
+              "model": "decision_tree",
+              "mechanism": "overfit",
+              "reason": "The decision tree has train R\u00b2=1.0 but held-out R\u00b2=0.3546, a very large train-evaluation gap."
+            },
+            {
+              "features": [
+                "f0"
+              ],
+              "mechanism": "noise",
+              "reason": "f0 has near-zero and inconsistent importance/SHAP across models."
+            },
+            {
+              "features": [
+                "f2"
+              ],
+              "mechanism": "noise",
+              "reason": "f2 has near-zero and inconsistent importance/SHAP across models."
+            },
+            {
+              "features": [
+                "f4"
+              ],
+              "mechanism": "noise",
+              "reason": "f4 has near-zero and inconsistent importance/SHAP across models."
+            },
+            {
+              "features": [
+                "f5"
+              ],
+              "mechanism": "noise",
+              "reason": "f5 has near-zero and inconsistent importance/SHAP across models."
+            }
+          ],
+          "trail": [
+            {
+              "turn": 1,
+              "hypothesis": "f3 has a nonlinear, non-monotonic effect that tree models capture but ridge does not.",
+              "claim": {
+                "features": [
+                  "f3"
+                ],
+                "mechanism": "nonlinear"
+              },
+              "prediction": {
+                "path": "linearity_r2",
+                "op": "<",
+                "value": 0.5
+              },
+              "action": {
+                "name": "shap_dependence",
+                "model": "hist_gb",
+                "feature": "f3"
+              },
+              "result": {
+                "bins": [
+                  {
+                    "x_mid": -1.6214,
+                    "mean_shap": 0.4665
+                  },
+                  {
+                    "x_mid": -1.0012,
+                    "mean_shap": -0.0001
+                  },
+                  {
+                    "x_mid": -0.6205,
+                    "mean_shap": -0.1194
+                  },
+                  {
+                    "x_mid": -0.3439,
+                    "mean_shap": 0.0818
+                  },
+                  {
+                    "x_mid": -0.1213,
+                    "mean_shap": 0.0257
+                  },
+                  {
+                    "x_mid": 0.0922,
+                    "mean_shap": 0.0505
+                  },
+                  {
+                    "x_mid": 0.3244,
+                    "mean_shap": -0.1352
+                  },
+                  {
+                    "x_mid": 0.6223,
+                    "mean_shap": -0.0572
+                  },
+                  {
+                    "x_mid": 0.9885,
+                    "mean_shap": -0.0726
+                  },
+                  {
+                    "x_mid": 1.6956,
+                    "mean_shap": 0.1432
+                  }
+                ],
+                "linearity_r2": 0.0206
+              },
+              "verdict": "confirmed"
+            },
+            {
+              "turn": 2,
+              "hypothesis": "The two dominant features f6 and f7 have a meaningful interaction captured by hist_gb.",
+              "claim": {
+                "features": [
+                  "f6",
+                  "f7"
+                ],
+                "mechanism": "interaction"
+              },
+              "prediction": {
+                "path": "share",
+                "op": ">",
+                "value": 0.05
+              },
+              "action": {
+                "name": "shap_interaction",
+                "model": "hist_gb",
+                "features": [
+                  "f6",
+                  "f7"
+                ]
+              },
+              "result": {
+                "strength": 0.2084,
+                "share": 0.0271
+              },
+              "verdict": "refuted"
+            },
+            {
+              "turn": 3,
+              "hypothesis": "f8 has a nonlinear effect captured by hist_gb but not well represented by a straight-line SHAP relationship.",
+              "claim": {
+                "features": [
+                  "f8"
+                ],
+                "mechanism": "nonlinear"
+              },
+              "prediction": {
+                "path": "linearity_r2",
+                "op": "<",
+                "value": 0.5
+              },
+              "action": {
+                "name": "shap_dependence",
+                "model": "hist_gb",
+                "feature": "f8"
+              },
+              "result": {
+                "bins": [
+                  {
+                    "x_mid": -1.6436,
+                    "mean_shap": -0.0969
+                  },
+                  {
+                    "x_mid": -0.902,
+                    "mean_shap": 0.1007
+                  },
+                  {
+                    "x_mid": -0.5895,
+                    "mean_shap": -0.0498
+                  },
+                  {
+                    "x_mid": -0.3882,
+                    "mean_shap": -0.152
+                  },
+                  {
+                    "x_mid": -0.1893,
+                    "mean_shap": 0.0176
+                  },
+                  {
+                    "x_mid": 0.0115,
+                    "mean_shap": -0.0221
+                  },
+                  {
+                    "x_mid": 0.2401,
+                    "mean_shap": 0.0459
+                  },
+                  {
+                    "x_mid": 0.597,
+                    "mean_shap": 0.0556
+                  },
+                  {
+                    "x_mid": 1.0074,
+                    "mean_shap": 0.1087
+                  },
+                  {
+                    "x_mid": 1.771,
+                    "mean_shap": 0.2085
+                  }
+                ],
+                "linearity_r2": 0.0367
+              },
+              "verdict": "confirmed"
+            }
+          ],
+          "calls": 4,
+          "recall": 0.6,
+          "matched": [
+            "correlated:f1+f9",
+            "linear:f7",
+            "overfit:decision_tree"
+          ],
+          "false_findings": 1,
+          "invalid_final": false,
+          "confirmed_false": 0
+        }
+      }
+    },
+    {
+      "seed": 7,
+      "roles": {
+        "linear": "f2",
+        "nonlinear": "f3",
+        "interaction": [
+          "f5",
+          "f6"
+        ],
+        "correlated": [
+          "f4",
+          "f9"
+        ],
+        "noise": [
+          "f0",
+          "f1",
+          "f7",
+          "f8"
+        ]
+      },
+      "scores": {
+        "ridge": {
+          "train_r2": 0.5382,
+          "eval_r2": 0.6206
+        },
+        "random_forest": {
+          "train_r2": 0.9399,
+          "eval_r2": 0.6142
+        },
+        "hist_gb": {
+          "train_r2": 0.9686,
+          "eval_r2": 0.7748
+        },
+        "decision_tree": {
+          "train_r2": 1.0,
+          "eval_r2": 0.4345
+        }
+      },
+      "arms": {
+        "narrator": {
+          "findings": [
+            {
+              "features": [
+                "f2"
+              ],
+              "mechanism": "linear",
+              "reason": "f2 has the highest importance across all models, including a dominant ridge coefficient, indicating a strong straight-line effect."
+            },
+            {
+              "features": [
+                "f3"
+              ],
+              "mechanism": "linear",
+              "reason": "f3 is consistently important in both ridge and tree models, supporting a straight-line effect."
+            },
+            {
+              "features": [
+                "f9"
+              ],
+              "mechanism": "linear",
+              "reason": "f9 is highly ranked by ridge and decision tree, consistent with a straight-line effect."
+            },
+            {
+              "features": [
+                "f4"
+              ],
+              "mechanism": "nonlinear",
+              "reason": "f4 is consistently important in all tree models but negligible in ridge, indicating a curved or threshold effect."
+            },
+            {
+              "features": [
+                "f5",
+                "f6"
+              ],
+              "mechanism": "interaction",
+              "reason": "f5 and f6 both become highly important only in hist_gb, consistent with an effect that depends on their joint values."
+            },
+            {
+              "features": [
+                "f0"
+              ],
+              "mechanism": "noise",
+              "reason": "f0 has near-zero or negative importance across all models."
+            },
+            {
+              "features": [
+                "f1"
+              ],
+              "mechanism": "noise",
+              "reason": "f1 is negligible in the stronger ridge and ensemble models, with only the lower-scoring decision tree showing notable importance."
+            },
+            {
+              "features": [
+                "f7"
+              ],
+              "mechanism": "noise",
+              "reason": "f7 shows small and inconsistent importance across models."
+            },
+            {
+              "features": [
+                "f8"
+              ],
+              "mechanism": "noise",
+              "reason": "f8 is near zero or negative in all models."
+            }
+          ],
+          "trail": [],
+          "calls": 1,
+          "recall": 0.4,
+          "matched": [
+            "interaction:f5+f6",
+            "linear:f2"
+          ],
+          "false_findings": 2,
+          "invalid_final": false
+        },
+        "evidence": {
+          "findings": [
+            {
+              "features": [
+                "f2"
+              ],
+              "mechanism": "linear",
+              "reason": "f2 has the strongest consistent positive SHAP/importance across ridge and tree models, indicating a straight-line effect."
+            },
+            {
+              "features": [
+                "f3"
+              ],
+              "mechanism": "nonlinear",
+              "reason": "f3 has a strong positive effect that tree models rank and attribute more strongly than ridge, indicating curvature or a threshold beyond a linear term."
+            },
+            {
+              "features": [
+                "f5",
+                "f6"
+              ],
+              "mechanism": "interaction",
+              "reason": "f5 and f6 are weak or negligible in ridge but become highly important together in hist_gb with weak monotonic directions, consistent with a joint interaction effect."
+            },
+            {
+              "features": [
+                "f4",
+                "f9"
+              ],
+              "mechanism": "correlated",
+              "reason": "f4 and f9 have Pearson r=0.9959 and show the same shared signal, with ridge retaining f9 while f4 is nearly zero."
+            },
+            {
+              "features": [],
+              "model": "decision_tree",
+              "mechanism": "overfit",
+              "reason": "decision_tree has training R\u00b2 1.0 versus held-out R\u00b2 0.4345, a much larger generalization gap than the other models."
+            },
+            {
+              "features": [
+                "f0"
+              ],
+              "mechanism": "noise",
+              "reason": "f0 has low, inconsistent importance and weak SHAP contribution across models."
+            },
+            {
+              "features": [
+                "f1"
+              ],
+              "mechanism": "noise",
+              "reason": "f1 has very low feature importance and only weak, unstable SHAP contribution across models."
+            },
+            {
+              "features": [
+                "f7"
+              ],
+              "mechanism": "noise",
+              "reason": "f7 has near-zero or negative importance in the stronger tree models and inconsistent SHAP evidence."
+            },
+            {
+              "features": [
+                "f8"
+              ],
+              "mechanism": "noise",
+              "reason": "f8 has consistently low importance and weak SHAP contribution across models."
+            }
+          ],
+          "trail": [],
+          "calls": 1,
+          "recall": 1.0,
+          "matched": [
+            "correlated:f4+f9",
+            "interaction:f5+f6",
+            "linear:f2",
+            "nonlinear:f3",
+            "overfit:decision_tree"
+          ],
+          "false_findings": 0,
+          "invalid_final": false
+        },
+        "investigator": {
+          "findings": [
+            {
+              "features": [
+                "f2"
+              ],
+              "mechanism": "linear",
+              "reason": "f2 has the highest consensus rank and a strong positive SHAP effect in every model, indicating a straight-line relationship."
+            },
+            {
+              "features": [
+                "f9"
+              ],
+              "mechanism": "linear",
+              "reason": "f9 has high SHAP importance and a consistent positive direction across models, supporting a linear effect."
+            },
+            {
+              "features": [
+                "f3"
+              ],
+              "mechanism": "nonlinear",
+              "reason": "hist_gb SHAP bins for f3 are flat negative below ~0 and jump to positive above ~0, a threshold effect."
+            },
+            {
+              "features": [
+                "f6"
+              ],
+              "mechanism": "nonlinear",
+              "reason": "hist_gb SHAP dependence for f6 has very low linearity R2 (0.0737) and irregular bins, indicating a curved or threshold effect."
+            },
+            {
+              "features": [
+                "f5",
+                "f6"
+              ],
+              "mechanism": "interaction",
+              "reason": "hist_gb SHAP interaction strength for f5 and f6 is 0.7617 with 9.07% share, confirming an interaction."
+            },
+            {
+              "features": [
+                "f4",
+                "f9"
+              ],
+              "mechanism": "correlated",
+              "reason": "The evaluation-data Pearson correlation between f4 and f9 is 0.9959, so they carry nearly identical information."
+            },
+            {
+              "features": [
+                "f0"
+              ],
+              "mechanism": "noise",
+              "reason": "f0 has low SHAP importance, inconsistent direction across models, and near-bottom consensus rank, supporting no effect."
+            },
+            {
+              "features": [
+                "f1"
+              ],
+              "mechanism": "noise",
+              "reason": "f1 has low SHAP importance and a low consensus rank, consistent with no effect."
+            },
+            {
+              "features": [
+                "f7"
+              ],
+              "mechanism": "noise",
+              "reason": "f7 has low SHAP importance in nonlinear models and a low consensus rank, consistent with no effect."
+            },
+            {
+              "features": [
+                "f8"
+              ],
+              "mechanism": "noise",
+              "reason": "f8 has low SHAP importance, inconsistent direction across models, and near-bottom consensus rank, supporting no effect."
+            },
+            {
+              "features": [],
+              "model": "random_forest",
+              "mechanism": "overfit",
+              "reason": "random_forest train R2 0.9399 vs evaluation R2 0.6142, a large train-eval gap."
+            },
+            {
+              "features": [],
+              "model": "hist_gb",
+              "mechanism": "overfit",
+              "reason": "hist_gb train R2 0.9686 vs evaluation R2 0.7748, showing overfitting."
+            },
+            {
+              "features": [],
+              "model": "decision_tree",
+              "mechanism": "overfit",
+              "reason": "decision_tree train R2 1.0 vs evaluation R2 0.4345, showing severe overfitting."
+            }
+          ],
+          "trail": [
+            {
+              "turn": 1,
+              "hypothesis": "f5 and f6 have a pairwise interaction beyond their individual effects.",
+              "claim": {
+                "features": [
+                  "f5",
+                  "f6"
+                ],
+                "mechanism": "interaction",
+                "reason": "SHAP interaction strength for f5 and f6 in hist_gb is substantial."
+              },
+              "prediction": {
+                "path": "share",
+                "op": ">",
+                "value": 0.05
+              },
+              "action": {
+                "name": "shap_interaction",
+                "model": "hist_gb",
+                "features": [
+                  "f5",
+                  "f6"
+                ]
+              },
+              "result": {
+                "strength": 0.7617,
+                "share": 0.0907
+              },
+              "verdict": "confirmed"
+            },
+            {
+              "turn": 2,
+              "hypothesis": "f6 has a nonlinear threshold-like effect on the target, so its SHAP dependence in hist_gb should not be well explained by a straight line.",
+              "claim": {
+                "features": [
+                  "f6"
+                ],
+                "mechanism": "nonlinear",
+                "reason": "SHAP dependence for f6 in hist_gb has low linearity R\u00b2, indicating a curved or threshold effect."
+              },
+              "prediction": {
+                "path": "linearity_r2",
+                "op": "<",
+                "value": 0.5
+              },
+              "action": {
+                "name": "shap_dependence",
+                "model": "hist_gb",
+                "feature": "f6"
+              },
+              "result": {
+                "bins": [
+                  {
+                    "x_mid": -1.873,
+                    "mean_shap": -0.2029
+                  },
+                  {
+                    "x_mid": -1.0024,
+                    "mean_shap": -0.32
+                  },
+                  {
+                    "x_mid": -0.6568,
+                    "mean_shap": -0.1547
+                  },
+                  {
+                    "x_mid": -0.3384,
+                    "mean_shap": -0.0549
+                  },
+                  {
+                    "x_mid": -0.058,
+                    "mean_shap": 0.0451
+                  },
+                  {
+                    "x_mid": 0.2166,
+                    "mean_shap": 0.1428
+                  },
+                  {
+                    "x_mid": 0.4315,
+                    "mean_shap": 0.0247
+                  },
+                  {
+                    "x_mid": 0.7338,
+                    "mean_shap": -0.0107
+                  },
+                  {
+                    "x_mid": 1.0892,
+                    "mean_shap": 0.2401
+                  },
+                  {
+                    "x_mid": 1.7667,
+                    "mean_shap": 0.3588
+                  }
+                ],
+                "linearity_r2": 0.0737
+              },
+              "verdict": "confirmed"
+            },
+            {
+              "turn": 3,
+              "hypothesis": "f3 has a nonlinear effect, so its SHAP dependence in hist_gb should not be well explained by a straight line.",
+              "claim": {
+                "features": [
+                  "f3"
+                ],
+                "mechanism": "nonlinear",
+                "reason": "SHAP dependence for f3 in hist_gb has low linearity R\u00b2, indicating a curved or threshold effect."
+              },
+              "prediction": {
+                "path": "linearity_r2",
+                "op": "<",
+                "value": 0.5
+              },
+              "action": {
+                "name": "shap_dependence",
+                "model": "hist_gb",
+                "feature": "f3"
+              },
+              "result": {
+                "bins": [
+                  {
+                    "x_mid": -1.635,
+                    "mean_shap": -1.4552
+                  },
+                  {
+                    "x_mid": -1.0582,
+                    "mean_shap": -1.4136
+                  },
+                  {
+                    "x_mid": -0.694,
+                    "mean_shap": -1.4786
+                  },
+                  {
+                    "x_mid": -0.3855,
+                    "mean_shap": -1.4116
+                  },
+                  {
+                    "x_mid": -0.1246,
+                    "mean_shap": -1.2784
+                  },
+                  {
+                    "x_mid": 0.0951,
+                    "mean_shap": 1.2061
+                  },
+                  {
+                    "x_mid": 0.4071,
+                    "mean_shap": 1.3805
+                  },
+                  {
+                    "x_mid": 0.6713,
+                    "mean_shap": 1.4946
+                  },
+                  {
+                    "x_mid": 0.9533,
+                    "mean_shap": 1.5277
+                  },
+                  {
+                    "x_mid": 1.58,
+                    "mean_shap": 1.5346
+                  }
+                ],
+                "linearity_r2": 0.6777
+              },
+              "verdict": "refuted"
+            }
+          ],
+          "calls": 4,
+          "recall": 1.0,
+          "matched": [
+            "correlated:f4+f9",
+            "interaction:f5+f6",
+            "linear:f2",
+            "nonlinear:f3",
+            "overfit:decision_tree"
+          ],
+          "false_findings": 0,
+          "invalid_final": false,
+          "confirmed_false": 0
+        }
+      }
+    },
+    {
+      "seed": 8,
+      "roles": {
+        "linear": "f7",
+        "nonlinear": "f4",
+        "interaction": [
+          "f2",
+          "f5"
+        ],
+        "correlated": [
+          "f3",
+          "f1"
+        ],
+        "noise": [
+          "f0",
+          "f6",
+          "f8",
+          "f9"
+        ]
+      },
+      "scores": {
+        "ridge": {
+          "train_r2": 0.5638,
+          "eval_r2": 0.5712
+        },
+        "random_forest": {
+          "train_r2": 0.9405,
+          "eval_r2": 0.6335
+        },
+        "hist_gb": {
+          "train_r2": 0.9728,
+          "eval_r2": 0.804
+        },
+        "decision_tree": {
+          "train_r2": 1.0,
+          "eval_r2": 0.2707
+        }
+      },
+      "arms": {
+        "narrator": {
+          "findings": [
+            {
+              "features": [
+                "f7"
+              ],
+              "mechanism": "linear",
+              "reason": "It has the highest positive importance across all models, especially in ridge, indicating a strong straight-line effect."
+            },
+            {
+              "features": [
+                "f4"
+              ],
+              "mechanism": "linear",
+              "reason": "It has high positive importance in ridge and is consistently ranked second across all models, supporting a linear effect."
+            },
+            {
+              "features": [
+                "f1"
+              ],
+              "mechanism": "linear",
+              "reason": "It shows moderate positive ridge importance and consistent tree importance, consistent with a linear effect."
+            },
+            {
+              "features": [
+                "f3"
+              ],
+              "mechanism": "linear",
+              "reason": "It has moderate positive ridge importance and consistent tree importance, consistent with a linear effect."
+            },
+            {
+              "features": [
+                "f6"
+              ],
+              "mechanism": "linear",
+              "reason": "It has a small but statistically significant positive importance across models, indicating a weak linear effect."
+            },
+            {
+              "features": [
+                "f2",
+                "f5"
+              ],
+              "mechanism": "interaction",
+              "reason": "Both have near-zero ridge importance but large hist_gb importance, indicating their effect is jointly captured by a model that fits interactions."
+            },
+            {
+              "features": [
+                "f0"
+              ],
+              "mechanism": "noise",
+              "reason": "Its importance is near zero or negative across models, with no consistent positive contribution."
+            },
+            {
+              "features": [
+                "f8"
+              ],
+              "mechanism": "noise",
+              "reason": "It consistently has negative or near-zero importance across all models, indicating no effect."
+            },
+            {
+              "features": [
+                "f9"
+              ],
+              "mechanism": "noise",
+              "reason": "It has near-zero or negative importance and consistently ranks at the bottom, indicating no effect."
+            }
+          ],
+          "trail": [],
+          "calls": 1,
+          "recall": 0.4,
+          "matched": [
+            "interaction:f2+f5",
+            "linear:f7"
+          ],
+          "false_findings": 2,
+          "invalid_final": false
+        },
+        "evidence": {
+          "findings": [
+            {
+              "features": [
+                "f7"
+              ],
+              "mechanism": "linear",
+              "reason": "f7 has the strongest consistent SHAP importance and near-perfect positive monotonic direction across all models."
+            },
+            {
+              "features": [
+                "f6"
+              ],
+              "mechanism": "linear",
+              "reason": "f6 has a small but consistently positive importance and SHAP direction across models, indicating a weak straight-line effect."
+            },
+            {
+              "features": [
+                "f4"
+              ],
+              "mechanism": "nonlinear",
+              "reason": "f4 has much larger SHAP importance in tree models than in ridge and a reduced monotonic direction, indicating a curved or threshold effect."
+            },
+            {
+              "features": [
+                "f2",
+                "f5"
+              ],
+              "mechanism": "interaction",
+              "reason": "f2 and f5 have near-zero marginal linear direction but large tree SHAP importance, especially in hist_gb, indicating their effect depends on each other."
+            },
+            {
+              "features": [
+                "f1",
+                "f3"
+              ],
+              "mechanism": "correlated",
+              "reason": "f1 and f3 are highly correlated (r=0.9937) and share importance across models."
+            },
+            {
+              "features": [],
+              "model": "decision_tree",
+              "mechanism": "overfit",
+              "reason": "decision_tree has train R\u00b2 1.0 versus evaluation R\u00b2 0.271, showing severe overfitting."
+            },
+            {
+              "features": [
+                "f0"
+              ],
+              "mechanism": "noise",
+              "reason": "f0 has negligible and inconsistent importance and negative permutation importance in ridge."
+            },
+            {
+              "features": [
+                "f8"
+              ],
+              "mechanism": "noise",
+              "reason": "f8 has negligible and inconsistent importance across models."
+            },
+            {
+              "features": [
+                "f9"
+              ],
+              "mechanism": "noise",
+              "reason": "f9 has negligible SHAP importance and low rank across models."
+            }
+          ],
+          "trail": [],
+          "calls": 1,
+          "recall": 1.0,
+          "matched": [
+            "correlated:f1+f3",
+            "interaction:f2+f5",
+            "linear:f7",
+            "nonlinear:f4",
+            "overfit:decision_tree"
+          ],
+          "false_findings": 1,
+          "invalid_final": false
+        },
+        "investigator": {
+          "findings": [
+            {
+              "features": [
+                "f7"
+              ],
+              "mechanism": "linear",
+              "reason": "f7 has the highest consensus rank and its hist_gb SHAP dependence is almost perfectly linear (linearity R\u00b2=0.967)."
+            },
+            {
+              "features": [
+                "f4"
+              ],
+              "mechanism": "nonlinear",
+              "reason": "f4's hist_gb SHAP dependence is step-like and not well explained by a straight line (linearity R\u00b2=0.627)."
+            },
+            {
+              "features": [
+                "f2",
+                "f5"
+              ],
+              "mechanism": "interaction",
+              "reason": "The hist_gb SHAP interaction for f2 and f5 is substantial, with share 0.0847 of total attribution."
+            },
+            {
+              "features": [
+                "f1",
+                "f3"
+              ],
+              "mechanism": "correlated",
+              "reason": "f1 and f3 have Pearson correlation 0.9937 on evaluation data."
+            },
+            {
+              "features": [
+                "f0"
+              ],
+              "mechanism": "noise",
+              "reason": "f0 has very low and inconsistent SHAP/importance across models."
+            },
+            {
+              "features": [
+                "f6"
+              ],
+              "mechanism": "noise",
+              "reason": "f6 has low and inconsistent SHAP/importance across models."
+            },
+            {
+              "features": [
+                "f8"
+              ],
+              "mechanism": "noise",
+              "reason": "f8 has very low and inconsistent SHAP/importance across models."
+            },
+            {
+              "features": [
+                "f9"
+              ],
+              "mechanism": "noise",
+              "reason": "f9 has very low and inconsistent SHAP/importance across models."
+            },
+            {
+              "features": [],
+              "model": "random_forest",
+              "mechanism": "overfit",
+              "reason": "random_forest train R\u00b2=0.9405 is much higher than eval R\u00b2=0.6335."
+            },
+            {
+              "features": [],
+              "model": "hist_gb",
+              "mechanism": "overfit",
+              "reason": "hist_gb train R\u00b2=0.9728 is notably higher than eval R\u00b2=0.8040."
+            },
+            {
+              "features": [],
+              "model": "decision_tree",
+              "mechanism": "overfit",
+              "reason": "decision_tree train R\u00b2=1.0 is far higher than eval R\u00b2=0.2707."
+            }
+          ],
+          "trail": [
+            {
+              "turn": 1,
+              "hypothesis": "f2 and f5 have an interaction effect in hist_gb.",
+              "claim": {
+                "features": [
+                  "f2",
+                  "f5"
+                ],
+                "mechanism": "interaction",
+                "reason": "SHAP interaction for f2 and f5 accounts for a nontrivial share of total attribution in hist_gb."
+              },
+              "prediction": {
+                "path": "share",
+                "op": ">",
+                "value": 0.02
+              },
+              "action": {
+                "name": "shap_interaction",
+                "model": "hist_gb",
+                "features": [
+                  "f2",
+                  "f5"
+                ]
+              },
+              "result": {
+                "strength": 0.6801,
+                "share": 0.0847
+              },
+              "verdict": "confirmed"
+            },
+            {
+              "turn": 2,
+              "hypothesis": "f4 has a curved or threshold effect, so its hist_gb SHAP dependence should be poorly fit by a straight line.",
+              "claim": {
+                "features": [
+                  "f4"
+                ],
+                "mechanism": "nonlinear",
+                "reason": "The hist_gb SHAP dependence for f4 is not well explained by a straight-line relationship."
+              },
+              "prediction": {
+                "path": "linearity_r2",
+                "op": "<",
+                "value": 0.8
+              },
+              "action": {
+                "name": "shap_dependence",
+                "model": "hist_gb",
+                "feature": "f4"
+              },
+              "result": {
+                "bins": [
+                  {
+                    "x_mid": -1.6071,
+                    "mean_shap": -1.2925
+                  },
+                  {
+                    "x_mid": -1.0079,
+                    "mean_shap": -1.3419
+                  },
+                  {
+                    "x_mid": -0.6763,
+                    "mean_shap": -1.353
+                  },
+                  {
+                    "x_mid": -0.3552,
+                    "mean_shap": -1.5324
+                  },
+                  {
+                    "x_mid": -0.0746,
+                    "mean_shap": -0.8437
+                  },
+                  {
+                    "x_mid": 0.1884,
+                    "mean_shap": 1.4447
+                  },
+                  {
+                    "x_mid": 0.3888,
+                    "mean_shap": 1.4355
+                  },
+                  {
+                    "x_mid": 0.592,
+                    "mean_shap": 1.4224
+                  },
+                  {
+                    "x_mid": 0.9223,
+                    "mean_shap": 1.3201
+                  },
+                  {
+                    "x_mid": 1.3928,
+                    "mean_shap": 1.345
+                  }
+                ],
+                "linearity_r2": 0.6273
+              },
+              "verdict": "confirmed"
+            },
+            {
+              "turn": 3,
+              "hypothesis": "f7 has a straight-line effect, so its hist_gb SHAP dependence should be well fit by a line.",
+              "claim": {
+                "features": [
+                  "f7"
+                ],
+                "mechanism": "linear",
+                "reason": "The hist_gb SHAP dependence for f7 is well explained by a straight-line relationship."
+              },
+              "prediction": {
+                "path": "linearity_r2",
+                "op": ">",
+                "value": 0.8
+              },
+              "action": {
+                "name": "shap_dependence",
+                "model": "hist_gb",
+                "feature": "f7"
+              },
+              "result": {
+                "bins": [
+                  {
+                    "x_mid": -1.5684,
+                    "mean_shap": -2.9756
+                  },
+                  {
+                    "x_mid": -0.9447,
+                    "mean_shap": -1.955
+                  },
+                  {
+                    "x_mid": -0.5807,
+                    "mean_shap": -1.2306
+                  },
+                  {
+                    "x_mid": -0.2862,
+                    "mean_shap": -0.0835
+                  },
+                  {
+                    "x_mid": -0.0132,
+                    "mean_shap": 0.3172
+                  },
+                  {
+                    "x_mid": 0.1797,
+                    "mean_shap": 0.5118
+                  },
+                  {
+                    "x_mid": 0.3599,
+                    "mean_shap": 0.9994
+                  },
+                  {
+                    "x_mid": 0.6153,
+                    "mean_shap": 1.4713
+                  },
+                  {
+                    "x_mid": 0.9285,
+                    "mean_shap": 1.8338
+                  },
+                  {
+                    "x_mid": 1.5338,
+                    "mean_shap": 3.363
+                  }
+                ],
+                "linearity_r2": 0.9671
+              },
+              "verdict": "confirmed"
+            }
+          ],
+          "calls": 4,
+          "recall": 1.0,
+          "matched": [
+            "correlated:f1+f3",
+            "interaction:f2+f5",
+            "linear:f7",
+            "nonlinear:f4",
+            "overfit:decision_tree"
+          ],
+          "false_findings": 0,
+          "invalid_final": false,
+          "confirmed_false": 0
+        }
+      }
+    },
+    {
+      "seed": 9,
+      "roles": {
+        "linear": "f1",
+        "nonlinear": "f9",
+        "interaction": [
+          "f0",
+          "f8"
+        ],
+        "correlated": [
+          "f4",
+          "f2"
+        ],
+        "noise": [
+          "f3",
+          "f5",
+          "f6",
+          "f7"
+        ]
+      },
+      "scores": {
+        "ridge": {
+          "train_r2": 0.6049,
+          "eval_r2": 0.5279
+        },
+        "random_forest": {
+          "train_r2": 0.9514,
+          "eval_r2": 0.609
+        },
+        "hist_gb": {
+          "train_r2": 0.983,
+          "eval_r2": 0.7594
+        },
+        "decision_tree": {
+          "train_r2": 1.0,
+          "eval_r2": 0.2609
+        }
+      },
+      "arms": {
+        "narrator": {
+          "findings": [
+            {
+              "features": [
+                "f1"
+              ],
+              "mechanism": "linear",
+              "reason": "f1 has high and consistent importance across ridge and tree models, indicating a strong straight-line effect."
+            },
+            {
+              "features": [
+                "f4"
+              ],
+              "mechanism": "linear",
+              "reason": "f4 is highly important in ridge and moderately important in trees, consistent with a linear effect."
+            },
+            {
+              "features": [
+                "f2"
+              ],
+              "mechanism": "linear",
+              "reason": "f2 shows a small but consistent positive importance across models, especially in ridge, indicating a weak linear effect."
+            },
+            {
+              "features": [
+                "f9"
+              ],
+              "mechanism": "nonlinear",
+              "reason": "f9 has higher importance in tree models than in ridge, indicating a curved or threshold component beyond linearity."
+            },
+            {
+              "features": [
+                "f0",
+                "f8"
+              ],
+              "mechanism": "interaction",
+              "reason": "f0 and f8 have near-zero ridge importance but similarly high hist_gb importance, consistent with an interaction effect."
+            },
+            {
+              "features": [
+                "f3"
+              ],
+              "mechanism": "noise",
+              "reason": "f3 has near-zero importance in all models."
+            },
+            {
+              "features": [
+                "f5"
+              ],
+              "mechanism": "noise",
+              "reason": "f5 has negligible importance across all models."
+            },
+            {
+              "features": [
+                "f6"
+              ],
+              "mechanism": "noise",
+              "reason": "f6 has negligible importance across all models."
+            },
+            {
+              "features": [
+                "f7"
+              ],
+              "mechanism": "noise",
+              "reason": "f7 has consistently very low importance across all models."
+            }
+          ],
+          "trail": [],
+          "calls": 1,
+          "recall": 0.6,
+          "matched": [
+            "interaction:f0+f8",
+            "linear:f1",
+            "nonlinear:f9"
+          ],
+          "false_findings": 0,
+          "invalid_final": false
+        },
+        "evidence": {
+          "findings": [
+            {
+              "features": [
+                "f1"
+              ],
+              "mechanism": "linear",
+              "reason": "SHAP is strongly positive and monotonic across all models with the highest consensus importance."
+            },
+            {
+              "features": [
+                "f4"
+              ],
+              "mechanism": "linear",
+              "reason": "SHAP is strongly positive and monotonic in all models, consistent with a straight-line effect."
+            },
+            {
+              "features": [
+                "f9"
+              ],
+              "mechanism": "linear",
+              "reason": "SHAP is strongly positive and monotonic with high importance in both ridge and tree models."
+            },
+            {
+              "features": [
+                "f7"
+              ],
+              "mechanism": "linear",
+              "reason": "A weak but consistent negative SHAP direction across models indicates a straight-line effect."
+            },
+            {
+              "features": [
+                "f8"
+              ],
+              "mechanism": "nonlinear",
+              "reason": "Importance is low in ridge but high in hist_gb with near-zero marginal SHAP direction, indicating a curved or threshold effect."
+            },
+            {
+              "features": [
+                "f0",
+                "f8"
+              ],
+              "mechanism": "interaction",
+              "reason": "f0 is important mainly in hist_gb and both f0 and f8 show weak marginal direction, supporting a joint effect."
+            },
+            {
+              "features": [
+                "f2",
+                "f4"
+              ],
+              "mechanism": "correlated",
+              "reason": "Their evaluation Pearson correlation is 0.9949, indicating they carry the same information."
+            },
+            {
+              "features": [
+                "f3"
+              ],
+              "mechanism": "noise",
+              "reason": "Importance and SHAP direction are low and inconsistent across models."
+            },
+            {
+              "features": [
+                "f5"
+              ],
+              "mechanism": "noise",
+              "reason": "Consensus importance is bottom-ranked with negligible and inconsistent SHAP effects."
+            },
+            {
+              "features": [
+                "f6"
+              ],
+              "mechanism": "noise",
+              "reason": "Importance is low and SHAP direction varies across models, indicating no supported effect."
+            },
+            {
+              "features": [],
+              "model": "decision_tree",
+              "mechanism": "overfit",
+              "reason": "It has train R\u00b2 of 1.0 but held-out R\u00b2 of only 0.2609."
+            }
+          ],
+          "trail": [],
+          "calls": 1,
+          "recall": 0.8,
+          "matched": [
+            "correlated:f2+f4",
+            "interaction:f0+f8",
+            "linear:f1",
+            "overfit:decision_tree"
+          ],
+          "false_findings": 2,
+          "invalid_final": false
+        },
+        "investigator": {
+          "findings": [
+            {
+              "features": [
+                "f1"
+              ],
+              "mechanism": "linear",
+              "reason": "SHAP dependence for f1 is strongly linear (linearity R\u00b2 = 0.9692)."
+            },
+            {
+              "features": [
+                "f9"
+              ],
+              "mechanism": "nonlinear",
+              "reason": "SHAP dependence for f9 is high-magnitude but not well fit by a straight line (linearity R\u00b2 = 0.6167), consistent with a curved/threshold effect."
+            },
+            {
+              "features": [
+                "f0",
+                "f8"
+              ],
+              "mechanism": "interaction",
+              "reason": "SHAP interaction between f0 and f8 accounts for 8.57% of total attribution."
+            },
+            {
+              "features": [
+                "f2",
+                "f4"
+              ],
+              "mechanism": "correlated",
+              "reason": "f2 and f4 have Pearson r = 0.9949 on evaluation data, indicating redundant information."
+            },
+            {
+              "features": [
+                "f3"
+              ],
+              "mechanism": "noise",
+              "reason": "f3 has near-zero importance and consistently low mean |SHAP| across models."
+            },
+            {
+              "features": [
+                "f5"
+              ],
+              "mechanism": "noise",
+              "reason": "f5 has the lowest consensus rank (mean 8.75) and negligible SHAP contribution across models."
+            },
+            {
+              "features": [
+                "f6"
+              ],
+              "mechanism": "noise",
+              "reason": "f6 ranks 8.25 on average and has low mean |SHAP| across models."
+            },
+            {
+              "features": [],
+              "model": "decision_tree",
+              "mechanism": "overfit",
+              "reason": "Decision tree training R\u00b2 = 1.0 vs held-out R\u00b2 = 0.2609, a much larger gap than other models."
+            }
+          ],
+          "trail": [
+            {
+              "turn": 1,
+              "hypothesis": "f1 has a straight-line effect on the target, so its SHAP dependence should be well fit by a line.",
+              "claim": {
+                "features": [
+                  "f1"
+                ],
+                "mechanism": "linear",
+                "reason": "SHAP dependence for f1 is strongly linear across the feature's range."
+              },
+              "prediction": {
+                "path": "linearity_r2",
+                "op": ">=",
+                "value": 0.8
+              },
+              "action": {
+                "name": "shap_dependence",
+                "model": "hist_gb",
+                "feature": "f1"
+              },
+              "result": {
+                "bins": [
+                  {
+                    "x_mid": -1.7829,
+                    "mean_shap": -3.5241
+                  },
+                  {
+                    "x_mid": -1.1852,
+                    "mean_shap": -2.3821
+                  },
+                  {
+                    "x_mid": -0.7739,
+                    "mean_shap": -1.6022
+                  },
+                  {
+                    "x_mid": -0.4613,
+                    "mean_shap": -1.0638
+                  },
+                  {
+                    "x_mid": -0.1483,
+                    "mean_shap": -0.1303
+                  },
+                  {
+                    "x_mid": 0.0949,
+                    "mean_shap": 0.2092
+                  },
+                  {
+                    "x_mid": 0.3552,
+                    "mean_shap": 0.6604
+                  },
+                  {
+                    "x_mid": 0.6145,
+                    "mean_shap": 1.5868
+                  },
+                  {
+                    "x_mid": 1.0535,
+                    "mean_shap": 2.1615
+                  },
+                  {
+                    "x_mid": 1.6499,
+                    "mean_shap": 3.2319
+                  }
+                ],
+                "linearity_r2": 0.9692
+              },
+              "verdict": "confirmed"
+            },
+            {
+              "turn": 2,
+              "hypothesis": "The target contains an interaction between f0 and f8, so their SHAP interaction share should be materially above zero.",
+              "claim": {
+                "features": [
+                  "f0",
+                  "f8"
+                ],
+                "mechanism": "interaction",
+                "reason": "SHAP interaction for f0 and f8 shows a non-negligible share of total attribution."
+              },
+              "prediction": {
+                "path": "share",
+                "op": ">",
+                "value": 0.05
+              },
+              "action": {
+                "name": "shap_interaction",
+                "model": "hist_gb",
+                "features": [
+                  "f0",
+                  "f8"
+                ]
+              },
+              "result": {
+                "strength": 0.7418,
+                "share": 0.0857
+              },
+              "verdict": "confirmed"
+            },
+            {
+              "turn": 3,
+              "hypothesis": "f9 has a curved or threshold effect, so its SHAP dependence should not be well fit by a straight line.",
+              "claim": {
+                "features": [
+                  "f9"
+                ],
+                "mechanism": "nonlinear",
+                "reason": "SHAP dependence for f9 is high magnitude but only moderately monotonic, consistent with a curved or threshold effect."
+              },
+              "prediction": {
+                "path": "linearity_r2",
+                "op": "<",
+                "value": 0.9
+              },
+              "action": {
+                "name": "shap_dependence",
+                "model": "hist_gb",
+                "feature": "f9"
+              },
+              "result": {
+                "bins": [
+                  {
+                    "x_mid": -1.5539,
+                    "mean_shap": -1.5471
+                  },
+                  {
+                    "x_mid": -1.0591,
+                    "mean_shap": -1.7442
+                  },
+                  {
+                    "x_mid": -0.6668,
+                    "mean_shap": -1.6182
+                  },
+                  {
+                    "x_mid": -0.4152,
+                    "mean_shap": -1.6688
+                  },
+                  {
+                    "x_mid": -0.1701,
+                    "mean_shap": -1.3982
+                  },
+                  {
+                    "x_mid": 0.0617,
+                    "mean_shap": 0.5353
+                  },
+                  {
+                    "x_mid": 0.3209,
+                    "mean_shap": 1.6201
+                  },
+                  {
+                    "x_mid": 0.6083,
+                    "mean_shap": 1.7187
+                  },
+                  {
+                    "x_mid": 1.0286,
+                    "mean_shap": 1.5495
+                  },
+                  {
+                    "x_mid": 1.8005,
+                    "mean_shap": 1.3005
+                  }
+                ],
+                "linearity_r2": 0.6167
+              },
+              "verdict": "confirmed"
+            }
+          ],
+          "calls": 4,
+          "recall": 1.0,
+          "matched": [
+            "correlated:f2+f4",
+            "interaction:f0+f8",
+            "linear:f1",
+            "nonlinear:f9",
+            "overfit:decision_tree"
+          ],
+          "false_findings": 0,
+          "invalid_final": false,
+          "confirmed_false": 0
+        }
+      }
+    }
+  ],
+  "decision": {
+    "outcome": "no_go",
+    "borderline": false,
+    "mean_recall": {
+      "narrator": 0.48,
+      "evidence": 0.96,
+      "investigator": 0.8400000000000001
+    },
+    "mean_false": {
+      "narrator": 1.0,
+      "evidence": 0.6,
+      "investigator": 0.4
+    },
+    "gaps": {
+      "investigator_vs_evidence": -0.11999999999999988,
+      "investigator_vs_narrator": 0.3600000000000001,
+      "evidence_vs_narrator": 0.48
+    },
+    "investigator_wins": 1,
+    "confirmed_false": 0
+  }
+}

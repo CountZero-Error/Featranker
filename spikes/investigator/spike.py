@@ -3,7 +3,7 @@ Spike: does an LLM that runs preregistered follow-up experiments find more
 planted mechanisms than one that only reads the report?
 
 Throwaway and never shipped. Design and decision rule:
-openspec/changes/spike-investigator-value/design.md (D1-D6). No network here;
+openspec/changes/spike-investigator-value/design.md (D1-D8). No network here;
 run.py supplies the real LLM.
 """
 
@@ -39,6 +39,8 @@ MAX_FOLLOWUPS = 3
 OVERFIT_GAP = 0.1  # train R² minus eval R² below this: calling the model overfit is false
 CORRELATION_MIN = 0.5
 INTERACTION_ROWS = 200  # interaction values are O(features²) per row
+# D8: features a finding must name, by mechanism; any other count is a false finding.
+ARITY = {"linear": 1, "nonlinear": 1, "noise": 1, "interaction": 2, "correlated": 2, "overfit": 0}
 OPS = {">": operator.gt, ">=": operator.ge, "<": operator.lt, "<=": operator.le}
 
 # D6, fixed before any real run.
@@ -62,7 +64,7 @@ Report only findings the data supports."""
 FINAL_FORMAT = """FINAL REPLY FORMAT
 Reply with JSON only:
 {"findings": [{"features": ["f1"], "model": "<only for overfit>", "mechanism": "linear|nonlinear|interaction|correlated|overfit|noise", "reason": "<one sentence>"}]}
-Use "features": [] for overfit findings."""
+Each finding names exactly the features its mechanism needs: one for linear, nonlinear and noise; two for interaction and correlated; none ("features": []) for overfit. A finding with any other number of features counts as false."""
 
 EVIDENCE_LEGEND = """mean_abs: mean |SHAP value| of the feature on evaluation data. direction: Spearman correlation between the feature's value and its SHAP value. correlated_pairs: feature pairs with |Pearson r| >= 0.5 on evaluation data."""
 
@@ -125,6 +127,8 @@ def scored_items(bench: Dict[str, Any]) -> List[str]:
 def is_false(finding: Dict[str, Any], bench: Dict[str, Any], gaps: Dict[str, float]) -> bool:
     """D2: contradicts ground truth. Unlisted cases (e.g. linear on the copy f) are neutral."""
     r, mechanism, features = bench["roles"], finding["mechanism"], set(finding["features"])
+    if len(features) != ARITY[mechanism]:
+        return True
     if mechanism == "overfit":
         return gaps.get(finding.get("model"), -math.inf) < OVERFIT_GAP
     signal = {r["linear"], r["nonlinear"], *r["interaction"], r["correlated"][0]}

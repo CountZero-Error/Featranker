@@ -43,12 +43,12 @@
 
 ## 7. Roadmap
 
-- [ ] 7.1 Update the roadmap in `openspec/config.yaml` with the outcome (1.1 `evidence-for-why`; 1.2 `llm-investigator` or deprecation of `explain()`/`to_prompt()`)
+- [x] 7.1 Update the roadmap in `openspec/config.yaml` with the outcome (1.1 `evidence-for-why`; 1.2 `llm-investigator` or deprecation of `explain()`/`to_prompt()`)
 
 ## 8. Confirmatory v2 (D8)
 
-- [ ] 8.1 Test: a finding or claim with the wrong feature count for its mechanism is a false finding; correct-arity findings score as before
-- [ ] 8.2 Implement the arity rule in scoring and state it in the final format; `run.py` defaults to seeds 5–9
-- [ ] 8.3 Freeze: record the new `spike.py` SHA-256 in `FINDINGS.md`; spike and package tests pass
-- [ ] 8.4 Maintainer runs `run.py --model deepseek-flash` once in their own terminal
-- [ ] 8.5 Analyse, write the v2 section and final outcome in `FINDINGS.md`; Signal review
+- [x] 8.1 Test: a finding or claim with the wrong feature count for its mechanism is a false finding; correct-arity findings score as before
+- [x] 8.2 Implement the arity rule in scoring and state it in the final format; `run.py` defaults to seeds 5–9
+- [x] 8.3 Freeze: record the new `spike.py` SHA-256 in `FINDINGS.md`; spike and package tests pass
+- [x] 8.4 Maintainer runs `run.py --model deepseek-flash` once in their own terminal
+- [x] 8.5 Analyse, write the v2 section and final outcome in `FINDINGS.md`; Signal review

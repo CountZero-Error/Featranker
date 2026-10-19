@@ -27,6 +27,11 @@ context: |
     0.9  LLM interpretation: to_prompt() + explain(report, llm=callable),
          provider-neutral, no SDK dependency
     1.0  report object + plots, py.typed, trusted publishing, API freeze
+  After 1.0 (spike-investigator-value: NO-GO LLM, see spikes/investigator/FINDINGS.md):
+    1.1  evidence-for-why: SHAP extra (TreeExplainer/LinearExplainer),
+         group correlation, train-vs-eval score; no LLM use;
+         explain()/to_prompt() deprecated (removed in 2.0)
+    1.2  llm-investigator: not built
 
 rules:
   proposal:

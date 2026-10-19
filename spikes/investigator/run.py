@@ -32,7 +32,7 @@ def main() -> None:
     parser.add_argument("--model", required=True, help="model id at the endpoint")
     parser.add_argument("--base-url", default="https://api.deepseek.com")
     parser.add_argument("--key-env", default="DEEPSEEK_API_KEY", help="env var holding the key")
-    parser.add_argument("--seeds", default="0,1,2,3,4")
+    parser.add_argument("--seeds", default="5,6,7,8,9")  # D8: v2 seeds; v1 used 0-4
     parser.add_argument("--arms", default=",".join(spike.ARMS))
     args = parser.parse_args()
 

@@ -10,7 +10,7 @@ Python 3.10 or newer (3.12 tested). In your own terminal, never through the Clau
 source ~/venvs/featranker-llm/bin/activate          # or any venv with Python >= 3.10
 pip install -e ~/Desktop/CodeHouse/Featranker shap openai pytest
 cd ~/Desktop/CodeHouse/Featranker
-python -m pytest spikes/investigator -q              # 28 tests, fake LLM, no network
+python -m pytest spikes/investigator -q              # 29 tests, fake LLM, no network
 read -s "DEEPSEEK_API_KEY?DeepSeek key: " && export DEEPSEEK_API_KEY && echo
 python spikes/investigator/run.py --model <deepseek-model-id>
 ```
@@ -102,7 +102,53 @@ D2 scores a finding by its exact feature set, so a grouped finding such as `line
 
 The rescore was chosen after seeing the data, so it cannot replace the preregistered outcome. It shows that the run 2 outcome depends on one reply in one seed.
 
+## v2: confirmatory run (design D8)
+
+v1 above stays NO-GO. v2 tests whether grouped findings drove that result. One run; its D6 outcome is final, borderline or not.
+
+| Item | Value |
+|---|---|
+| `spike.py` SHA-256 | `b90a37cd4c12e7a1a6485c5056475fd3129ccf9903caf811d48e47c1d0cc54e4` (v1 code: commit `8e7c2bf`) |
+| Change from v1 | finding arity: one feature for `linear`/`nonlinear`/`noise`, two for `interaction`/`correlated`, none for `overfit`; stated in the final format; any other count is a false finding |
+| Seeds | 5, 6, 7, 8, 9 (`run.py` default) |
+| Model | `deepseek-flash`, temperature 0 |
+| Decision rule | D6 unchanged; no follow-up run |
+
+Run: `python spikes/investigator/run.py --model deepseek-flash`
+
+Dry check on seeds 5–9: the decision tree's train-minus-eval R² gap is 0.57–0.88, ridge's −0.08 to 0.08, and the planted correlated pair appears in every seed.
+
+### v2 result: `deepseek-flash` (`results/deepseek-flash-20261019-031917.json`)
+
+`spike_sha256` matches the v2 hash; `commit` is `8e7c2bf` (v1); `spike_dirty: true` because the v2 changes were not committed before the run.
+
+| Seed | Narrator | Evidence | Investigator |
+|---|---|---|---|
+| 5 | 0.6 / 0 | **1.0 / 0** | 0.6 / 1 |
+| 6 | 0.4 / 1 | **1.0 / 0** | 0.6 / 1 |
+| 7 | 0.4 / 2 | 1.0 / 0 | 1.0 / 0 |
+| 8 | 0.4 / 2 | 1.0 / 1 | 1.0 / 0 |
+| 9 | 0.6 / 0 | 0.8 / 2 | **1.0 / 0** |
+| **Mean** | **0.48 / 1.0** | **0.96 / 0.6** | **0.84 / 0.4** |
+
+Gaps: evidence − narrator **+0.48**, investigator − narrator **+0.36**, investigator − evidence **−0.12** (investigator ahead in 1 seed, tied in 2, behind in 2). Confirmed-false hypotheses: **0**. Every reply was valid and no finding broke the arity rule.
+
+D6 outcome: **no_go, not borderline**. The loop fails on recall gap and seed consistency; evidence only fails on mean false findings (0.6 > 0.5) although its recall gap (+0.48) passed.
+
+False findings: 6 of the 10 are again the threshold feature labelled `linear` (narrator 3, evidence 1, investigator 2); 3 are a noise feature labelled `linear` (narrator 1, evidence 2); 1 is the narrator calling the linear source of the correlated pair `nonlinear`.
+
+What the investigator did: in seed 5 it tested the threshold feature with an interaction member; in seed 6 it tested the threshold feature with the linear feature. Both predictions were REFUTED. Both final replies omitted the true interaction and labelled the threshold feature `linear`, whereas the evidence arm identified both mechanisms correctly. In seed 7 a too-strict prediction (`linearity_r2 < 0.5`, observed 0.68) refuted a true `nonlinear` claim; the final reply kept the correct finding anyway.
+
+Across runs: the evidence arm on the same model scored 0.72 on seeds 0–4 and 0.96 on seeds 5–9, but both the seeds and arity instructions changed, so this comparison cannot isolate seed sensitivity. Each run contains only five seeds.
+
+
 ## Outcome
+
+**Final: NO-GO LLM** (D6 via D8: v1 NO-GO on both models, v2 NO-GO not borderline). Per D6: 1.1 `evidence-for-why` ships without LLM use, `explain()`/`to_prompt()` are deprecated in 1.1, and the 1.2 investigator is not built.
+
+On this benchmark the evidence battery is what carried the gains: the arm that read it beat the report-only narrator proxy by +0.40, +0.24, and +0.48 in mean recall across the three runs. The evidence arm never met the false-findings limit (1.0, 0.6, 0.6), and the investigator's preregistered experiments did not add consistent value over reading the evidence. In v2 seeds 5 and 6, the investigator's final replies missed mechanisms that the evidence arm identified correctly; the recorded trails do not establish that it first held and then abandoned those findings. These results do not measure production `explain()` directly, and the NO-GO is D6's stipulated policy consequence, not a demonstration that LLM interpretation has no value.
+
+## Outcome (v1)
 
 Under the preregistered D6 rule, **NO-GO on both models** (both borderline). D6's "Next" for NO-GO: 1.1 `evidence-for-why` ships without LLM use, and `explain()`/`to_prompt()` are deprecated in 1.1.
 
