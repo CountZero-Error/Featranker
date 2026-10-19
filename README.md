@@ -165,7 +165,7 @@ Built-in linear models are wrapped in a `StandardScaler` pipeline fit on trainin
 
 | Page | Contents |
 |---|---|
-| [**Usage**](https://github.com/CountZero-Error/Featranker/blob/main/docs/usage.md) | API and defaults, working with reports (`summary`, `to_frame`, `plot`), choosing a scorer, your own models, parallel runs, the CLI, resampled ranking, shadow features, mechanism evidence, pipeline feature selection, `summarize`, LLM interpretation (deprecated), labels, troubleshooting |
+| [**Usage**](https://github.com/CountZero-Error/Featranker/blob/main/docs/usage.md) | API and defaults, working with reports (`summary`, `to_frame`, `plot`), choosing a scorer, your own models, parallel runs, the CLI, resampled ranking, shadow features and the shadow hits test, mechanism evidence, pipeline feature selection, `summarize`, LLM interpretation (deprecated), labels, troubleshooting |
 | [**Report**](https://github.com/CountZero-Error/Featranker/blob/main/docs/report.md) | How to read the results, resampled (stability) reports, full report structure, ranking and failure rules |
 | [**Models**](https://github.com/CountZero-Error/Featranker/blob/main/docs/models.md) | All 40 built-in models, optional extras, known issues |
 | [**API**](https://github.com/CountZero-Error/Featranker/blob/main/docs/api.md) | Public API, stability policy, typing, releases |

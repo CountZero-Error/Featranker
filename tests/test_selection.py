@@ -17,9 +17,9 @@ def selector(**kwargs):
 
 
 def test_parameters_are_stored_raw_and_clone_round_trips():
-    s = ConsensusSelector("reg", "r2", k=3, cv=4, min_shadow_share=0.5)
+    s = ConsensusSelector("reg", "r2", k=3, cv=4, min_shadow_share=0.5, max_shadow_q=0.05)
 
-    assert s.k == 3 and s.cv == 4 and s.min_shadow_share == 0.5
+    assert s.k == 3 and s.cv == 4 and s.min_shadow_share == 0.5 and s.max_shadow_q == 0.05
     assert clone(s).get_params() == s.get_params()
     assert s.set_params(k=5).k == 5
 
@@ -28,7 +28,10 @@ def test_parameters_are_stored_raw_and_clone_round_trips():
     "kwargs",
     [{"k": None}, {"k": 0}, {"k": 2.5}, {"k": True},
      {"k": None, "min_shadow_share": 1.5}, {"k": None, "min_shadow_share": -0.1},
-     {"k": None, "min_shadow_share": "half"}, {"k": None, "min_shadow_share": float("nan")}],
+     {"k": None, "min_shadow_share": "half"}, {"k": None, "min_shadow_share": float("nan")},
+     {"k": 1, "max_shadow_q": 0}, {"k": 1, "max_shadow_q": 1.5}, {"k": 1, "max_shadow_q": -0.1},
+     {"k": 1, "max_shadow_q": "low"}, {"k": 1, "max_shadow_q": float("nan")},
+     {"k": 1, "max_shadow_q": True}],
 )
 def test_invalid_rule_raises_before_ranking(kwargs, monkeypatch):
     def fail(*args, **kw):
@@ -59,10 +62,12 @@ def fake_resampled(stability, groups=None):
     return rank_resampled
 
 
-def _rows(order, shares=None):
+def _rows(order, shares=None, qs=None):
     return [
-        {"feature_group": g, **({} if shares is None else {"above_shadow_share": s})}
-        for g, s in zip(order, shares or [None] * len(order))
+        {"feature_group": g,
+         **({} if shares is None else {"above_shadow_share": s}),
+         **({} if qs is None else {"shadow_q_value": q})}
+        for g, s, q in zip(order, shares or [None] * len(order), qs or [None] * len(order))
     ]
 
 
@@ -94,6 +99,44 @@ def test_shadows_on_only_with_min_shadow_share(patched):
     selector(k=None, min_shadow_share=0.5, shadow_seed=4).fit(X_DATA, Y_DATA)
 
     assert [(c["shadows"], c["shadow_seed"]) for c in CALLS] == [(False, None), (True, 4)]
+
+
+def test_shadows_on_with_max_shadow_q_alone(patched):
+    patched(_rows(["x0", "x1", "x2"], qs=[0.1, 0.1, 0.1]))
+
+    s = selector(k=None, max_shadow_q=0.2, shadow_seed=4).fit(X_DATA, Y_DATA)
+
+    assert [(c["shadows"], c["shadow_seed"]) for c in CALLS] == [(True, 4)]
+    assert s.selected_groups_ == ["x0", "x1", "x2"]
+
+
+def test_no_rule_error_names_all_three(patched):
+    with pytest.raises(ValueError, match="k, min_shadow_share, or max_shadow_q"):
+        selector(k=None).fit(X_DATA, Y_DATA)
+
+
+def test_q_rule_keeps_groups_at_or_below_threshold(patched):
+    patched(_rows(["x0", "x1", "x2"], qs=[0.01, 0.2, 0.04]))
+
+    s = selector(k=None, max_shadow_q=0.05).fit(X_DATA, Y_DATA)
+
+    assert s.selected_groups_ == ["x0", "x2"]
+
+
+def test_q_filter_then_k(patched):
+    patched(_rows(["x0", "x1", "x2"], qs=[0.01, 0.2, 0.04]))
+
+    s = selector(k=1, max_shadow_q=0.05).fit(X_DATA, Y_DATA)
+
+    assert s.selected_groups_ == ["x0"]
+
+
+def test_both_filters_apply(patched):
+    patched(_rows(["x0", "x1", "x2"], [0.9, 0.9, 0.2], [0.5, 0.01, 0.01]))
+
+    s = selector(k=None, min_shadow_share=0.5, max_shadow_q=0.05).fit(X_DATA, Y_DATA)
+
+    assert s.selected_groups_ == ["x1"]
 
 
 def test_top_k_rule(patched):
@@ -363,3 +406,31 @@ def test_non_dict_feature_groups_error_mentions_auto():
 def test_array_or_series_feature_groups_raise_the_auto_type_error(make):
     with pytest.raises(TypeError, match="auto"):
         selector(feature_groups=make(["x0", "x1"])).fit(AUTO_X, Y_DATA)
+
+
+def test_max_shadow_q_alone_gives_report_with_shadow_test():
+    s = selector(k=None, max_shadow_q=1.0, shadow_seed=0).fit(X_DATA, Y_DATA)
+
+    assert "shadow_test" in s.report_
+    assert all("shadow_q_value" in row for row in s.report_["stability"])
+    assert s.selected_groups_ == [r["feature_group"] for r in s.report_["stability"]]
+
+
+def test_empty_q_selection_warning_names_splits_and_min_p_value():
+    with pytest.warns(UserWarning, match="No feature group") as caught:
+        s = selector(k=None, max_shadow_q=0.01, shadow_seed=0, cv=5).fit(X_DATA, Y_DATA)
+
+    assert s.selected_groups_ == []
+    message = str(caught[0].message)
+    assert "5 splits" in message and "0.031" in message and "RepeatedKFold" in message
+
+
+def test_empty_share_selection_warning_is_unchanged(patched):
+    patched(_rows(["x0", "x1", "x2"], [0.2, 0.3, 0.4]))
+
+    with pytest.warns(UserWarning) as caught:
+        selector(k=None, min_shadow_share=1.0).fit(X_DATA, Y_DATA)
+
+    assert str(caught[0].message) == (
+        "No feature group was selected; transform() will return no columns."
+    )

@@ -475,3 +475,14 @@ def test_prompt_is_unchanged_from_1_0(anonymize):
     prompt = to_prompt(golden_report(), anonymize=anonymize)
 
     assert hashlib.sha256(prompt.encode("utf-8")).hexdigest() == GOLDEN_PROMPT_SHA256[anonymize]
+
+
+def test_shadow_test_block_reaches_the_prompt_only_when_present(resampled):
+    shadowed = make_ranker(shadows=True, shadow_seed=0).rank_resampled(
+        X, Y, feature_names=NAMES, scoring="r2", cv=3, n_repeats=1, random_state=0)
+
+    data = data_section(to_prompt(shadowed))
+
+    assert data["shadow_test"] == shadowed["shadow_test"]
+    assert "min_p_value" in to_prompt(shadowed)
+    assert "shadow_test" not in data_section(to_prompt(resampled))

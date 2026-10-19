@@ -90,6 +90,7 @@ def _data_view(report: Dict[str, Any]) -> Dict[str, Any]:
                 for entry in report["splits"]
             ],
             "stability": report["stability"],
+            **({"shadow_test": report["shadow_test"]} if "shadow_test" in report else {}),
             "failures": failures,
         }
     return {

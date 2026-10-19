@@ -340,13 +340,80 @@ Output shown with the `xgboost` and `catboost` extras installed. The two pure-no
 
 - `above_shadow_share` is family-weighted: each voting family contributes the fraction of its members in which the group beat the strongest shadow.
 - `above_shadow` is a relative comparison, not proof of useful signal. If `shadow_max` is negative, even negative real importance can beat it. Inspect the real mean, shuffle spread, and evaluation score alongside the share.
-- It is descriptive, not a p-value. Families and splits are not independent trials, and a share below 0.5 does not prove a group is useless.
+- It is descriptive, not a p-value. Families are not independent trials, and a share below 0.5 does not prove a group is useless. For a test across splits, see [the shadow hits test](#shadow-test).
 - Ranks still compare real groups only. Extra noise columns can still change how some models fit (for example, forests that sample a fraction of features per split), so ranks with shadows on can differ slightly from a run without them.
 - **Cost.** Models train on twice the columns and every group is permuted twice, so expect about double the time and memory.
-- `rank_resampled()` uses the same setting; split `i` uses `shadow_seed + i`, and each stability row gains the mean `above_shadow_share` over ranked splits.
+- `rank_resampled()` uses the same setting; split `i` uses `shadow_seed + i`, and each stability row gains the mean `above_shadow_share` over ranked splits, plus the [hits test](#shadow-test) keys.
 
 > [!WARNING]
 > Shadows only work if every model sees every column. A custom pipeline that drops columns, such as a positional `ColumnTransformer` with the default `remainder="drop"`, never sees the shadows, so every group trivially beats them. Shadow columns are appended after the real ones, so positional selectors of real columns still work.
+
+<a id="shadow-test"></a>
+
+### Shadow hits test
+
+With shadows on, `rank_resampled()` also tests, for every group, whether it beats its shadows across splits more often than chance, at no extra model fits. This is Boruta's hits test applied to your splits. In each split, the group has a *hit* when its consensus `above_shadow_share` is strictly greater than 0.5: a majority of the family-weighted vote put it above the strongest shadow. Each stability row gains:
+
+- `shadow_hits`: the number of splits that were hits. A split where the group has no consensus row (a failed or empty split) is a non-hit, and the number of trials is always `n_splits`.
+- `shadow_p_value`: the one-sided binomial probability of at least `shadow_hits` hits in `n_splits` trials with success probability 0.5.
+- `shadow_q_value`: the Benjamini-Hochberg adjusted p-value across all groups.
+
+The report also has a `shadow_test` block (method, hit rule, `null_probability`, correction, `n_trials`, and `min_p_value`).
+
+```python
+import numpy as np
+from sklearn.datasets import load_diabetes
+from sklearn.model_selection import RepeatedKFold
+
+from featranker import FeatureRanker
+
+data = load_diabetes()
+rng = np.random.default_rng(0)
+X = np.hstack([data.data, rng.normal(size=(len(data.data), 2))])  # two pure-noise columns
+names = list(data.feature_names) + ["noise_1", "noise_2"]
+
+ranker = FeatureRanker(task="reg", group="fast", shadows=True, shadow_seed=0, verbose=False)
+report = ranker.rank_resampled(
+    X, data.target, feature_names=names, scoring="r2", n_repeats=3, random_state=0,
+    cv=RepeatedKFold(n_splits=5, n_repeats=2, random_state=0),
+)
+
+test = report["shadow_test"]
+print(f"{test['n_trials']} trials, smallest possible p-value {test['min_p_value']:.4f}")
+for row in report["stability"]:
+    print(
+        f"{row['feature_group']:>7}  hits {row['shadow_hits']:>2}/{test['n_trials']}  "
+        f"p {row['shadow_p_value']:.4f}  q {row['shadow_q_value']:.4f}"
+    )
+```
+
+```text
+10 trials, smallest possible p-value 0.0010
+     s5  hits 10/10  p 0.0010  q 0.0059
+    bmi  hits 10/10  p 0.0010  q 0.0059
+     bp  hits  7/10  p 0.1719  q 0.6875
+     s3  hits  4/10  p 0.8281  q 1.0000
+     s6  hits  3/10  p 0.9453  q 1.0000
+     s4  hits  0/10  p 1.0000  q 1.0000
+    sex  hits  0/10  p 1.0000  q 1.0000
+    age  hits  0/10  p 1.0000  q 1.0000
+     s2  hits  0/10  p 1.0000  q 1.0000
+     s1  hits  1/10  p 0.9990  q 1.0000
+noise_2  hits  0/10  p 1.0000  q 1.0000
+noise_1  hits  0/10  p 1.0000  q 1.0000
+```
+
+Output from scikit-learn models only (`group="fast"`), on 10 splits.
+
+Read it with these limits in mind:
+
+- **Conservative null.** Under no effect, a group beats the *maximum* of all shadow groups with probability at most 0.5 (about 1/2 with one real group, much lower with many), so testing against 0.5 errs on the side of not finding signal. This is Boruta's choice too.
+- **Dependent splits.** Cross-validation training sets overlap, so the splits are not independent trials and the p-values are approximate. Treat them as a guide, not exact error control.
+- **Low power with few splits.** The smallest p-value `n_splits` allows is `0.5 ** n_splits` (`shadow_test["min_p_value"]`): 0.031 for the default `cv=5`. At `cv=5` only a group that hits in all 5 splits reaches it (4 of 5 already gives p = 0.19), and Benjamini-Hochberg multiplies it by the number of groups over its rank, so it stays above 0.05 unless most groups hit 5 of 5. With 12 groups of which `s5` and `bmi` hit 5 of 5, both get q = 0.19. Use `RepeatedKFold` or another splitter with 10 or more splits when you want the test to say something; no warning is raised for fewer, except that a `ConsensusSelector` with `max_shadow_q` that selects nothing adds `n_splits` and the smallest possible p-value to its empty-selection warning.
+- **What a small q means.** The group beats shuffled noise across splits. It is not proof of a causal effect or of usefulness for a new target.
+- **Not for single-split reports.** `rank_features()` has one trial, so it gets no test.
+
+`ConsensusSelector(max_shadow_q=0.05)` keeps the groups with `shadow_q_value <= 0.05` (see [Feature selection](#feature-selection)).
 
 <a id="evidence"></a>
 
@@ -465,24 +532,51 @@ selected: ['s5', 'bmi', 'bp', 'sex']
 
 Output shown with the `xgboost` and `catboost` extras installed. The score is honest because every outer fold chose its own four groups from its own training rows; the last line shows the groups chosen from all the data for the final model.
 
-### `ConsensusSelector(task, scoring, *, k=None, min_shadow_share=None, ...)`
+### `ConsensusSelector(task, scoring, *, k=None, min_shadow_share=None, max_shadow_q=None, ...)`
 
 | Parameter | Default | Meaning |
 |---|---|---|
 | `task`, `scoring` | required | As in `FeatureRanker` and `rank_features()`. |
 | `k` | `None` | Keep the first `k` groups in the [stability](report.md#resampled-reports) order (or all groups if there are fewer). Python or NumPy integer. |
 | `min_shadow_share` | `None` | Keep groups whose stability `above_shadow_share` is at least this (0 to 1). Turns on [shadow features](#shadow-features). |
+| `max_shadow_q` | `None` | Keep groups whose stability `shadow_q_value` (the [shadow hits test](#shadow-test)) is at most this (greater than 0, at most 1). Turns on shadow features. Use `cv` with 10 or more splits, such as `RepeatedKFold`; with 5 the test has little power. |
 | `group`, `models`, `n_jobs`, `shadow_seed` | as `FeatureRanker` | Passed to the ranker built in `fit()`. |
 | `feature_groups`, `cv`, `n_repeats`, `random_state` | as `rank_resampled()` | Passed to `rank_resampled()` on the data given to `fit()`. |
 | `feature_groups="auto"` | | Groups correlated columns with [`auto_groups()`](#auto-groups) on the data given to `fit()`, so inside a pipeline from the training fold only. The groups used are in `report_["feature_groups"]`. Any other string raises `ValueError` in `fit()`. |
 | `verbose` | `False` | Progress bars; off by default because pipelines fit many times. |
 
-Set `k`, `min_shadow_share`, or both; with both, the shadow filter applies first, then the first `k` that pass. Invalid rules raise `ValueError` in `fit()`, before any ranking, following scikit-learn's convention that `__init__` only stores parameters (so `clone`, `set_params`, and `GridSearchCV` over `select__k` work).
+Set at least one of `k`, `min_shadow_share`, and `max_shadow_q`; the shadow filters apply first, then the first `k` that pass. Invalid rules raise `ValueError` in `fit()`, before any ranking, following scikit-learn's convention that `__init__` only stores parameters (so `clone`, `set_params`, and `GridSearchCV` over `select__k` work).
+
+```python
+import numpy as np
+import pandas as pd
+from sklearn.datasets import load_diabetes
+from sklearn.model_selection import RepeatedKFold
+
+from featranker import ConsensusSelector
+
+data = load_diabetes()
+rng = np.random.default_rng(0)
+values = np.hstack([data.data, rng.normal(size=(len(data.data), 2))])  # two pure-noise columns
+names = list(data.feature_names) + ["noise_1", "noise_2"]
+X = pd.DataFrame(values, columns=names)
+
+selector = ConsensusSelector(
+    "reg", "r2", max_shadow_q=0.05, group="fast", n_repeats=3, random_state=0,
+    shadow_seed=0, cv=RepeatedKFold(n_splits=5, n_repeats=2, random_state=0),
+)
+selector.fit(X, data.target)
+print(selector.selected_groups_)
+```
+
+```text
+['s5', 'bmi']
+```
 
 A selected group keeps all of its columns, in their original order. Feature names come from DataFrame columns; for arrays they are `x0`, `x1`, … and `feature_groups` must use those names. After `fit()`: `selected_groups_`, `report_` (the resampled report from this fit), `n_features_in_`, `feature_names_in_` (DataFrames), and the standard `get_support()` and `get_feature_names_out()`.
 
 - `report_` reflects only the data that particular fit saw. For the ranking of your whole development set, call `rank_resampled()` directly.
-- If no group passes, `fit()` warns and the selector keeps no columns, as scikit-learn's own selectors do. Most downstream estimators (such as `Ridge`) then fail on zero columns, so that pipeline fit errors out. Lower `min_shadow_share`, or use only the top-k rule by setting `min_shadow_share=None` and a positive `k`.
+- If no group passes, `fit()` warns and the selector keeps no columns, as scikit-learn's own selectors do. Most downstream estimators (such as `Ridge`) then fail on zero columns, so that pipeline fit errors out. Loosen `min_shadow_share` or `max_shadow_q`, or use only the top-k rule by setting both to `None` and a positive `k`.
 - For a group-aware inner `cv` such as `GroupKFold`, pass row groups to `fit(X, y, groups=...)`; in a `Pipeline`, pass `select__groups=...` (for example `cross_val_score(..., params={"select__groups": groups})`, which slices them to each training fold).
 - DataFrame column labels are compared as strings, in `fit()` and `transform()`. A failed `fit()` clears any earlier fitted state.
 - **Cost.** Each `fit()` is one `rank_resampled()` run: `cv` rankings, doubled with shadows. Inside `cross_val_score(cv=n)` that is `n × cv` rankings; fitting the final pipeline afterwards adds one more run. `GridSearchCV` multiplies the cost by the number of candidates, plus its final refit. Use `group="fast"` or `"tree"`, a small `cv`, and fewer `n_repeats` while searching.

@@ -216,3 +216,138 @@ def test_resampled_passes_shadow_seed_plus_split_index():
 def test_negative_shadow_seed_is_rejected_at_construction():
     with pytest.raises(ValueError, match="non-negative"):
         ranker(shadows=True, shadow_seed=-1)
+
+
+# --- shadow hits test ---------------------------------------------------------
+
+from scipy.stats import binom
+from sklearn.model_selection import RepeatedKFold
+
+from featranker.importance import _benjamini_hochberg
+
+TEST_KEYS = {"shadow_hits", "shadow_p_value", "shadow_q_value"}
+
+
+def _shares_split(index, shares):
+    """A split whose consensus gives each group this above_shadow_share (None = absent)."""
+    rows = [
+        {"feature_group": g, "median_rank": float(i), "mean_rank": float(i),
+         "above_shadow_share": s}
+        for i, (g, s) in enumerate(shares.items(), start=1) if s is not None
+    ]
+    return {"split": index, "n_train": 4, "n_eval": 2,
+            "report": {"feature_groups": {g: [g] for g in shares}, "consensus": rows}}
+
+
+def test_hits_and_p_value_over_ten_splits():
+    splits = [_shares_split(i, {"g": 1.0 if i < 9 else 0.0}) for i in range(10)]
+
+    row = _build_stability(splits, 10, 1)[0]
+
+    assert row["shadow_hits"] == 9
+    assert row["shadow_p_value"] == pytest.approx(binom.sf(8, 10, 0.5))
+    assert row["shadow_p_value"] == pytest.approx(0.0107, abs=1e-4)
+
+
+def test_missing_split_is_a_non_hit_with_n_splits_trials():
+    splits = [_shares_split(i, {"g": 1.0 if i else None}) for i in range(5)]
+
+    row = _build_stability(splits, 5, 1)[0]
+
+    assert row["shadow_hits"] == 4
+    assert row["shadow_p_value"] == pytest.approx(binom.sf(3, 5, 0.5))
+
+
+def test_share_of_exactly_half_is_not_a_hit():
+    splits = [_shares_split(i, {"g": 0.5}) for i in range(4)]
+
+    row = _build_stability(splits, 4, 1)[0]
+
+    assert row["shadow_hits"] == 0 and row["shadow_p_value"] == 1.0
+
+
+def test_benjamini_hochberg_example():
+    assert _benjamini_hochberg([0.01, 0.04, 0.03]) == pytest.approx([0.03, 0.04, 0.04])
+
+
+def test_benjamini_hochberg_caps_at_one_and_is_monotone():
+    q = _benjamini_hochberg([1.0, 0.9, 0.001])
+
+    assert q.max() <= 1.0 and q[2] == pytest.approx(0.003)
+
+
+def test_stability_q_values_are_bh_across_groups():
+    splits = [_shares_split(i, {"a": 1.0, "b": 1.0 if i < 8 else 0.0, "c": 0.0})
+              for i in range(10)]
+
+    rows = {r["feature_group"]: r for r in _build_stability(splits, 10, 1)}
+
+    p = [rows[g]["shadow_p_value"] for g in "abc"]
+    assert [rows[g]["shadow_q_value"] for g in "abc"] == pytest.approx(
+        _benjamini_hochberg(p)
+    )
+
+
+def test_stability_has_no_test_keys_without_shadows():
+    split = _split(0, 1.0)
+    del split["report"]["consensus"][0]["above_shadow_share"]
+
+    assert not TEST_KEYS & set(_build_stability([split], 1, 1)[0])
+
+
+def test_resampled_report_has_shadow_test_block_for_cv5():
+    report = ranker(shadows=True).rank_resampled(
+        X_DATA, Y_DATA, feature_names=NAMES, scoring="r2", cv=5, n_repeats=1,
+        random_state=0)
+
+    assert report["shadow_test"] == {
+        "method": "binomial", "hit": "above_shadow_share > 0.5",
+        "null_probability": 0.5, "correction": "benjamini-hochberg",
+        "n_trials": 5, "min_p_value": 0.03125,
+    }
+    assert all(TEST_KEYS <= set(row) for row in report["stability"])
+    json.dumps(report, allow_nan=False)
+
+
+def test_resampled_report_without_shadows_has_no_test_keys():
+    report = ranker().rank_resampled(
+        X_DATA, Y_DATA, feature_names=NAMES, scoring="r2", cv=3, n_repeats=1,
+        random_state=0)
+
+    assert "shadow_test" not in report
+    assert not TEST_KEYS & all_keys(report)
+
+
+def test_planted_signal_gets_small_q_and_noise_large_q():
+    rng = np.random.default_rng(1)
+    X = rng.normal(size=(60, 3))
+    y = 3.0 * X[:, 0] + 0.1 * rng.normal(size=60)
+
+    report = ranker(shadows=True, shadow_seed=0).rank_resampled(
+        X, y, feature_names=NAMES, scoring="r2", n_repeats=2, random_state=0,
+        cv=RepeatedKFold(n_splits=5, n_repeats=3, random_state=0))
+
+    rows = {r["feature_group"]: r for r in report["stability"]}
+    assert report["shadow_test"]["n_trials"] == 15
+    assert rows["signal"]["shadow_q_value"] < 0.01
+    assert rows["noise_a"]["shadow_q_value"] > 0.2
+    assert rows["noise_b"]["shadow_q_value"] > 0.2
+
+
+def test_benjamini_hochberg_ties_share_a_q_value_and_keep_order():
+    q = _benjamini_hochberg([0.03125, 0.03125, 1.0, 0.03125])
+
+    assert q == pytest.approx([0.03125 * 4 / 3] * 2 + [1.0, 0.03125 * 4 / 3])
+
+
+def test_benjamini_hochberg_single_p_value_is_unchanged():
+    assert _benjamini_hochberg([0.2]) == pytest.approx([0.2])
+
+
+def test_fewer_split_reports_than_n_splits_still_uses_n_splits_trials():
+    splits = [_shares_split(i, {"g": 1.0}) for i in range(3)]
+
+    row = _build_stability(splits, 5, 1)[0]
+
+    assert row["shadow_hits"] == 3
+    assert row["shadow_p_value"] == pytest.approx(binom.sf(2, 5, 0.5))

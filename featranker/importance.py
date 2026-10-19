@@ -15,6 +15,7 @@ import numpy as np
 import sklearn
 import yaml
 from joblib import Parallel, delayed
+from scipy.stats import binom
 from sklearn.base import clone
 from sklearn.dummy import DummyClassifier, DummyRegressor
 from sklearn.metrics import get_scorer
@@ -420,6 +421,17 @@ def _consensus_positions(consensus: List[Dict[str, Any]]) -> Dict[str, int]:
     return positions
 
 
+def _benjamini_hochberg(p_values: List[float]) -> np.ndarray:
+    """Benjamini-Hochberg adjusted p-values, in input order, capped at 1."""
+    p = np.asarray(p_values, dtype=float)
+    order = np.argsort(p)
+    scaled = p[order] * len(p) / np.arange(1, len(p) + 1)
+    adjusted = np.minimum.accumulate(scaled[::-1])[::-1]
+    q = np.empty(len(p))
+    q[order] = np.minimum(adjusted, 1.0)
+    return q
+
+
 def _build_stability(
     split_reports: List[Dict[str, Any]], n_splits: int, top_k: int
 ) -> List[Dict[str, Any]]:
@@ -463,6 +475,14 @@ def _build_stability(
         )
         if name in shadow_shares:
             rows[-1]["above_shadow_share"] = float(np.mean(shadow_shares[name]))
+            # One trial per split; a split without a consensus row is a non-hit.
+            hits = sum(share > 0.5 for share in shadow_shares[name])
+            rows[-1]["shadow_hits"] = hits
+            rows[-1]["shadow_p_value"] = float(binom.sf(hits - 1, n_splits, 0.5))
+    if shadow_shares:
+        q_values = _benjamini_hochberg([row["shadow_p_value"] for row in rows])
+        for row, q_value in zip(rows, q_values):
+            row["shadow_q_value"] = float(q_value)
     return sorted(
         rows,
         key=lambda row: (row["median_rank"], -row["top_k_share"], row["feature_group"]),
@@ -957,6 +977,14 @@ class FeatureRanker:
         if self.shadows:
             result["shadows"] = True
             result["shadow_seed"] = self.shadow_seed
+            result["shadow_test"] = {
+                "method": "binomial",
+                "hit": "above_shadow_share > 0.5",
+                "null_probability": 0.5,
+                "correction": "benjamini-hochberg",
+                "n_trials": len(splits),
+                "min_p_value": 0.5 ** len(splits),
+            }
         return Report(result)
 
     def _score_baseline(

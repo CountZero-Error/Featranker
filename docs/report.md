@@ -88,6 +88,11 @@ How to read `stability`, which is sorted by `median_rank`, then `top_k_share` (h
 | `top_k_share` | Fraction of attempted splits in which the group's place is at most `top_k`. Failed and empty-consensus splits contribute zero. Inspect `n_splits_ranked` and failures first: an intermediate share can reflect missing rankings, changing ranks, or both; no fixed band establishes statistical uncertainty. |
 | `n_splits_ranked` | How many splits produced a consensus. It is the same for every group. |
 | `above_shadow_share` | Only with shadows on: the mean of the group's per-split `above_shadow_share` over ranked splits. |
+| `shadow_hits` | Only with shadows on: the number of splits in which the group's consensus `above_shadow_share` was above 0.5. A split with no consensus row for the group is a non-hit. |
+| `shadow_p_value` | Only with shadows on: the one-sided binomial probability of at least `shadow_hits` hits in `n_splits` trials at probability 0.5. Approximate: splits overlap. See [the hits test](usage.md#shadow-test). |
+| `shadow_q_value` | Only with shadows on: `shadow_p_value` adjusted with Benjamini-Hochberg across all groups. |
+
+With shadows on, the report also has a top-level `shadow_test`: `method` (`"binomial"`), `hit` (`"above_shadow_share > 0.5"`), `null_probability` (0.5), `correction` (`"benjamini-hochberg"`), `n_trials` (equal to `n_splits`), and `min_p_value` (`0.5 ** n_splits`, the smallest p-value the test can give; with `cv=5` it is 0.03125, so use 10 or more splits).
 
 Within each split, `rank_std` still measures disagreement between model families, not between splits; between-split variation is what `min_rank`, `max_rank`, and `top_k_share` show. With few splits (for example `cv=3`), these numbers are coarse. Every split also draws on the same data, so a stable ranking here is not a guarantee on new data.
 
@@ -97,7 +102,7 @@ Within each split, `rank_std` still measures disagreement between model families
 
 `evaluation_mode` is always `"held_out"`. It names the workflow (scoring on data passed to `rank_features()`); FeatRanker cannot check that this data is really separate from the training data.
 
-With `shadows=True`, the report also has top-level `shadows: true` and `shadow_seed`; each model gains `shadow_importance` and `shadow_max`; each importance entry gains `above_shadow`; and each consensus row gains `above_shadow_share`. Without shadows, none of these keys appear.
+With `shadows=True`, the report also has top-level `shadows: true` and `shadow_seed` (resampled reports add the `shadow_test` block, and their stability rows gain `shadow_hits`, `shadow_p_value`, and `shadow_q_value`); each model gains `shadow_importance` and `shadow_max`; each importance entry gains `above_shadow`; and each consensus row gains `above_shadow_share`. Without shadows, none of these keys appear.
 
 With `evidence=True`, each model also has `train_score` and `overfit_gap` (`null` if the training score could not be computed, with a `failures` entry at stage `"evidence"`), the report has a top-level `evidence` block, and models SHAP can explain have `shap`. Without `evidence`, none of these keys appear. See [Evidence](usage.md#evidence).
 

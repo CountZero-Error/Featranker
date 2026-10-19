@@ -45,6 +45,10 @@ class ConsensusSelector(SelectorMixin, BaseEstimator):
         k: Keep the first k groups in the stability order.
         min_shadow_share: Keep groups whose above_shadow_share is at least
             this (turns shadow features on). With k too, filter then take k.
+        max_shadow_q: Keep groups whose shadow_q_value (Benjamini-Hochberg
+            adjusted shadow hits test across splits) is at most this, in
+            (0, 1]. Turns shadow features on; combines with the other rules
+            like min_shadow_share. Needs about 10 or more splits to have power.
         group, models, n_jobs, shadow_seed: As in FeatureRanker.
         feature_groups, cv, n_repeats, random_state: As in rank_resampled().
             feature_groups="auto" groups correlated columns with auto_groups()
@@ -60,6 +64,7 @@ class ConsensusSelector(SelectorMixin, BaseEstimator):
         *,
         k: Optional[Union[int, "np.integer[Any]"]] = None,
         min_shadow_share: Optional[float] = None,
+        max_shadow_q: Optional[float] = None,
         group: Literal["linear", "tree", "all", "fast"] = "all",
         models: Optional[Dict[str, Any]] = None,
         feature_groups: Union[Dict[str, List[str]], Literal["auto"], None] = None,
@@ -75,6 +80,7 @@ class ConsensusSelector(SelectorMixin, BaseEstimator):
         self.scoring = scoring
         self.k = k
         self.min_shadow_share = min_shadow_share
+        self.max_shadow_q = max_shadow_q
         self.group = group
         self.models = models
         self.feature_groups = feature_groups
@@ -86,9 +92,9 @@ class ConsensusSelector(SelectorMixin, BaseEstimator):
         self.verbose = verbose
 
     def _validate_rule(self) -> None:
-        k, share = self.k, self.min_shadow_share
-        if k is None and share is None:
-            raise ValueError("[!] Set k, min_shadow_share, or both.")
+        k, share, q = self.k, self.min_shadow_share, self.max_shadow_q
+        if k is None and share is None and q is None:
+            raise ValueError("[!] Set k, min_shadow_share, or max_shadow_q.")
         if k is not None and (
             not isinstance(k, numbers.Integral) or isinstance(k, bool) or k < 1
         ):
@@ -100,6 +106,13 @@ class ConsensusSelector(SelectorMixin, BaseEstimator):
             or not 0 <= share <= 1
         ):
             raise ValueError("[!] min_shadow_share must be a number in [0, 1].")
+        if q is not None and (
+            not isinstance(q, numbers.Real)
+            or isinstance(q, bool)
+            or math.isnan(q)
+            or not 0 < q <= 1
+        ):
+            raise ValueError("[!] max_shadow_q must be a number in (0, 1].")
 
     def fit(self, X: Any, y: Any, groups: Any = None) -> "ConsensusSelector":
         """
@@ -137,7 +150,7 @@ class ConsensusSelector(SelectorMixin, BaseEstimator):
             models=self.models,
             n_jobs=self.n_jobs,
             verbose=self.verbose,
-            shadows=self.min_shadow_share is not None,
+            shadows=self.min_shadow_share is not None or self.max_shadow_q is not None,
             shadow_seed=self.shadow_seed,
         )
         report = ranker.rank_resampled(
@@ -157,6 +170,8 @@ class ConsensusSelector(SelectorMixin, BaseEstimator):
         rows = report["stability"]
         if self.min_shadow_share is not None:
             rows = [r for r in rows if r["above_shadow_share"] >= self.min_shadow_share]
+        if self.max_shadow_q is not None:
+            rows = [r for r in rows if r["shadow_q_value"] <= self.max_shadow_q]
         if self.k is not None:
             rows = rows[: int(self.k)]
         selected = [row["feature_group"] for row in rows]
@@ -171,8 +186,15 @@ class ConsensusSelector(SelectorMixin, BaseEstimator):
         self.n_features_in_ = len(names)
         self.report_ = report
         if not selected:
+            message = "No feature group was selected; transform() will return no columns."
+            if self.max_shadow_q is not None:
+                message += (
+                    f" With {report['n_splits']} splits the smallest possible p-value"
+                    f" is {report['shadow_test']['min_p_value']:.3f}; use more splits,"
+                    " e.g. RepeatedKFold."
+                )
             warnings.warn(
-                "No feature group was selected; transform() will return no columns.",
+                message,
                 UserWarning,
                 stacklevel=2,
             )
