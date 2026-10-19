@@ -14,6 +14,7 @@ import numpy as np
 import yaml
 from sklearn.metrics import get_scorer
 
+from .evidence import auto_groups
 from .importance import FeatureRanker, _float_target, _resolve_feature_groups
 
 
@@ -117,9 +118,12 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--feature-groups",
-        type=Path,
         default=None,
-        help="Optional YAML mapping of feature-group names to column names.",
+        help=(
+            "Optional YAML mapping of feature-group names to column names, or "
+            "'auto' to group correlated training columns (a file named 'auto' "
+            "needs './auto')."
+        ),
     )
     parser.add_argument(
         "--n-repeats",
@@ -175,10 +179,10 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _load_feature_groups(path: Optional[Path]) -> Optional[Dict[str, List[str]]]:
+def _load_feature_groups(path: Optional[str]) -> Optional[Dict[str, List[str]]]:
     if path is None:
         return None
-    with path.open("r", encoding="utf-8") as group_file:
+    with Path(path).open("r", encoding="utf-8") as group_file:
         feature_groups = yaml.safe_load(group_file)
     if not isinstance(feature_groups, dict):
         raise ValueError("[!] Feature groups YAML must contain a mapping.")
@@ -195,7 +199,12 @@ def _load_cli_inputs(args: argparse.Namespace) -> Dict[str, Any]:
         )
     if args.task == "reg":
         y_train, y_eval = _float_target(y_train), _float_target(y_eval)
-    feature_groups = _load_feature_groups(args.feature_groups)
+    if args.feature_groups == "auto":
+        feature_groups: Optional[Dict[str, List[str]]] = auto_groups(
+            X_train, feature_names=feature_names
+        )
+    else:
+        feature_groups = _load_feature_groups(args.feature_groups)
     # Fail fast: rank_features repeats these checks, but only after
     # every model has been fit.
     get_scorer(args.scoring)

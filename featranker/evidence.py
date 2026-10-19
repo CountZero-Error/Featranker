@@ -3,16 +3,21 @@ Mechanism evidence for a report: correlated feature groups and a SHAP summary.
 """
 
 import itertools
+import numbers
 import warnings
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
+from scipy.cluster.hierarchy import fcluster, linkage
+from scipy.spatial.distance import squareform
 from scipy.stats import rankdata
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import MaxAbsScaler, MinMaxScaler, RobustScaler, StandardScaler
 
 # Group pairs whose strongest member-column |Spearman rho| reaches this are listed.
 CORRELATION_THRESHOLD = 0.5
+# Floating-point slack on the auto_groups cut.
+CUT_TOLERANCE = 1e-12
 # At most this many evaluation rows are explained, and as many training rows
 # serve as the linear background.
 SHAP_ROWS = 1000
@@ -27,6 +32,62 @@ def _spearman_matrix(X: np.ndarray) -> np.ndarray:
     norm = np.sqrt((centered**2).sum(axis=0))
     with np.errstate(invalid="ignore", divide="ignore"):
         return np.clip(centered.T @ centered / np.outer(norm, norm), -1.0, 1.0)
+
+
+def auto_groups(
+    X: Any, *, threshold: float = 0.7, feature_names: Optional[List[str]] = None
+) -> Dict[str, List[str]]:
+    """
+    Propose feature_groups from X alone: columns clustered by Spearman correlation.
+
+    Complete linkage on 1 - |rho|, cut so that every pair inside a group has
+    |rho| >= threshold. A constant column is uncorrelated with every other.
+    Only groups of two or more columns are returned; a group is named by its
+    members joined with "+". Uses no target.
+    """
+    # Local import: importance imports this module.
+    from .importance import _validate_X
+
+    if (
+        isinstance(threshold, bool)
+        or not isinstance(threshold, numbers.Real)
+        or not 0 < threshold <= 1
+    ):
+        raise ValueError("[!] threshold must be a number with 0 < threshold <= 1.")
+    if feature_names is None and not hasattr(X, "columns"):
+        # Same default names as ConsensusSelector.
+        width = np.shape(X)[1] if np.ndim(X) == 2 else 0
+        feature_names = [f"x{index}" for index in range(width)]
+    values, names = _validate_X(X, feature_names=feature_names)
+    if values.shape[0] < 2:
+        raise ValueError("[!] X must contain at least two rows.")
+    if values.shape[1] < 2:
+        return {}
+
+    # NaN (constant column) -> 2, beyond any cut, so it is never grouped.
+    distance = np.nan_to_num(np.clip(1.0 - np.abs(_spearman_matrix(values)), 0.0, 1.0), nan=2.0)
+    distance = (distance + distance.T) / 2
+    np.fill_diagonal(distance, 0.0)
+    labels = fcluster(
+        linkage(squareform(distance, checks=False), method="complete"),
+        # Exact copies can compute |rho| = 1 - 2e-16, so the cut allows a tiny slack.
+        t=1.0 - threshold + CUT_TOLERANCE,
+        criterion="distance",
+    )
+    clusters: Dict[int, List[str]] = {}
+    for label, name in zip(labels, names):  # insertion order = first member's position
+        clusters.setdefault(int(label), []).append(name)
+    groups: Dict[str, List[str]] = {}
+    for members in clusters.values():
+        if len(members) < 2:
+            continue
+        group_name = "+".join(members)
+        if group_name in names or group_name in groups:
+            raise ValueError(
+                f"[!] Group name '{group_name}' collides with a column or another group."
+            )
+        groups[group_name] = members
+    return groups
 
 
 def correlation_evidence(X_train: np.ndarray, groups: Dict[str, List[int]]) -> Dict[str, Any]:

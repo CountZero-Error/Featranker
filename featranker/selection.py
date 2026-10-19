@@ -12,6 +12,7 @@ from sklearn.base import BaseEstimator
 from sklearn.feature_selection import SelectorMixin
 from sklearn.utils.validation import check_is_fitted
 
+from .evidence import auto_groups
 from .importance import FeatureRanker
 
 
@@ -46,6 +47,9 @@ class ConsensusSelector(SelectorMixin, BaseEstimator):
             this (turns shadow features on). With k too, filter then take k.
         group, models, n_jobs, shadow_seed: As in FeatureRanker.
         feature_groups, cv, n_repeats, random_state: As in rank_resampled().
+            feature_groups="auto" groups correlated columns with auto_groups()
+            on the X given to fit(), so inside a Pipeline from the training
+            fold only; the groups used are in report_["feature_groups"].
         verbose: Show progress bars (off by default; pipelines fit often).
     """
 
@@ -58,7 +62,7 @@ class ConsensusSelector(SelectorMixin, BaseEstimator):
         min_shadow_share: Optional[float] = None,
         group: Literal["linear", "tree", "all", "fast"] = "all",
         models: Optional[Dict[str, Any]] = None,
-        feature_groups: Optional[Dict[str, List[str]]] = None,
+        feature_groups: Union[Dict[str, List[str]], Literal["auto"], None] = None,
         cv: Any = 5,
         n_repeats: int = 10,
         random_state: Optional[int] = None,
@@ -120,6 +124,13 @@ class ConsensusSelector(SelectorMixin, BaseEstimator):
             names = [f"x{index}" for index in range(X.shape[1])]
             feature_names = names
 
+        feature_groups = self.feature_groups
+        if isinstance(feature_groups, str) and feature_groups == "auto":
+            feature_groups = auto_groups(X, feature_names=names)
+        elif feature_groups is not None and not isinstance(feature_groups, dict):
+            error = ValueError if isinstance(feature_groups, str) else TypeError
+            raise error("[!] feature_groups must be a dict, None, or 'auto'.")
+
         ranker = FeatureRanker(
             self.task,
             self.group,
@@ -136,7 +147,7 @@ class ConsensusSelector(SelectorMixin, BaseEstimator):
             cv=self.cv,
             groups=groups,
             feature_names=feature_names,
-            feature_groups=self.feature_groups,
+            feature_groups=feature_groups,
             n_repeats=self.n_repeats,
             random_state=self.random_state,
             # k may be a NumPy integer (e.g. from a GridSearchCV grid).

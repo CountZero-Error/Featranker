@@ -194,7 +194,7 @@ featranker \
   --output report.json
 ```
 
-Both CSV files need headers, the same feature columns in the same order, and the target column. Feature values must be numeric; targets may be numeric or strings. Add `--quiet` to hide progress bars and `--evidence` to add [evidence](#evidence) to the report. Run `featranker --help` for every flag.
+Both CSV files need headers, the same feature columns in the same order, and the target column. Feature values must be numeric; targets may be numeric or strings. Add `--quiet` to hide progress bars and `--evidence` to add [evidence](#evidence) to the report. `--feature-groups` takes a YAML file, or the word `auto` to group correlated columns of the training CSV with [`auto_groups()`](#auto-groups) (a file literally named `auto` must be written `./auto`). Run `featranker --help` for every flag.
 
 <details>
 <summary><b>Example input files</b></summary>
@@ -474,6 +474,7 @@ Output shown with the `xgboost` and `catboost` extras installed. The score is ho
 | `min_shadow_share` | `None` | Keep groups whose stability `above_shadow_share` is at least this (0 to 1). Turns on [shadow features](#shadow-features). |
 | `group`, `models`, `n_jobs`, `shadow_seed` | as `FeatureRanker` | Passed to the ranker built in `fit()`. |
 | `feature_groups`, `cv`, `n_repeats`, `random_state` | as `rank_resampled()` | Passed to `rank_resampled()` on the data given to `fit()`. |
+| `feature_groups="auto"` | | Groups correlated columns with [`auto_groups()`](#auto-groups) on the data given to `fit()`, so inside a pipeline from the training fold only. The groups used are in `report_["feature_groups"]`. Any other string raises `ValueError` in `fit()`. |
 | `verbose` | `False` | Progress bars; off by default because pipelines fit many times. |
 
 Set `k`, `min_shadow_share`, or both; with both, the shadow filter applies first, then the first `k` that pass. Invalid rules raise `ValueError` in `fit()`, before any ranking, following scikit-learn's convention that `__init__` only stores parameters (so `clone`, `set_params`, and `GridSearchCV` over `select__k` work).
@@ -632,6 +633,68 @@ feature_groups = {
 Every column in a multi-column group receives the same row permutation during a repeat. This keeps the relationships inside the block while breaking its relationship with the target.
 
 Features left out of `feature_groups` become singleton groups. Empty groups, unknown features, duplicate membership, overlaps, and group-name collisions raise errors.
+
+<a id="auto-groups"></a>
+
+### Grouping correlated features: `auto_groups()`
+
+Permutation importance splits credit between near-copies: shuffling one of two correlated columns barely hurts a model that can use the other, so both look unimportant. `auto_groups(X, *, threshold=0.7, feature_names=None)` proposes the groups from `X` alone (it never sees a target) and returns a dict you can pass as `feature_groups`.
+
+```python
+from sklearn.datasets import load_diabetes
+
+from featranker import auto_groups
+
+X, y = load_diabetes(return_X_y=True, as_frame=True)
+
+print(auto_groups(X))
+print(auto_groups(X, threshold=0.4))
+print(auto_groups(X, threshold=0.9))
+```
+
+```text
+{'s1+s2': ['s1', 's2'], 's3+s4': ['s3', 's4']}
+{'bmi+s5': ['bmi', 's5'], 's1+s2': ['s1', 's2'], 's3+s4': ['s3', 's4']}
+{}
+```
+
+- Columns are clustered by Spearman correlation with complete linkage, so every pair of columns inside a group has absolute correlation of at least `threshold` (`0 < threshold <= 1`), up to a floating-point tolerance of `1e-12`, which lets exact copies group at `threshold=1`. Lowering it makes bigger groups. A constant column is never grouped, whatever the threshold.
+- Use enough rows: with few rows the sample correlation is inflated (with two rows every non-constant pair has absolute correlation 1), so near-unrelated columns can be grouped.
+- Only groups of two or more columns are returned. A group is named by its members joined with `+`, in column order; a name that equals an existing column or another generated group's name raises `ValueError`.
+- `X` is validated like `FeatureRanker.fit()` input. Column names come from a DataFrame, else `feature_names`, else `x0`, `x1`, ….
+- Call it on your training or development data and pass the result to `rank_features()` or `rank_resampled()`; there is no `"auto"` option there, so the grouping stays visible in your code. The [correlation evidence](#evidence) lists group pairs from 0.5, which shows what sits near the cut.
+- The correlation matrix and clustering are O(p²) in the number of columns, which is fine for hundreds of columns.
+
+Where you cannot compute the groups yourself, use `"auto"`: `ConsensusSelector(feature_groups="auto")` in a pipeline, or `--feature-groups auto` on the command line. Both use the default threshold.
+
+```python
+from sklearn.datasets import load_diabetes
+from sklearn.linear_model import Ridge
+from sklearn.pipeline import Pipeline
+
+from featranker import ConsensusSelector
+
+X, y = load_diabetes(return_X_y=True, as_frame=True)
+pipe = Pipeline([
+    ("select", ConsensusSelector(
+        "reg", "neg_mean_absolute_error", k=3, group="fast", cv=3, n_repeats=3,
+        feature_groups="auto", random_state=0,
+    )),
+    ("model", Ridge()),
+])
+pipe.fit(X, y)
+
+select = pipe.named_steps["select"]
+print({name: cols for name, cols in select.report_["feature_groups"].items() if len(cols) > 1})
+print("selected:", select.selected_groups_)
+```
+
+```text
+{'s1+s2': ['s1', 's2'], 's3+s4': ['s3', 's4']}
+selected: ['s5', 'bmi', 's3+s4']
+```
+
+Under `cross_val_score` each outer training fold computes its own groups, so evaluation rows never shape them.
 
 <a id="labels"></a>
 

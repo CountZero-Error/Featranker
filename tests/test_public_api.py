@@ -9,7 +9,10 @@ PYPROJECT = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
 
 def test_public_names():
     assert sorted(featranker.__all__) == sorted(
-        ["ConsensusSelector", "FeatureRanker", "Report", "explain", "summarize", "to_prompt"]
+        [
+            "ConsensusSelector", "FeatureRanker", "Report", "auto_groups", "explain",
+            "summarize", "to_prompt",
+        ]
     )
     assert all(hasattr(featranker, name) for name in featranker.__all__)
 

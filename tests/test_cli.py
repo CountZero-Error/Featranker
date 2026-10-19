@@ -514,3 +514,56 @@ def test_cli_rejects_non_finite_eval_feature_before_fit(monkeypatch, tmp_path, c
         cli_module.main()
 
     assert "finite" in capsys.readouterr().err
+
+
+def run_cli_with_pair(monkeypatch, tmp_path, groups_argument):
+    rng = np.random.default_rng(0)
+
+    def write_csv(path, n_rows):
+        e = rng.normal(size=n_rows)
+        X = np.column_stack([e, e + 0.05 * rng.normal(size=n_rows), rng.normal(size=n_rows)])
+        lines = ["e,f,g,target"]
+        lines += [",".join(map(str, [*row, 2 * row[0]])) for row in X]
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    write_csv(tmp_path / "train.csv", 60)
+    write_csv(tmp_path / "eval.csv", 30)
+    output = tmp_path / "report.json"
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "featranker", "--task", "reg", "--group", "linear", "--quiet",
+            "--train-data", "train.csv", "--eval-data", "eval.csv",
+            "--target", "target", "--scoring", "r2", "--n-repeats", "2",
+            "--random-state", "0", "--feature-groups", groups_argument,
+            "--output", str(output),
+        ],
+    )
+
+    assert cli_module.main() == 0
+
+    return json.loads(output.read_text(encoding="utf-8"))["feature_groups"]
+
+
+def test_cli_feature_groups_auto_groups_the_pair(monkeypatch, tmp_path):
+    groups = run_cli_with_pair(monkeypatch, tmp_path, "auto")
+
+    assert groups == {"e+f": ["e", "f"], "g": ["g"]}
+
+
+def test_cli_feature_groups_yaml_path_still_works(monkeypatch, tmp_path):
+    (tmp_path / "groups.yaml").write_text("pair: [e, g]\n", encoding="utf-8")
+
+    groups = run_cli_with_pair(monkeypatch, tmp_path, "groups.yaml")
+
+    assert groups == {"pair": ["e", "g"], "f": ["f"]}
+
+
+def test_cli_dot_slash_auto_reads_a_file_named_auto(monkeypatch, tmp_path):
+    (tmp_path / "auto").write_text("pair: [f, g]\n", encoding="utf-8")
+
+    groups = run_cli_with_pair(monkeypatch, tmp_path, "./auto")
+
+    assert groups == {"pair": ["f", "g"], "e": ["e"]}

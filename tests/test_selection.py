@@ -164,7 +164,7 @@ def test_dataframe_names_in_and_out():
 
 
 from sklearn.datasets import load_diabetes
-from sklearn.model_selection import GridSearchCV, KFold, cross_val_score
+from sklearn.model_selection import GridSearchCV, KFold, cross_val_score, cross_validate
 from sklearn.pipeline import Pipeline
 
 SEEN_ROWS = []
@@ -298,3 +298,68 @@ def test_colliding_labels_rejected_on_transform():
 
     with pytest.raises(ValueError, match="unique"):
         s.transform(pd.DataFrame(X_DATA, columns=[1, "1", "c"]))
+
+
+# -- feature_groups="auto" ----------------------------------------------------
+
+AUTO_X = np.column_stack([X_DATA[:, 0], X_DATA[:, 0] + 0.05 * RNG.normal(size=60), X_DATA[:, 2]])
+
+
+def test_auto_groups_the_near_copy_pair_in_the_report():
+    s = selector(feature_groups="auto").fit(AUTO_X, Y_DATA)
+
+    assert s.report_["feature_groups"] == {
+        "x0+x1": ["x0", "x1"],
+        "x2": ["x2"],
+    }
+    assert s.get_params()["feature_groups"] == "auto"
+    assert clone(s).get_params()["feature_groups"] == "auto"
+    assert s.selected_groups_ == ["x0+x1"]
+    assert s.support_.tolist() == [True, True, False]
+
+
+def test_auto_with_dataframe_names():
+    pd = pytest.importorskip("pandas")
+    frame = pd.DataFrame(AUTO_X, columns=["a", "b", "c"])
+
+    s = selector(feature_groups="auto").fit(frame, Y_DATA)
+
+    assert s.report_["feature_groups"]["a+b"] == ["a", "b"]
+
+
+def test_other_feature_groups_string_raises_in_fit():
+    s = selector(feature_groups="manual")
+
+    assert s.feature_groups == "manual"  # not validated in __init__
+    with pytest.raises(ValueError, match="feature_groups"):
+        s.fit(AUTO_X, Y_DATA)
+
+
+def test_auto_groups_come_from_each_pipeline_training_fold():
+    # The pair is a copy only in the first half of the rows.
+    n = 100
+    rng = np.random.default_rng(1)
+    e = rng.normal(size=n)
+    f = rng.normal(size=n)
+    f[:50] = e[:50] + 0.02 * rng.normal(size=50)
+    X = np.column_stack([e, f, rng.normal(size=n)])
+    y = e + 0.1 * rng.normal(size=n)
+
+    result = cross_validate(
+        pipeline(feature_groups="auto"), X, y, cv=KFold(2), return_estimator=True
+    )
+
+    folds = [est["select"].report_["feature_groups"] for est in result["estimator"]]
+    assert "x0+x1" not in folds[0]  # trained on rows 50..99
+    assert folds[1]["x0+x1"] == ["x0", "x1"]  # trained on rows 0..49
+
+
+def test_non_dict_feature_groups_error_mentions_auto():
+    with pytest.raises(TypeError, match="auto"):
+        selector(feature_groups=5).fit(AUTO_X, Y_DATA)
+
+
+@pytest.mark.parametrize("make", [np.array, lambda v: __import__("pandas").Series(v)])
+def test_array_or_series_feature_groups_raise_the_auto_type_error(make):
+    with pytest.raises(TypeError, match="auto"):
+        selector(feature_groups=make(["x0", "x1"])).fit(AUTO_X, Y_DATA)

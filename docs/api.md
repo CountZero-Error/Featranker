@@ -8,7 +8,7 @@ From 1.0, these are FeatRanker's public API:
 
 | Kind | Public |
 |---|---|
-| Python names | Everything in `featranker.__all__`: `FeatureRanker`, `ConsensusSelector`, `Report`, `summarize`, and the deprecated `to_prompt` and `explain`. Also `featranker.__version__`. |
+| Python names | Everything in `featranker.__all__`: `FeatureRanker`, `ConsensusSelector`, `Report`, `auto_groups`, `summarize`, and the deprecated `to_prompt` and `explain`. Also `featranker.__version__`. |
 | Parameters and methods | The documented parameters, methods, and fitted attributes of those names (see [Usage](usage.md)). |
 | Reports | The report keys and their meaning documented in [Report](report.md). |
 | Command line | The `featranker` command and its flags (`featranker --help`). |

@@ -152,6 +152,8 @@ Every model uses the same scorer. In the report, the unshuffled score is each mo
 
 To see why a ranking looks the way it does, `FeatureRanker(..., evidence=True)` adds each model's train score and overfit gap, pairs of correlated groups, and (with `featranker[shap]`) how each group pushes predictions ([details](https://github.com/CountZero-Error/Featranker/blob/main/docs/usage.md#evidence)).
 
+Permutation importance splits credit between near-copies. `auto_groups(X)` proposes `feature_groups` from correlation (no target), and `ConsensusSelector(feature_groups="auto")` or the CLI's `--feature-groups auto` computes them on the training data ([details](https://github.com/CountZero-Error/Featranker/blob/main/docs/usage.md#auto-groups)).
+
 To see how stable a ranking is, `rank_resampled()` repeats this over cross-validation splits and reports each group's rank range and how often it lands in the top *k* ([details](https://github.com/CountZero-Error/Featranker/blob/main/docs/usage.md#resampled-ranking)).
 
 Built-in linear models are wrapped in a `StandardScaler` pipeline fit on training data only; tree models and your own models are used as given.
