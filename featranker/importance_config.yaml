@@ -2,6 +2,7 @@ classification:
   linear:
     - name: logistic_regression
       family: logistic
+      fast: true
       import: sklearn.linear_model
       class: LogisticRegression
       params:
@@ -48,6 +49,7 @@ classification:
         random_state: 42
     - name: ridge_classifier
       family: linear_margin
+      fast: true
       import: sklearn.linear_model
       class: RidgeClassifier
     - name: perceptron
@@ -68,6 +70,7 @@ classification:
         random_state: 42
     - name: lda
       family: discriminant
+      fast: true
       import: sklearn.discriminant_analysis
       class: LinearDiscriminantAnalysis
     - name: qda
@@ -78,6 +81,7 @@ classification:
         reg_param: 0.1
     - name: naive_bayes_gaussian
       family: naive_bayes
+      fast: true
       import: sklearn.naive_bayes
       class: GaussianNB
     - name: naive_bayes_bernoulli
@@ -88,12 +92,14 @@ classification:
   tree:
     - name: decision_tree
       family: single_tree
+      fast: true
       import: sklearn.tree
       class: DecisionTreeClassifier
       params:
         random_state: 42
     - name: random_forest
       family: bagging
+      fast: true
       import: sklearn.ensemble
       class: RandomForestClassifier
       params:
@@ -124,6 +130,7 @@ classification:
         random_state: 42
     - name: hist_gradient_boosting
       family: boosting
+      fast: true
       import: sklearn.ensemble
       class: HistGradientBoostingClassifier
       params:
@@ -151,6 +158,7 @@ regression:
       class: LinearRegression
     - name: ridge_regression
       family: linear
+      fast: true
       import: sklearn.linear_model
       class: Ridge
     - name: lasso_regression
@@ -196,18 +204,21 @@ regression:
       class: KernelRidge
     - name: svr_regression
       family: kernel
+      fast: true
       import: sklearn.svm
       class: SVR
 
   tree:
     - name: decision_tree_regressor
       family: single_tree
+      fast: true
       import: sklearn.tree
       class: DecisionTreeRegressor
       params:
         random_state: 42
     - name: random_forest_regressor
       family: bagging
+      fast: true
       import: sklearn.ensemble
       class: RandomForestRegressor
       params:
@@ -232,6 +243,7 @@ regression:
         random_state: 42
     - name: hist_gradient_boosting_regressor
       family: boosting
+      fast: true
       import: sklearn.ensemble
       class: HistGradientBoostingRegressor
       params:

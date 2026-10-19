@@ -119,6 +119,8 @@ for row in report["consensus"]:
 
 Output shown with the `xgboost` and `catboost` extras installed; a core-only install has fewer tree models, so `n_models` is lower. The six blood-serum columns are ranked as one group. The decision tree scored worse than the dummy baseline, so it stays in the report without a vote. See [Reading the report](https://github.com/CountZero-Error/Featranker/blob/main/docs/report.md#reading-the-report) for what to do next.
 
+For a faster run, `group="fast"` fits one model per family (7 for classification, 5 for regression), so the same families vote with about a third of the models ([details](https://github.com/CountZero-Error/Featranker/blob/main/docs/usage.md#speed)).
+
 Or from the command line:
 
 ```bash

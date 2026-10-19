@@ -141,11 +141,12 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--group",
-        choices=["linear", "tree", "all"],
+        choices=["linear", "tree", "all", "fast"],
         default="all",
         help=(
             "Built-in model group: 'linear' (linear models only), "
-            "'tree' (tree/ensemble models only), or 'all' (both)."
+            "'tree' (tree/ensemble models only), 'all' (both), or "
+            "'fast' (one representative per model family)."
         ),
     )
     parser.add_argument(

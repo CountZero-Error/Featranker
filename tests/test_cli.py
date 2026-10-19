@@ -224,6 +224,40 @@ def test_cli_end_to_end_with_real_ranker_and_registry(monkeypatch, tmp_path):
     assert not [f for f in report["failures"] if f["stage"] in {"fit", "ranking"}]
 
 
+def test_cli_group_fast_reports_the_fast_set(monkeypatch, tmp_path):
+    rng = np.random.default_rng(0)
+
+    def write_csv(path, n_rows):
+        X = rng.normal(size=(n_rows, 2))
+        y = 3.0 * X[:, 0] + 0.1 * rng.normal(size=n_rows)
+        lines = ["signal,noise,target"]
+        lines += [",".join(map(str, [*row, target])) for row, target in zip(X, y)]
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    write_csv(tmp_path / "train.csv", 60)
+    write_csv(tmp_path / "eval.csv", 30)
+    output = tmp_path / "report.json"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "featranker", "--task", "reg", "--group", "fast", "--quiet",
+            "--train-data", str(tmp_path / "train.csv"),
+            "--eval-data", str(tmp_path / "eval.csv"),
+            "--target", "target", "--scoring", "r2", "--n-repeats", "2",
+            "--random-state", "0", "--output", str(output),
+        ],
+    )
+
+    assert cli_module.main() == 0
+
+    report = json.loads(output.read_text(encoding="utf-8"))
+    assert set(report["models"]) == {
+        "ridge_regression", "svr_regression", "decision_tree_regressor",
+        "random_forest_regressor", "hist_gradient_boosting_regressor",
+    }
+
+
 @pytest.mark.filterwarnings("ignore:shap is not installed:UserWarning")
 def test_cli_evidence_flag_writes_evidence(monkeypatch, tmp_path):
     rng = np.random.default_rng(0)

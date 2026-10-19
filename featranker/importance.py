@@ -619,7 +619,7 @@ class FeatureRanker:
     def __init__(
         self,
         task: Literal["clf", "reg"],
-        group: Literal["linear", "tree", "all"] = "all",
+        group: Literal["linear", "tree", "all", "fast"] = "all",
         models: Optional[Dict[str, Any]] = None,
         n_jobs: Optional[int] = None,
         verbose: bool = True,
@@ -632,7 +632,8 @@ class FeatureRanker:
 
         Args:
             task: Task type — "clf" for classification or "reg" for regression.
-            group: Built-in model group — "linear", "tree", or "all" for both.
+            group: Built-in model group — "linear", "tree", "all" for both, or
+                "fast" for one representative model per family.
             models: Optional name -> scikit-learn estimator mapping that
                 replaces the built-in registry. Estimators are cloned at fit().
             n_jobs: Parallel workers over models in fit() and rank_features();
@@ -647,8 +648,8 @@ class FeatureRanker:
         """
         if task not in {"clf", "reg"}:
             raise ValueError("[!] task must be 'clf' or 'reg'.")
-        if group not in {"linear", "tree", "all"}:
-            raise ValueError("[!] group must be 'linear', 'tree', or 'all'.")
+        if group not in {"linear", "tree", "all", "fast"}:
+            raise ValueError("[!] group must be 'linear', 'tree', 'all', or 'fast'.")
         if models is not None and group != "all":
             raise ValueError("[!] group selects built-in models; omit it with models.")
         if not isinstance(verbose, bool):
@@ -719,7 +720,9 @@ class FeatureRanker:
         if self.user_models is not None:
             candidates.update(self.user_models)
         else:
-            groups = ["linear", "tree"] if self.group == "all" else [self.group]
+            groups = (
+                ["linear", "tree"] if self.group in {"all", "fast"} else [self.group]
+            )
             for group in groups:
                 candidates.update(self.models.get(self.task, {}).get(group, {}))
 
@@ -995,7 +998,9 @@ class FeatureRanker:
 
         # Determine which tasks and groups to initialize.
         allowed_tasks = {"clf", "reg"} if self.task == "all" else {self.task}
-        allowed_groups = {"linear", "tree"} if self.group == "all" else {self.group}
+        allowed_groups = (
+            {"linear", "tree"} if self.group in {"all", "fast"} else {self.group}
+        )
 
         for task_name, groups in config.items():
             task_key = task_map.get(task_name)
@@ -1013,6 +1018,10 @@ class FeatureRanker:
                 if not isinstance(model_configs, list):
                     continue
 
+                if self.group == "fast":
+                    model_configs = [
+                        m for m in model_configs if isinstance(m, dict) and m.get("fast")
+                    ]
                 group_models: Dict[str, Any] = {}
                 for model in tqdm(
                     model_configs,

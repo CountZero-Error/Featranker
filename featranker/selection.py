@@ -56,7 +56,7 @@ class ConsensusSelector(SelectorMixin, BaseEstimator):
         *,
         k: Optional[Union[int, "np.integer[Any]"]] = None,
         min_shadow_share: Optional[float] = None,
-        group: Literal["linear", "tree", "all"] = "all",
+        group: Literal["linear", "tree", "all", "fast"] = "all",
         models: Optional[Dict[str, Any]] = None,
         feature_groups: Optional[Dict[str, List[str]]] = None,
         cv: Any = 5,

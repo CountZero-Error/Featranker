@@ -11,7 +11,7 @@ The API is one class: `FeatureRanker(...)`, then `.fit(...)`, then `.rank_featur
 | Parameter | Default | Meaning |
 |---|---|---|
 | `task` | required | `"clf"` for classification or `"reg"` for regression. |
-| `group` | `"all"` | Built-in model group: `"linear"`, `"tree"`, or `"all"`. Groups select estimators; model families determine consensus votes. See [Models](models.md). |
+| `group` | `"all"` | Built-in model group: `"linear"`, `"tree"`, `"fast"`, or `"all"`. Groups select estimators; model families determine consensus votes. See [Models](models.md). |
 | `models` | `None` | Non-empty dict of `{name: estimator}` to use instead of the built-in models. Names must be non-empty strings other than `dummy_baseline`. Cannot be combined with a `group` other than `"all"`. See [Your own models](#your-own-models). |
 | `n_jobs` | `None` | Parallel workers over models. `None` or `1` is sequential, `-1` uses all cores, `0` is invalid. See [Parallel models](#parallel-models). |
 | `verbose` | `True` | Show progress bars during model setup, `fit()`, and `rank_features()`. `False` hides them; warnings are still shown. |
@@ -94,7 +94,7 @@ Output shown with the `xgboost` and `catboost` extras installed. `ranking.png` s
 
 **Task.** `"clf"` when the target is a set of classes, `"reg"` when it is a number.
 
-**Group.** `"all"` (the default) gives the broadest consensus. `"tree"` holds tree ensembles, which capture non-linear effects and interactions. `"linear"` holds standardized linear, discriminant, naive Bayes, and kernel models (including RBF `SVR`), so it is not purely additive. See [Models](models.md).
+**Group.** `"all"` (the default) gives the broadest consensus. `"tree"` holds tree ensembles, which capture non-linear effects and interactions. `"linear"` holds standardized linear, discriminant, naive Bayes, and kernel models (including RBF `SVR`), so it is not purely additive. `"fast"` keeps one representative per family from both. See [Speed](#speed) and [Models](models.md).
 
 **Scorer.** Pick one that matches the problem. scikit-learn scorers are higher-is-better, so error metrics come with a `neg_` prefix.
 
@@ -105,6 +105,39 @@ Output shown with the `xgboost` and `catboost` extras installed. `ranking.png` s
 | Regression | `"r2"`, `"neg_mean_absolute_error"`, `"neg_root_mean_squared_error"` | |
 
 A model that cannot produce what the scorer needs is listed in the report's `failures` and the others still rank. If no model can, `rank_features()` raises.
+
+<a id="speed"></a>
+
+## ▍ Speed
+
+`group="fast"` fits one built-in model per family: 7 for classification (22 in `"all"`) and 5 for regression (18 in `"all"`), all from scikit-learn. Every family still casts its vote, so the consensus is built from the same families with about a third of the models. Which models run is marked in the **Fast** column of [Models](models.md). It works the same in `rank_resampled()`, `ConsensusSelector(group="fast")`, and the CLI (`--group fast`).
+
+```python
+from sklearn.datasets import load_diabetes
+from sklearn.model_selection import train_test_split
+
+from featranker import FeatureRanker
+
+data = load_diabetes()
+X_train, X_eval, y_train, y_eval = train_test_split(
+    data.data, data.target, test_size=0.3, random_state=0
+)
+
+for group in ("all", "fast"):
+    ranker = FeatureRanker(task="reg", group=group, verbose=False)
+    ranker.fit(X_train, y_train, feature_names=list(data.feature_names))
+    report = ranker.rank_features(X_eval, y_eval, scoring="r2", random_state=42)
+    families = {m["family"] for m in report["models"].values()}
+    top = [row["feature_group"] for row in report["consensus"][:3]]
+    print(f"{group:>4}: {len(report['models'])} models, {len(families)} families, top 3 {top}")
+```
+
+```text
+ all: 18 models, 5 families, top 3 ['s5', 'bmi', 'bp']
+fast: 5 models, 5 families, top 3 ['s5', 'bmi', 'bp']
+```
+
+Output shown with the `xgboost` and `catboost` extras installed; without them `"all"` runs 16 models. The trade-off is a thinner vote: each family is one model instead of the median of several, so one unlucky model moves its family's rank more. `"all"` stays the default. `svr_regression`, the regression kernel family's only model, takes time quadratic in the number of rows; on large data pass your own `models=` instead (`group="fast"` cannot be combined with `models=`).
 
 <a id="your-own-models"></a>
 
@@ -247,7 +280,7 @@ Output shown with the `xgboost` and `catboost` extras installed. A group's *plac
 
 Each split uses a new ranker with this ranker's settings, so the ranker you call it on is not changed. A split that fails entirely is recorded in `failures` with `stage: "split"` and the run continues; it raises only if no split ranks. Invalid `cv`, `top_k`, scorer, `n_repeats`, or feature groups raise before any model is fit. See [Resampled reports](report.md#resampled-reports) for the output.
 
-**Cost.** One call costs about `n_splits` times a normal `fit()` plus `rank_features()`. With `group="all"` and `cv=10`, that is ten full runs; start with `cv=5`, a smaller `group`, or fewer `n_repeats`.
+**Cost.** One call costs about `n_splits` times a normal `fit()` plus `rank_features()`. With `group="all"` and `cv=10`, that is ten full runs; start with `cv=5`, a smaller `group` (such as `"fast"`), or fewer `n_repeats`.
 
 > [!IMPORTANT]
 > Pass development data only and keep your final test set out. The splits here are internal validation. Choosing features from these results and then scoring a model on the same data overstates its performance.
@@ -451,7 +484,7 @@ A selected group keeps all of its columns, in their original order. Feature name
 - If no group passes, `fit()` warns and the selector keeps no columns, as scikit-learn's own selectors do. Most downstream estimators (such as `Ridge`) then fail on zero columns, so that pipeline fit errors out. Lower `min_shadow_share`, or use only the top-k rule by setting `min_shadow_share=None` and a positive `k`.
 - For a group-aware inner `cv` such as `GroupKFold`, pass row groups to `fit(X, y, groups=...)`; in a `Pipeline`, pass `select__groups=...` (for example `cross_val_score(..., params={"select__groups": groups})`, which slices them to each training fold).
 - DataFrame column labels are compared as strings, in `fit()` and `transform()`. A failed `fit()` clears any earlier fitted state.
-- **Cost.** Each `fit()` is one `rank_resampled()` run: `cv` rankings, doubled with shadows. Inside `cross_val_score(cv=n)` that is `n × cv` rankings; fitting the final pipeline afterwards adds one more run. `GridSearchCV` multiplies the cost by the number of candidates, plus its final refit. Use `group="tree"`, a small `cv`, and fewer `n_repeats` while searching.
+- **Cost.** Each `fit()` is one `rank_resampled()` run: `cv` rankings, doubled with shadows. Inside `cross_val_score(cv=n)` that is `n × cv` rankings; fitting the final pipeline afterwards adds one more run. `GridSearchCV` multiplies the cost by the number of candidates, plus its final refit. Use `group="fast"` or `"tree"`, a small `cv`, and fewer `n_repeats` while searching.
 
 <a id="summarize"></a>
 
