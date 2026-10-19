@@ -32,6 +32,13 @@ context: |
          group correlation, train-vs-eval score; no LLM use;
          explain()/to_prompt() deprecated (removed in 2.0)
     1.2  llm-investigator: not built
+  Planned after 1.1 (weaknesses review, 2026-10-19):
+    1.2  fast-preset: group="fast", one model per family; skip permutations
+         for models that lose to the dummy (preset only, schema unchanged)
+    1.3  auto-groups: feature_groups="auto" via Spearman clustering on
+         training data
+    1.4  shadow-test: binomial hits test over resampled splits, BH correction
+    docs benchmark vs Boruta / sklearn / feature-engine on planted data
 
 rules:
   proposal:

@@ -1,6 +1,6 @@
 # Spike: is an LLM investigator worth building?
 
-Go/no-go spike for the FeatRanker 1.1/1.2 roadmap. Design, benchmark, and decision rule: [`openspec/changes/spike-investigator-value/design.md`](../../openspec/changes/spike-investigator-value/design.md). This directory is not part of the `featranker` package and is not run by CI.
+Go/no-go spike for the FeatRanker 1.1/1.2 roadmap. Design, benchmark, and decision rule: [`openspec/changes/archive/2026-10-19-spike-investigator-value/design.md`](../../openspec/changes/archive/2026-10-19-spike-investigator-value/design.md). This directory is not part of the `featranker` package and is not run by CI.
 
 ## Setup (maintainer)
 
