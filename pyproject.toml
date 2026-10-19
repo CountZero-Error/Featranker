@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "featranker"
-version = "1.0.0"
+version = "1.1.0"
 description = "Rank feature importance across multiple ML models."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -46,7 +46,8 @@ xgboost = ["xgboost"]
 catboost = ["catboost"]
 all = ["xgboost", "catboost"]
 plot = ["matplotlib"]
-test = ["pytest", "pandas", "matplotlib", "build", "mypy", "types-PyYAML"]
+shap = ["shap"]
+test = ["pytest>=8.2", "pandas", "matplotlib", "shap", "build", "mypy", "types-PyYAML"]
 
 [project.scripts]
 featranker = "featranker.cli:main"
@@ -67,5 +68,5 @@ warn_unused_ignores = true
 
 [[tool.mypy.overrides]]
 # These ship no type information.
-module = ["sklearn.*", "joblib.*", "tqdm.*", "pandas.*", "matplotlib.*", "xgboost.*", "catboost.*"]
+module = ["sklearn.*", "joblib.*", "tqdm.*", "pandas.*", "matplotlib.*", "xgboost.*", "catboost.*", "shap.*", "scipy.*"]
 ignore_missing_imports = true

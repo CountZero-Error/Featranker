@@ -8,7 +8,7 @@ From 1.0, these are FeatRanker's public API:
 
 | Kind | Public |
 |---|---|
-| Python names | Everything in `featranker.__all__`: `FeatureRanker`, `ConsensusSelector`, `Report`, `summarize`, `to_prompt`, `explain`. Also `featranker.__version__`. |
+| Python names | Everything in `featranker.__all__`: `FeatureRanker`, `ConsensusSelector`, `Report`, `summarize`, and the deprecated `to_prompt` and `explain`. Also `featranker.__version__`. |
 | Parameters and methods | The documented parameters, methods, and fitted attributes of those names (see [Usage](usage.md)). |
 | Reports | The report keys and their meaning documented in [Report](report.md). |
 | Command line | The `featranker` command and its flags (`featranker --help`). |
@@ -23,7 +23,13 @@ FeatRanker follows [semantic versioning](https://semver.org) from 1.0.0:
 - **Minor** (1.x): adds features. Reports may gain new keys; code that reads reports should ignore keys it does not know. Built-in models and their families may be added, which can change rankings; the change is listed in the release notes.
 - **Patch** (1.x.y): fixes only.
 
-Before something public is removed, it is deprecated with a `DeprecationWarning` for at least one minor release. Results are reproducible within a release given the seeds described in [Usage](usage.md#parallel-models); they can differ between releases when estimators or the registry change.
+Before something public is removed, it is deprecated with a `DeprecationWarning` for at least one minor release; a deprecation end users of a script or CLI should see by default uses `FutureWarning` instead. Results are reproducible within a release given the seeds described in [Usage](usage.md#parallel-models); they can differ between releases when estimators or the registry change.
+
+## ▍ Deprecations
+
+| Since | Deprecated | Removal | Note |
+|---|---|---|---|
+| 1.1 | `to_prompt()` and `explain()` | 2.0 | Each call emits a `FutureWarning`; behavior is otherwise unchanged through 1.x. The report [evidence](usage.md#evidence) added in 1.1 replaces the need for an LLM reading. |
 
 ## ▍ Typing
 

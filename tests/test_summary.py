@@ -249,3 +249,97 @@ def test_below_shadow_comes_after_within_noise():
 
 def test_no_below_shadow_without_shares():
     assert "below_shadow" not in codes(summarize(clean_report()))
+
+
+def _with_train(report, **train_scores):
+    """Give models a train_score; the model's evaluation_score stays 0.5."""
+    for name, score in train_scores.items():
+        report["models"][name]["train_score"] = score
+    return report
+
+
+def test_overfit_lists_models_that_lost_half_their_training_advantage():
+    report = clean_report()
+    report["baseline_score"] = 0.0
+    report["models"]["m1"]["evaluation_score"] = 0.2
+    report["models"]["m2"].update(train_score=0.56, evaluation_score=0.64)
+    _with_train(report, m1=1.0)
+
+    findings = [f for f in summarize(report) if f["code"] == "overfit"]
+
+    assert len(findings) == 1 and findings[0]["severity"] == "info"
+    assert findings[0]["evidence"] == {
+        "models": {"m1": {"train_score": 1.0, "evaluation_score": 0.2, "share": 0.8}}
+    }
+    json.dumps(findings, allow_nan=False)
+
+
+def test_overfit_skips_null_train_score_and_models_without_an_advantage():
+    report = clean_report()
+    report["baseline_score"] = 0.0
+    report["models"]["m1"].update(train_score=None, evaluation_score=-1.0)
+    report["models"]["m2"].update(train_score=-0.5, evaluation_score=-2.0)
+    report["models"]["m3"].update(train_score=0.0, evaluation_score=-2.0)
+
+    assert "overfit" not in codes(summarize(report))
+
+
+def test_overfit_threshold_is_half():
+    report = clean_report()
+    report["baseline_score"] = 0.0
+    report["models"]["m1"].update(train_score=1.0, evaluation_score=0.5)
+    report["models"]["m2"].update(train_score=1.0, evaluation_score=0.51)
+
+    finding = next(f for f in summarize(report) if f["code"] == "overfit")
+
+    assert list(finding["evidence"]["models"]) == ["m1"]
+
+
+def test_no_overfit_without_train_score_or_baseline():
+    assert "overfit" not in codes(summarize(clean_report()))
+    report = _with_train(clean_report(), m1=1.0, m2=1.0, m3=1.0)
+    report["baseline_score"] = None
+    assert "overfit" not in codes(summarize(report))
+
+
+def _pairs_report(pairs):
+    report = clean_report()
+    report["evidence"] = {"correlation": {"pairs": pairs}}
+    return report
+
+
+def test_correlated_groups_lists_pairs():
+    pairs = [{"groups": ["e", "f"], "rho": 0.99}]
+
+    findings = [f for f in summarize(_pairs_report(pairs)) if f["code"] == "correlated_groups"]
+
+    assert len(findings) == 1 and findings[0]["severity"] == "info"
+    assert findings[0]["evidence"] == {"pairs": pairs}
+    assert "e" in findings[0]["message"] and "f" in findings[0]["message"]
+    assert "split" in findings[0]["message"]
+
+
+def test_no_correlated_groups_finding_without_pairs():
+    assert "correlated_groups" not in codes(summarize(_pairs_report([])))
+    assert "correlated_groups" not in codes(summarize(clean_report()))
+
+
+def test_evidence_findings_come_after_below_shadow_in_order():
+    report = _pairs_report([{"groups": ["a", "b"], "rho": 0.9}])
+    report["baseline_score"] = 0.0
+    report["models"]["m1"].update(train_score=1.0, evaluation_score=0.1)
+    for row in report["consensus"]:
+        row["above_shadow_share"] = 0.0
+
+    assert codes(summarize(report))[-3:] == ["below_shadow", "overfit", "correlated_groups"]
+
+
+def test_evidence_stage_failures_are_info():
+    report = clean_report()
+    report["failures"] = [_failure("m1", "evidence")]
+
+    findings = summarize(report)
+
+    assert codes(findings) == ["failures"]
+    assert findings[0]["severity"] == "info"
+    assert findings[0]["evidence"] == {"stage": "evidence", "models": ["m1"]}

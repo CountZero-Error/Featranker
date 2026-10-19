@@ -149,6 +149,14 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--evidence",
+        action="store_true",
+        help=(
+            "Add mechanism evidence to the report: train score, overfit gap, "
+            "correlated groups, and SHAP when the shap package is installed."
+        ),
+    )
+    parser.add_argument(
         "--quiet",
         action="store_true",
         help="Hide progress bars (warnings and errors are still shown).",
@@ -203,7 +211,11 @@ def _load_cli_inputs(args: argparse.Namespace) -> Dict[str, Any]:
 def _run_ranking(args: argparse.Namespace) -> Dict[str, Any]:
     inputs = _load_cli_inputs(args)
     ranker = FeatureRanker(
-        task=args.task, group=args.group, n_jobs=args.n_jobs, verbose=not args.quiet
+        task=args.task,
+        group=args.group,
+        n_jobs=args.n_jobs,
+        verbose=not args.quiet,
+        evidence=args.evidence,
     )
     ranker.fit(*inputs["train"])
     return ranker.rank_features(

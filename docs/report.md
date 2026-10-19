@@ -38,7 +38,7 @@ Each model family casts one vote. Voting models are grouped by `family` (for exa
 
 ### Caveats
 
-- **Correlated features share credit.** If two features carry the same information, shuffling one leaves the other, so both can look unimportant. Put them in one `feature_groups` entry to rank them together. See scikit-learn's [notes on correlated features](https://scikit-learn.org/stable/modules/permutation_importance.html#misleading-values-on-strongly-correlated-features).
+- **Correlated features share credit.** If two features carry the same information, shuffling one leaves the other, so both can look unimportant. Put them in one `feature_groups` entry to rank them together; with `evidence=True`, `evidence.correlation` lists such pairs. See scikit-learn's [notes on correlated features](https://scikit-learn.org/stable/modules/permutation_importance.html#misleading-values-on-strongly-correlated-features).
 - **Rankings depend on the evaluation data and scorer.** A different split or metric can reorder close groups. Treat groups with similar `median_rank` as tied.
 - **Use rankings inside validation only.** Pick or drop features using inner-fold results, never the final test set. See the [leakage warning](../README.md#-03--how-it-works).
 
@@ -98,6 +98,42 @@ Within each split, `rank_std` still measures disagreement between model families
 `evaluation_mode` is always `"held_out"`. It names the workflow (scoring on data passed to `rank_features()`); FeatRanker cannot check that this data is really separate from the training data.
 
 With `shadows=True`, the report also has top-level `shadows: true` and `shadow_seed`; each model gains `shadow_importance` and `shadow_max`; each importance entry gains `above_shadow`; and each consensus row gains `above_shadow_share`. Without shadows, none of these keys appear.
+
+With `evidence=True`, each model also has `train_score` and `overfit_gap` (`null` if the training score could not be computed, with a `failures` entry at stage `"evidence"`), the report has a top-level `evidence` block, and models SHAP can explain have `shap`. Without `evidence`, none of these keys appear. See [Evidence](usage.md#evidence).
+
+```python
+{
+    "models": {
+        "ridge": {
+            # ... the keys above, plus:
+            "train_score": 0.55,
+            "overfit_gap": 0.16,          # train_score - evaluation_score
+            "shap": {                     # only when shap is installed and supports the model
+                "explainer": "linear",    # or "tree"
+                "groups": {
+                    "bmi": {"mean_abs": 21.4, "direction": 1.0},
+                    "segment": {"mean_abs": 3.2, "direction": None},  # multi-column group
+                },
+            },
+        }
+    },
+    "evidence": {
+        "correlation": {
+            "method": "spearman",
+            "data": "train",
+            "threshold": 0.5,
+            "pairs": [{"groups": ["s1", "s2"], "rho": 0.87}],   # sorted by |rho|
+        },
+        "shap": {
+            "available": True,        # {"available": False} when shap is not installed
+            "n_rows": 133,            # evaluation rows explained (at most 1000)
+            "unsupported": [{"model": "knn", "reason": "InvalidModelError: ..."}],
+        },
+    },
+}
+```
+
+`mean_abs` is in the model's own output units, so compare it between groups of one model, not across models. `direction` is `null` for multi-column groups, constant features, and multiclass models; for binary classification the explained output is the positive class (the second label in sorted order). For linear models `direction` is always +1 or -1 (the coefficient's sign), even when `mean_abs` is near 0.
 
 ```python
 {
@@ -163,7 +199,7 @@ With `shadows=True`, the report also has top-level `shadows: true` and `shadow_s
 
 ## ▍ Failures
 
-- Failures contain `model`, `stage`, `error_type`, and `message`.
+- Failures contain `model`, `stage`, `error_type`, and `message`. The stages are `initialization`, `fit`, `ranking`, and (with `evidence=True`) `evidence`; an `evidence` failure leaves the model's ranking untouched.
 - Failed models get no zero placeholder and do not enter the consensus.
 - `fit()` raises if no model fits; `rank_features()` raises if every model fails ranking.
 

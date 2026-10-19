@@ -24,6 +24,7 @@ from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.utils.fixes import parse_version
 from tqdm import tqdm
 
+from .evidence import correlation_evidence, shap_evidence
 from .report import Report
 
 task_map = {
@@ -574,7 +575,11 @@ def _rank_model(
     baseline_score: Optional[float],
     family: str,
     shadow_groups: Optional[Dict[str, List[int]]] = None,
-) -> tuple[str, Optional[Dict[str, Any]], Optional[Dict[str, str]]]:
+    train_data: Optional[tuple[np.ndarray, np.ndarray]] = None,
+) -> tuple[
+    str, Optional[Dict[str, Any]], Optional[Dict[str, str]], Optional[Dict[str, str]]
+]:
+    """Returns (name, report, ranking failure, evidence failure)."""
     try:
         baseline = _finite_float(scorer(model, X_values, y_values), "baseline score")
         importances, shadow = _permutation_importances(
@@ -594,9 +599,20 @@ def _rank_model(
                 entry["above_shadow"] = entry["mean"] > shadow_max
             report["shadow_importance"] = shadow
             report["shadow_max"] = shadow_max
-        return name, report, None
+        evidence_failure = None
+        if train_data is not None:
+            try:
+                train_score = _finite_float(scorer(model, *train_data), "train score")
+                report["train_score"] = train_score
+                report["overfit_gap"] = _finite_float(
+                    train_score - baseline, "overfit gap"
+                )
+            except Exception as error:
+                report["train_score"] = report["overfit_gap"] = None
+                evidence_failure = _failure(name, "evidence", error)
+        return name, report, None, evidence_failure
     except Exception as error:
-        return name, None, _failure(name, "ranking", error)
+        return name, None, _failure(name, "ranking", error), None
 
 
 class FeatureRanker:
@@ -609,6 +625,7 @@ class FeatureRanker:
         verbose: bool = True,
         shadows: bool = False,
         shadow_seed: Optional[int] = None,
+        evidence: bool = False,
     ) -> None:
         """
         Initialize configured models without loading or fitting data.
@@ -624,6 +641,9 @@ class FeatureRanker:
             shadows: Train and rank with a shuffled shadow copy of every
                 feature, to check which groups beat noise.
             shadow_seed: Seed for the shadow shuffles; None draws fresh entropy.
+            evidence: Keep the training data so rank_features() can add
+                mechanism evidence: train score, overfit gap, correlated
+                groups, and (with the shap extra) a SHAP summary.
         """
         if task not in {"clf", "reg"}:
             raise ValueError("[!] task must be 'clf' or 'reg'.")
@@ -635,6 +655,8 @@ class FeatureRanker:
             raise TypeError("[!] verbose must be True or False.")
         if not isinstance(shadows, bool):
             raise TypeError("[!] shadows must be True or False.")
+        if not isinstance(evidence, bool):
+            raise TypeError("[!] evidence must be True or False.")
         if shadow_seed is not None and (
             not isinstance(shadow_seed, int) or isinstance(shadow_seed, bool)
         ):
@@ -648,6 +670,7 @@ class FeatureRanker:
         self.verbose = verbose
         self.shadows = shadows
         self.shadow_seed = shadow_seed
+        self.evidence = evidence
         self.label_encoder = None
         self.initialization_failures_: List[Dict[str, str]] = []
         # Built-in model name -> registry family; anything else is its own family.
@@ -666,6 +689,8 @@ class FeatureRanker:
         # ... and those pickled by 0.6 lack the 0.7 shadow options.
         self.__dict__.setdefault("shadows", False)
         self.__dict__.setdefault("shadow_seed", None)
+        # ... and those pickled by 1.0 lack the 1.1 evidence flag.
+        self.__dict__.setdefault("evidence", False)
         if "model_families_" not in self.__dict__:
             self.model_families_ = (
                 _registry_families() if self.user_models is None else {}
@@ -725,6 +750,10 @@ class FeatureRanker:
             self.fit_failures_.append(_failure(BASELINE_NAME, "fit", error))
 
         self.baseline_model_ = baseline_model
+        if self.evidence:
+            # As the models saw them (shadow block included), for train scores.
+            self.train_X_ = X_models
+            self.train_y_ = y_values
         self.label_encoder = label_encoder
         self.feature_names_ = names
         self.n_features_in_ = len(names)
@@ -775,19 +804,23 @@ class FeatureRanker:
                 name: [index + offset for index in indices]
                 for name, indices in groups.items()
             }
+        train_data = (self.train_X_, self.train_y_) if self.evidence else None
         jobs = [
             (name, model, scorer, X_models, y_values, groups, n_repeats,
              random_state, baseline_score, self.model_families_.get(name, name),
-             shadow_groups)
+             shadow_groups, train_data)
             for name, model in self.trained_models.items()
         ]
-        for name, model_report, failure in _run_models(
+        evidence_failures: List[Dict[str, str]] = []
+        for name, model_report, failure, evidence_failure in _run_models(
             _rank_model, jobs, self.n_jobs, "[*] Ranking models", self.verbose
         ):
             if failure is None:
                 model_reports[name] = model_report
             else:
                 ranking_failures.append(failure)
+            if evidence_failure is not None:
+                evidence_failures.append(evidence_failure)
 
         if not model_reports:
             details = json.dumps(ranking_failures)
@@ -807,11 +840,26 @@ class FeatureRanker:
             "consensus": _build_consensus(model_reports),
             "failures": self.initialization_failures_
             + self.fit_failures_
-            + ranking_failures,
+            + ranking_failures
+            + evidence_failures,
         }
         if self.shadows:
             report["shadows"] = True
             report["shadow_seed"] = self.shadow_seed
+        if self.evidence:
+            n_real = len(self.feature_names_)
+            shap_block, shap_models = shap_evidence(
+                {name: self.trained_models[name] for name in model_reports},
+                X_models,
+                self.train_X_,
+                groups,
+            )
+            for name, entry in shap_models.items():
+                model_reports[name]["shap"] = entry
+            report["evidence"] = {
+                "correlation": correlation_evidence(self.train_X_[:, :n_real], groups),
+                "shap": shap_block,
+            }
         return Report(report)
 
     def rank_resampled(
@@ -861,6 +909,7 @@ class FeatureRanker:
                     shadow_seed=(
                         None if self.shadow_seed is None else self.shadow_seed + index
                     ),
+                    evidence=self.evidence,
                 )
                 ranker.fit(X_values[train], y_values[train], feature_names=names)
                 report = ranker.rank_features(

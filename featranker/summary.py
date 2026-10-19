@@ -8,9 +8,12 @@ from typing import Any, Dict, List
 MIN_FAMILIES = 3
 # Groups whose family-weighted above-shadow share is below this are listed.
 MIN_SHADOW_SHARE = 0.5
+# Models that lost at least this share of their training advantage over the
+# dummy on the evaluation data are listed as overfit.
+MIN_OVERFIT_SHARE = 0.5
 
 REQUIRED_KEYS = ("baseline_score", "models", "consensus", "failures")
-FAILURE_STAGES = ("initialization", "fit", "ranking")
+FAILURE_STAGES = ("initialization", "fit", "ranking", "evidence")
 
 
 def _finding(code: str, severity: str, message: str, evidence: Dict[str, Any]) -> Dict[str, Any]:
@@ -45,7 +48,7 @@ def _failures(report: Dict[str, Any]) -> List[Dict[str, Any]]:
         models = [f["model"] for f in report["failures"] if f.get("stage") == stage]
         if not models:
             continue
-        severity = "info" if stage == "initialization" else "warning"
+        severity = "info" if stage in ("initialization", "evidence") else "warning"
         findings.append(_finding(
             "failures", severity,
             f"{len(models)} model(s) failed at {stage}: {', '.join(models)}.",
@@ -123,9 +126,51 @@ def _below_shadow(report: Dict[str, Any]) -> List[Dict[str, Any]]:
     )]
 
 
+def _overfit(report: Dict[str, Any]) -> List[Dict[str, Any]]:
+    baseline = report["baseline_score"]
+    if baseline is None:
+        return []
+    overfit = {}
+    for name, model in report["models"].items():
+        train = model.get("train_score")
+        if train is None or train - baseline <= 0:
+            continue
+        share = (train - model["evaluation_score"]) / (train - baseline)
+        if share >= MIN_OVERFIT_SHARE:
+            overfit[name] = {
+                "train_score": train,
+                "evaluation_score": model["evaluation_score"],
+                "share": share,
+            }
+    if not overfit:
+        return []
+    return [_finding(
+        "overfit", "info",
+        f"{', '.join(overfit)} lost at least half of the training advantage over the "
+        "dummy baseline on the evaluation data, so may be overfit; read their "
+        "importances with that in mind.",
+        {"models": overfit},
+    )]
+
+
+def _correlated_groups(report: Dict[str, Any]) -> List[Dict[str, Any]]:
+    pairs = report.get("evidence", {}).get("correlation", {}).get("pairs")
+    if not pairs:
+        return []
+    listed = "; ".join(f"{a} and {b} (rho {pair['rho']:.2f})"
+                       for pair in pairs for a, b in [pair["groups"]])
+    return [_finding(
+        "correlated_groups", "info",
+        f"Correlated on the training data: {listed}. Permutation importance may be "
+        "split between correlated groups, so each can look less important than "
+        "the pair together.",
+        {"pairs": pairs},
+    )]
+
+
 RULES = (
     _gate_off, _empty_consensus, _failures, _few_families, _tied_groups,
-    _within_noise, _below_shadow,
+    _within_noise, _below_shadow, _overfit, _correlated_groups,
 )
 
 

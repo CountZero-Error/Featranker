@@ -1,11 +1,15 @@
 import copy
+import hashlib
 import json
 
 import numpy as np
 import pytest
 from sklearn.linear_model import LinearRegression, Ridge
 
-from featranker import FeatureRanker, summarize, to_prompt
+from featranker import FeatureRanker, explain, summarize, to_prompt
+
+# to_prompt() and explain() warn since 1.1; the tests below cover that warning.
+pytestmark = pytest.mark.filterwarnings("ignore:.*deprecated since 1.1:FutureWarning")
 
 RNG = np.random.default_rng(0)
 X = RNG.normal(size=(60, 3))
@@ -126,8 +130,6 @@ def test_anonymized_findings_use_tokens(report):
 
     assert "tied_groups" in prompt and "bmi" not in prompt
 
-
-from featranker import explain
 
 
 def reply(claims, summary="A short summary."):
@@ -391,3 +393,85 @@ def test_marker_instruction_keeps_builtin_names():
 
     assert "Keep unaliased built-in names unchanged" in prompt
     assert "every feature group, column, model, and family name" not in prompt
+
+
+def test_anonymized_findings_hide_names_in_correlated_pairs(report):
+    correlated = copy.deepcopy(report)
+    correlated["evidence"] = {
+        "correlation": {"pairs": [{"groups": ["bmi", "serum"], "rho": 0.9}]}
+    }
+
+    prompt = to_prompt(correlated, anonymize=True)
+
+    assert "correlated_groups" in prompt
+    assert "bmi" not in prompt and "serum" not in prompt
+    assert "g1 and g2" in prompt
+
+
+@pytest.mark.parametrize("call", ["to_prompt", "explain"])
+def test_deprecated_functions_warn_once_and_name_2_0(report, call):
+    def run():
+        if call == "to_prompt":
+            return to_prompt(report)
+        return explain(report, fake(reply([])))
+
+    with pytest.warns(FutureWarning, match=r"deprecated since 1\.1.*removed in 2\.0") as caught:
+        result = run()
+
+    assert len(caught) == 1
+    assert caught[0].filename == __file__  # points at the caller
+    assert call in str(caught[0].message)
+    assert "deprecated" in (to_prompt.__doc__ if call == "to_prompt" else explain.__doc__).lower()
+    if call == "explain":
+        assert set(result) == {"summary", "claims", "all_verified"}
+
+
+def test_explain_still_calls_the_llm_once(report):
+    llm = fake(reply([]))
+
+    with pytest.warns(FutureWarning):
+        explain(report, llm)
+
+    assert len(llm.calls) == 1
+
+
+def golden_report():
+    """A small hand-written 1.0-shaped report; no model is trained."""
+    def model(family, evaluation_score, means):
+        return {
+            "family": family, "evaluation_score": evaluation_score,
+            "in_consensus": True, "params": {"alpha": 1.0},
+            "importance": {
+                name: {"values": [mean], "mean": mean, "std": 0.05, "rank": rank}
+                for rank, (name, mean) in enumerate(means.items(), start=1)
+            },
+        }
+
+    means = {"bmi": 0.5, "serum": 0.2, "fit": 0.01}
+    row = lambda name, rank: {  # noqa: E731
+        "feature_group": name, "median_rank": rank, "mean_rank": rank,
+        "rank_std": 0.0, "n_models": 2, "n_families": 2, "family_ranks": {},
+    }
+    return {
+        "evaluation_mode": "held_out", "scoring": "r2", "n_repeats": 3,
+        "random_state": 0,
+        "feature_groups": {"bmi": ["bmi"], "serum": ["serum"], "fit": ["fit"]},
+        "baseline_score": -0.01,
+        "models": {"ridge": model("ridge", 0.8, means), "lasso": model("lasso", 0.7, means)},
+        "consensus": [row("bmi", 1.0), row("serum", 2.0), row("fit", 3.0)],
+        "failures": [],
+    }
+
+
+# sha256 of the 1.0 prompts for golden_report(), generated from the 1.0.0 package
+GOLDEN_PROMPT_SHA256 = {
+    False: "8f5200ad99eab140f6611afc2af65f0248fa05c3978919b96e0b5363e5026bd6",
+    True: "0c20e476a04ba07c8146c4ce2f9b43cca309e466541046d75e9f7c0b97665ee2",
+}
+
+
+@pytest.mark.parametrize("anonymize", [False, True])
+def test_prompt_is_unchanged_from_1_0(anonymize):
+    prompt = to_prompt(golden_report(), anonymize=anonymize)
+
+    assert hashlib.sha256(prompt.encode("utf-8")).hexdigest() == GOLDEN_PROMPT_SHA256[anonymize]

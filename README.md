@@ -77,7 +77,7 @@ Ships with **40 built-in models** (22 classification, 18 regression), or bring y
 pip install featranker
 ```
 
-Requires **Python ≥ 3.10**. Optional extras: `featranker[xgboost]`, `[catboost]`, `[all]` (both), or `[plot]` (matplotlib, for `report.plot()`). The `lightgbm` extra was removed in 1.0; install `lightgbm` directly for custom LightGBM estimators. `[all]` now installs only XGBoost and CatBoost.
+Requires **Python ≥ 3.10**. Optional extras: `featranker[xgboost]`, `[catboost]`, `[all]` (both), `[plot]` (matplotlib, for `report.plot()`), or `[shap]` (SHAP summaries for `evidence=True`; not part of `[all]`). The `lightgbm` extra was removed in 1.0; install `lightgbm` directly for custom LightGBM estimators. `[all]` now installs only XGBoost and CatBoost.
 
 ## ▍ 02 · Quick start
 
@@ -148,6 +148,8 @@ importance = model_score - model_score_after_shuffling
 
 Every model uses the same scorer. In the report, the unshuffled score is each model's `evaluation_score`; `baseline_score` is the dummy's score, used only for the vote.
 
+To see why a ranking looks the way it does, `FeatureRanker(..., evidence=True)` adds each model's train score and overfit gap, pairs of correlated groups, and (with `featranker[shap]`) how each group pushes predictions ([details](https://github.com/CountZero-Error/Featranker/blob/main/docs/usage.md#evidence)).
+
 To see how stable a ranking is, `rank_resampled()` repeats this over cross-validation splits and reports each group's rank range and how often it lands in the top *k* ([details](https://github.com/CountZero-Error/Featranker/blob/main/docs/usage.md#resampled-ranking)).
 
 Built-in linear models are wrapped in a `StandardScaler` pipeline fit on training data only; tree models and your own models are used as given.
@@ -159,7 +161,7 @@ Built-in linear models are wrapped in a `StandardScaler` pipeline fit on trainin
 
 | Page | Contents |
 |---|---|
-| [**Usage**](https://github.com/CountZero-Error/Featranker/blob/main/docs/usage.md) | API and defaults, working with reports (`summary`, `to_frame`, `plot`), choosing a scorer, your own models, parallel runs, the CLI, resampled ranking, shadow features, pipeline feature selection, `summarize`, LLM interpretation, labels, troubleshooting |
+| [**Usage**](https://github.com/CountZero-Error/Featranker/blob/main/docs/usage.md) | API and defaults, working with reports (`summary`, `to_frame`, `plot`), choosing a scorer, your own models, parallel runs, the CLI, resampled ranking, shadow features, mechanism evidence, pipeline feature selection, `summarize`, LLM interpretation (deprecated), labels, troubleshooting |
 | [**Report**](https://github.com/CountZero-Error/Featranker/blob/main/docs/report.md) | How to read the results, resampled (stability) reports, full report structure, ranking and failure rules |
 | [**Models**](https://github.com/CountZero-Error/Featranker/blob/main/docs/models.md) | All 40 built-in models, optional extras, known issues |
 | [**API**](https://github.com/CountZero-Error/Featranker/blob/main/docs/api.md) | Public API, stability policy, typing, releases |
@@ -168,7 +170,7 @@ Upgrading from 0.3? The preparation-file workflow was removed in 0.4.0; see the 
 
 ## ▍ Scope
 
-`FeatureRanker` does not impute or encode features, tune models, or provide SHAP-style attribution. `ConsensusSelector` performs feature selection inside validation. `rank_resampled()` splits data only to measure ranking stability; it does not evaluate a final model. The one target change it makes is encoding classification labels to `0..n_classes-1` internally (see [Usage](https://github.com/CountZero-Error/Featranker/blob/main/docs/usage.md#labels)). Results depend on the evaluation sample, scorer, estimators, correlated predictors, and permutation design.
+`FeatureRanker` does not impute or encode features or tune models. Its optional SHAP summaries (`evidence=True`) describe how models use features and are not used in the ranking. `ConsensusSelector` performs feature selection inside validation. `rank_resampled()` splits data only to measure ranking stability; it does not evaluate a final model. The one target change it makes is encoding classification labels to `0..n_classes-1` internally (see [Usage](https://github.com/CountZero-Error/Featranker/blob/main/docs/usage.md#labels)). Results depend on the evaluation sample, scorer, estimators, correlated predictors, and permutation design.
 
 ## ▍ Development
 

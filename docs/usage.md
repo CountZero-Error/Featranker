@@ -4,9 +4,9 @@
 
 ## ▍ API
 
-The API is one class: `FeatureRanker(...)`, then `.fit(...)`, then `.rank_features(...)`, which returns a [`Report`](#working-with-reports). [`.rank_resampled(...)`](#resampled-ranking) repeats that over cross-validation splits, [`ConsensusSelector`](#feature-selection) turns the ranking into a scikit-learn pipeline step, [`summarize(report)`](#summarize) reads the result, and [`to_prompt` / `explain`](#llm-interpretation) hand it to an LLM with checked citations.
+The API is one class: `FeatureRanker(...)`, then `.fit(...)`, then `.rank_features(...)`, which returns a [`Report`](#working-with-reports). [`.rank_resampled(...)`](#resampled-ranking) repeats that over cross-validation splits, [`ConsensusSelector`](#feature-selection) turns the ranking into a scikit-learn pipeline step, [`summarize(report)`](#summarize) reads the result, and [`to_prompt` / `explain`](#llm-interpretation) hand it to an LLM with checked citations (deprecated since 1.1). `evidence=True` adds [mechanism evidence](#evidence) to the report.
 
-### `FeatureRanker(task, group="all", models=None, n_jobs=None, verbose=True, shadows=False, shadow_seed=None)`
+### `FeatureRanker(task, group="all", models=None, n_jobs=None, verbose=True, shadows=False, shadow_seed=None, evidence=False)`
 
 | Parameter | Default | Meaning |
 |---|---|---|
@@ -17,6 +17,7 @@ The API is one class: `FeatureRanker(...)`, then `.fit(...)`, then `.rank_featur
 | `verbose` | `True` | Show progress bars during model setup, `fit()`, and `rank_features()`. `False` hides them; warnings are still shown. |
 | `shadows` | `False` | Train and rank with a shuffled copy of every feature, to show which groups beat noise. See [Shadow features](#shadow-features). |
 | `shadow_seed` | `None` | Non-negative integer seed for the shadow shuffles, or `None` for different shadows on every run. |
+| `evidence` | `False` | Keep the training data and add train scores, overfit gaps, correlated groups, and (with `featranker[shap]`) a SHAP summary to the report. See [Evidence](#evidence). |
 
 ### `.fit(X, y, feature_names=None)`
 
@@ -160,7 +161,7 @@ featranker \
   --output report.json
 ```
 
-Both CSV files need headers, the same feature columns in the same order, and the target column. Feature values must be numeric; targets may be numeric or strings. Add `--quiet` to hide progress bars. Run `featranker --help` for every flag.
+Both CSV files need headers, the same feature columns in the same order, and the target column. Feature values must be numeric; targets may be numeric or strings. Add `--quiet` to hide progress bars and `--evidence` to add [evidence](#evidence) to the report. Run `featranker --help` for every flag.
 
 <details>
 <summary><b>Example input files</b></summary>
@@ -314,6 +315,86 @@ Output shown with the `xgboost` and `catboost` extras installed. The two pure-no
 > [!WARNING]
 > Shadows only work if every model sees every column. A custom pipeline that drops columns, such as a positional `ColumnTransformer` with the default `remainder="drop"`, never sees the shadows, so every group trivially beats them. Shadow columns are appended after the real ones, so positional selectors of real columns still work.
 
+<a id="evidence"></a>
+
+## ▍ Evidence
+
+A rank says which groups matter, not why. With `evidence=True`, `fit()` also keeps the training data and `rank_features()` adds evidence about the mechanism behind the ranking:
+
+- **Train score and overfit gap.** Each model gets `train_score` (the same scorer on the data it was fit on) and `overfit_gap = train_score - evaluation_score`. A large gap means the model memorized its training data, so its importances describe a model that may not generalize.
+- **Correlated groups.** `evidence.correlation` lists pairs of feature groups whose strongest member-column Spearman correlation on the **training** data is at least 0.5, with its sign. Permutation importance can split credit between correlated groups; consider putting them in one `feature_groups` entry.
+- **SHAP summary** (needs `pip install 'featranker[shap]'`). For each linear model (`LinearExplainer`) and each tree model SHAP's tree explainer supports, including a `Pipeline` whose earlier steps are all `StandardScaler`, `MinMaxScaler`, `MaxAbsScaler`, or `RobustScaler` (any other pipeline step lists the model as unsupported), `models[name]["shap"]` gives every group's `mean_abs` (mean absolute SHAP value, summed over the group's columns) and `direction` (Spearman correlation between a single-column group's value and its SHAP value; positive means higher values push the prediction up). Other models appear in `evidence.shap.unsupported`; there is no model-agnostic fallback. Without `shap`, a `UserWarning` is raised and the rest of the evidence is still computed.
+
+```python
+from sklearn.datasets import load_diabetes
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.linear_model import Ridge
+from sklearn.model_selection import train_test_split
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import StandardScaler
+from sklearn.tree import DecisionTreeRegressor
+
+from featranker import FeatureRanker
+
+data = load_diabetes()
+X_train, X_eval, y_train, y_eval = train_test_split(
+    data.data, data.target, test_size=0.3, random_state=0
+)
+
+ranker = FeatureRanker(
+    task="reg",
+    models={
+        "ridge": make_pipeline(StandardScaler(), Ridge()),
+        "forest": RandomForestRegressor(n_estimators=50, random_state=0),
+        "tree": DecisionTreeRegressor(random_state=0),
+    },
+    evidence=True,
+    verbose=False,
+)
+ranker.fit(X_train, y_train, feature_names=list(data.feature_names))
+report = ranker.rank_features(X_eval, y_eval, scoring="r2", random_state=0)
+
+for name, model in report["models"].items():
+    print(f"{name:>6}  train {model['train_score']:.2f}  eval {model['evaluation_score']:.2f}"
+          f"  overfit gap {model['overfit_gap']:.2f}")
+
+for pair in report["evidence"]["correlation"]["pairs"][:3]:
+    print(pair["groups"], f"rho {pair['rho']:.2f}")
+
+for group, effect in report["models"]["ridge"]["shap"]["groups"].items():
+    print(f"{group:>4}  mean|SHAP| {effect['mean_abs']:5.1f}  direction {effect['direction']:+.2f}")
+
+print([f["code"] for f in report.summary()])
+```
+
+```text
+ ridge  train 0.55  eval 0.39  overfit gap 0.16
+forest  train 0.92  eval 0.29  overfit gap 0.63
+  tree  train 1.00  eval -0.13  overfit gap 1.13
+['s1', 's2'] rho 0.87
+['s3', 's4'] rho -0.81
+['s2', 's4'] rho 0.65
+ age  mean|SHAP|   1.9  direction -1.00
+ sex  mean|SHAP|   9.1  direction -1.00
+ bmi  mean|SHAP|  21.4  direction +1.00
+  bp  mean|SHAP|  10.7  direction +1.00
+  s1  mean|SHAP|  14.3  direction -1.00
+  s2  mean|SHAP|   5.4  direction +1.00
+  s3  mean|SHAP|   4.5  direction -1.00
+  s4  mean|SHAP|   2.5  direction +1.00
+  s5  mean|SHAP|  24.5  direction +1.00
+  s6  mean|SHAP|   0.8  direction +1.00
+['few_families', 'tied_groups', 'tied_groups', 'within_noise', 'overfit', 'correlated_groups']
+```
+
+The unpruned tree fits its training data perfectly (`train 1.00`) and does worse than the dummy on the evaluation data, and the forest also lost most of its training advantage, so `summarize()` adds an `overfit` finding for both. `s1`/`s2` and `s3`/`s4` are correlated, so their permutation importances share credit (`correlated_groups`). For the ridge model, `s5` and `bmi` push predictions up and carry the largest `mean_abs`.
+
+- `mean_abs` and `direction` are computed on at most 1000 evaluation rows, evenly spaced, so they do not depend on `random_state`. For linear models the background is at most 1000 evenly spaced **training** rows (the training distribution, like the tree explainer's own reference), so a linear `mean_abs` is the mean absolute distance from the training mean times the coefficient. `mean_abs` is in the model's own output units (the prediction for regression; log-odds, margin, or probability for classifiers, depending on the model), so compare it between groups within a model, not between models. For multiclass models `mean_abs` is averaged over classes and `direction` is `null`; `direction` is also `null` for multi-column groups and constant features. For binary classification the explained output is the positive class, the second label in sorted order (`label_encoder.classes_[1]`). For linear models `direction` is always +1 or -1, the sign of the coefficient, even when `mean_abs` is near 0, so read it together with `mean_abs`.
+- Evidence costs one extra scoring pass per model, plus SHAP when installed (seconds per model for a large forest). It is off by default, and reports made without it are unchanged.
+- A ranker fitted with `evidence=True` keeps its training matrix, so pickling it stores that data too. With `shadows=True` the stored matrix includes the shadow block, about twice the size.
+- `rank_resampled()` passes the setting to every split, so each `report["splits"][i]["report"]` carries its own evidence; nothing is aggregated across splits.
+- On the command line, add `--evidence`.
+
 <a id="feature-selection"></a>
 
 ## ▍ Feature selection in a pipeline
@@ -391,17 +472,22 @@ Each finding is a dict with `code`, `severity` (`"info"` or `"warning"`), `messa
 |---|---|---|
 | `gate_off` | warning | The dummy baseline failed, so every model voted. |
 | `empty_consensus` | warning | No model beat the dummy. |
-| `failures` | warning for `fit` and `ranking`; info for `initialization` (usually a missing optional library) | One finding per failed stage, listing the models. |
+| `failures` | warning for `fit` and `ranking`; info for `initialization` (usually a missing optional library) and `evidence` (a model's train score could not be computed) | One finding per failed stage, listing the models. |
 | `few_families` | warning | Fewer than 3 model families voted. |
 | `tied_groups` | info | Groups share the same `median_rank`; one finding per tie. `mean_rank` still orders them, and the finding does not measure ranking uncertainty. |
 | `within_noise` | info | In most voting models, the group's mean importance is no greater than its standard deviation across shuffles (`mean <= std`). This flags large relative spread or non-positive importance; it does not prove shuffling left the score unchanged. With `n_repeats=1` the spread is 0, so it only catches importances of 0 or less. |
 | `below_shadow` | info | With [shadows](#shadow-features) on, groups whose `above_shadow_share` is below 0.5. Descriptive, not a significance test. |
+| `overfit` | info | With [evidence](#evidence) on: models that lost at least half of their training advantage over the dummy on the evaluation data, that is `(train_score - evaluation_score) / (train_score - baseline_score) >= 0.5`. Each is listed with its scores and that share. Skipped when `baseline_score` is `None`. |
+| `correlated_groups` | info | With [evidence](#evidence) on: feature groups correlated on the training data (absolute Spearman rho of at least 0.5), whose permutation importance may be split between them. |
 
 An empty list means nothing stood out, not that the ranking is proven. The checks cover one evaluation set.
 
 <a id="llm-interpretation"></a>
 
 ## ▍ LLM interpretation
+
+> [!WARNING]
+> **Deprecated since 1.1; removal in 2.0.** `to_prompt()` and `explain()` emit a `FutureWarning` on every call and otherwise work as before through 1.x. The investigator study behind this feature found that the mechanism [evidence](#evidence), not an LLM, carried the interpretive gains, so FeatRanker is not extending LLM features.
 
 FeatRanker can hand a report to any LLM you choose and check the numbers in the reply. It never calls a model, holds an API key, or imports an LLM library itself.
 

@@ -33,5 +33,14 @@ def test_extras_match_the_registry():
     assert "lightgbm" not in extras
     assert 'all = ["xgboost", "catboost"]' in extras
     assert 'plot = ["matplotlib"]' in extras
+    assert 'shap = ["shap"]' in extras
     for name in ("xgboost", "catboost", "test"):
         assert f"\n{name} = [" in extras
+
+
+def test_test_extra_installs_shap_but_all_does_not():
+    extras = PYPROJECT.split("[project.optional-dependencies]", 1)[1].split("\n[", 1)[0]
+    test_line = next(line for line in extras.splitlines() if line.startswith("test = "))
+
+    assert '"shap"' in test_line
+    assert 'all = ["xgboost", "catboost"]' in extras

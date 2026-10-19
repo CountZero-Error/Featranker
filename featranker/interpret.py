@@ -10,6 +10,7 @@ import copy
 import json
 import math
 import re
+import warnings
 from typing import Any, Callable, Dict, List
 
 from sklearn.metrics import get_scorer_names
@@ -194,6 +195,9 @@ def _anonymize(report: Dict[str, Any], maps: Dict[str, Dict[str, str]]) -> Dict[
         for failure in part.get("failures", []):
             if failure.get("model"):
                 failure["model"] = alias("model", failure["model"])
+        # summarize() names these groups in its correlated_groups finding.
+        for pair in part.get("evidence", {}).get("correlation", {}).get("pairs", []):
+            pair["groups"] = [group[g] for g in pair["groups"]]
         for entry in part.get("splits", []):
             rename(entry["report"])
 
@@ -241,6 +245,8 @@ def _render(report: Dict[str, Any], *, anonymized: bool) -> tuple[str, Dict[str,
 
 def to_prompt(report: Any, *, anonymize: bool = False) -> str:
     """
+    Deprecated since 1.1, to be removed in 2.0.
+
     Build a deterministic LLM prompt for a FeatRanker report.
 
     The prompt carries FeatRanker's interpretation rules, the summarize()
@@ -248,6 +254,11 @@ def to_prompt(report: Any, *, anonymize: bool = False) -> str:
     which every claim cites the data it uses. No network call is made.
     With anonymize=True, group and column names become g1.. and c1...
     """
+    warnings.warn(
+        "to_prompt() is deprecated since 1.1 and will be removed in 2.0.",
+        FutureWarning,
+        stacklevel=2,
+    )
     prompt, _, _ = _prepare(report, anonymize)
     return prompt
 
@@ -359,6 +370,8 @@ def explain(
     report: Any, llm: Callable[[str], str], *, anonymize: bool = False
 ) -> Dict[str, Any]:
     """
+    Deprecated since 1.1, to be removed in 2.0.
+
     Ask your LLM to interpret a report, then check every number it cites.
 
     llm is any function taking the prompt string and returning the reply
@@ -366,6 +379,11 @@ def explain(
     summary and claims, each evidence item and claim with a "verified" flag,
     and "all_verified". Verified numbers do not guarantee a sound reading.
     """
+    warnings.warn(
+        "explain() is deprecated since 1.1 and will be removed in 2.0.",
+        FutureWarning,
+        stacklevel=2,
+    )
     if not callable(llm):
         raise TypeError("[!] llm must be a function taking a prompt string.")
     prompt, view, reverse = _prepare(report, anonymize)

@@ -85,9 +85,10 @@ def test_modern_cli_routes_train_and_eval_data(monkeypatch, tmp_path, capsys):
     calls = {}
 
     class RecordingRanker:
-        def __init__(self, task, group, n_jobs, verbose):
+        def __init__(self, task, group, n_jobs, verbose, evidence):
             calls["constructor"] = (task, group, n_jobs)
             calls["verbose"] = verbose
+            calls["evidence"] = evidence
 
         def fit(self, X, y, feature_names):
             calls["fit"] = (X.copy(), y.copy(), list(feature_names))
@@ -130,6 +131,7 @@ def test_modern_cli_routes_train_and_eval_data(monkeypatch, tmp_path, capsys):
 
     assert calls["constructor"] == ("reg", "tree", 2)
     assert calls["verbose"] is True
+    assert calls["evidence"] is False
     assert np.array_equal(calls["fit"][0], [[1, 2], [4, 5], [7, 8]])
     assert np.array_equal(calls["fit"][1], [3, 6, 9])
     assert calls["fit"][2] == ["a", "b"]
@@ -222,6 +224,39 @@ def test_cli_end_to_end_with_real_ranker_and_registry(monkeypatch, tmp_path):
     assert not [f for f in report["failures"] if f["stage"] in {"fit", "ranking"}]
 
 
+@pytest.mark.filterwarnings("ignore:shap is not installed:UserWarning")
+def test_cli_evidence_flag_writes_evidence(monkeypatch, tmp_path):
+    rng = np.random.default_rng(0)
+
+    def write_csv(path, n_rows):
+        X = rng.normal(size=(n_rows, 2))
+        y = 3.0 * X[:, 0] + 0.1 * rng.normal(size=n_rows)
+        lines = ["signal,noise,target"]
+        lines += [",".join(map(str, [*row, target])) for row, target in zip(X, y)]
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    write_csv(tmp_path / "train.csv", 60)
+    write_csv(tmp_path / "eval.csv", 30)
+    argv = [
+        "featranker", "--task", "reg", "--group", "linear", "--quiet",
+        "--train-data", str(tmp_path / "train.csv"),
+        "--eval-data", str(tmp_path / "eval.csv"),
+        "--target", "target", "--scoring", "r2", "--n-repeats", "2",
+        "--random-state", "0",
+    ]
+
+    reports = {}
+    for flag in ([], ["--evidence"]):
+        output = tmp_path / f"report{len(flag)}.json"
+        monkeypatch.setattr(sys, "argv", [*argv, *flag, "--output", str(output)])
+        assert cli_module.main() == 0
+        reports[len(flag)] = json.loads(output.read_text(encoding="utf-8"))
+
+    assert "evidence" not in reports[0]
+    assert "correlation" in reports[1]["evidence"]
+    assert "train_score" in next(iter(reports[1]["models"].values()))
+
+
 def test_cli_quiet_writes_report_without_progress(monkeypatch, tmp_path, capsys):
     train, evaluation = tmp_path / "train.csv", tmp_path / "eval.csv"
     rows = "\n".join(f"{i},{i % 3},{2 * i}" for i in range(8))
@@ -286,7 +321,7 @@ def test_modern_cli_accepts_eval_class_subset(monkeypatch, tmp_path, capsys):
     monkeypatch.setattr(
         cli_module,
         "FeatureRanker",
-        lambda task, group, n_jobs, verbose: clf_ranker_with_models(
+        lambda task, group, n_jobs, verbose, evidence: clf_ranker_with_models(
             monkeypatch, {"ok": RecordingClassifier()}
         ),
     )
@@ -413,7 +448,7 @@ def test_cli_rejects_unseen_longer_eval_label_with_full_name(
     monkeypatch.setattr(
         cli_module,
         "FeatureRanker",
-        lambda task, group, n_jobs, verbose: clf_ranker_with_models(
+        lambda task, group, n_jobs, verbose, evidence: clf_ranker_with_models(
             monkeypatch, {"ok": RecordingClassifier()}
         ),
     )
