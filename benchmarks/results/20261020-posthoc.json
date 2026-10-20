@@ -1,0 +1,3596 @@
+{
+  "environment": {
+    "featranker": {
+      "version": "1.4.0",
+      "commit": "e486fbf",
+      "dirty": false,
+      "imported_from": "/Users/countzero/Desktop/CodeHouse/Featranker/featranker"
+    },
+    "packages": {
+      "numpy": "1.26.4",
+      "scipy": "1.13.1",
+      "scikit-learn": "1.5.1",
+      "pandas": "2.2.2",
+      "joblib": "1.4.2",
+      "xgboost": "3.1.3",
+      "catboost": "1.2.8",
+      "boruta": "0.4.3",
+      "feature-engine": "1.9.4"
+    },
+    "python": "3.12.7",
+    "platform": "macOS-27.0.1-arm64-arm-64bit",
+    "machine": "arm64",
+    "cpu_count": 10
+  },
+  "settings": {
+    "n_rows": 1000,
+    "n_features": 10,
+    "n_trees": 100,
+    "seeds": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "tasks": [
+      "reg",
+      "clf"
+    ],
+    "variants": [
+      "standard",
+      "hard"
+    ],
+    "selectors": [
+      "featranker_share_fast",
+      "featranker_share_tree"
+    ],
+    "noise_sd": {
+      "standard": 1.0,
+      "hard": 2.0
+    }
+  },
+  "note": "Post-hoc diagnostic (design D6), added after seeing the preregistered results in 20261019.json; not part of the headline comparison.",
+  "warm_up": true,
+  "dropped": [],
+  "started": "2026-10-20T12:07:17",
+  "runs": [
+    {
+      "task": "reg",
+      "variant": "standard",
+      "seed": 0,
+      "selector": "featranker_share_fast",
+      "roles": {
+        "signal": [
+          "f1",
+          "f0",
+          "f9",
+          "f6",
+          "f4"
+        ],
+        "neutral": [
+          "f7"
+        ],
+        "noise": [
+          "f5",
+          "f2",
+          "f8",
+          "f3"
+        ]
+      },
+      "status": "ok",
+      "seconds": 5.657352625043131,
+      "selected": [
+        "f0",
+        "f1",
+        "f4",
+        "f6",
+        "f7",
+        "f9"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6,
+      "diagnostics": {
+        "above_shadow_share": {
+          "a": 1.0,
+          "b": 0.96,
+          "e": 1.0,
+          "c": 0.64,
+          "f": 0.8,
+          "d": 0.64
+        },
+        "family_shares": {
+          "linear": {
+            "b": 0.8,
+            "a": 1.0,
+            "e": 1.0,
+            "d": 0.0,
+            "f": 0.0,
+            "c": 0.2
+          },
+          "kernel": {
+            "b": 1.0,
+            "a": 1.0,
+            "e": 1.0,
+            "d": 1.0,
+            "f": 1.0,
+            "c": 1.0
+          },
+          "single_tree": {
+            "b": 1.0,
+            "a": 1.0,
+            "e": 1.0,
+            "d": 0.4,
+            "f": 1.0,
+            "c": 0.0
+          },
+          "bagging": {
+            "b": 1.0,
+            "a": 1.0,
+            "e": 1.0,
+            "d": 0.8,
+            "f": 1.0,
+            "c": 1.0
+          },
+          "boosting": {
+            "b": 1.0,
+            "a": 1.0,
+            "e": 1.0,
+            "d": 1.0,
+            "f": 1.0,
+            "c": 1.0
+          }
+        }
+      }
+    },
+    {
+      "task": "reg",
+      "variant": "standard",
+      "seed": 0,
+      "selector": "featranker_share_tree",
+      "roles": {
+        "signal": [
+          "f1",
+          "f0",
+          "f9",
+          "f6",
+          "f4"
+        ],
+        "neutral": [
+          "f7"
+        ],
+        "noise": [
+          "f5",
+          "f2",
+          "f8",
+          "f3"
+        ]
+      },
+      "status": "ok",
+      "seconds": 7.708911833004095,
+      "selected": [
+        "f0",
+        "f1",
+        "f4",
+        "f6",
+        "f7",
+        "f9"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6,
+      "diagnostics": {
+        "above_shadow_share": {
+          "a": 1.0,
+          "b": 1.0,
+          "f": 1.0,
+          "e": 1.0,
+          "d": 0.7133333333333334,
+          "c": 0.6266666666666667
+        },
+        "family_shares": {
+          "single_tree": {
+            "b": 1.0,
+            "a": 1.0,
+            "e": 1.0,
+            "d": 0.4,
+            "f": 1.0,
+            "c": 0.0
+          },
+          "bagging": {
+            "b": 1.0,
+            "a": 1.0,
+            "e": 1.0,
+            "d": 0.9,
+            "f": 1.0,
+            "c": 1.0
+          },
+          "boosting": {
+            "b": 1.0,
+            "a": 1.0,
+            "e": 1.0,
+            "d": 0.8400000000000001,
+            "f": 1.0,
+            "c": 0.8799999999999999
+          }
+        }
+      }
+    },
+    {
+      "task": "reg",
+      "variant": "standard",
+      "seed": 1,
+      "selector": "featranker_share_fast",
+      "roles": {
+        "signal": [
+          "f7",
+          "f5",
+          "f9",
+          "f0",
+          "f6"
+        ],
+        "neutral": [
+          "f1"
+        ],
+        "noise": [
+          "f2",
+          "f8",
+          "f3",
+          "f4"
+        ]
+      },
+      "status": "ok",
+      "seconds": 5.643781041027978,
+      "selected": [
+        "f0",
+        "f1",
+        "f5",
+        "f6",
+        "f7",
+        "f9"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6,
+      "diagnostics": {
+        "above_shadow_share": {
+          "a": 1.0,
+          "b": 0.9199999999999999,
+          "f": 0.8400000000000001,
+          "e": 0.9199999999999999,
+          "c": 0.7600000000000001,
+          "d": 0.6
+        },
+        "family_shares": {
+          "linear": {
+            "d": 0.0,
+            "f": 0.4,
+            "b": 0.6,
+            "e": 0.6,
+            "a": 1.0,
+            "c": 0.4
+          },
+          "kernel": {
+            "d": 1.0,
+            "f": 1.0,
+            "b": 1.0,
+            "e": 1.0,
+            "a": 1.0,
+            "c": 1.0
+          },
+          "single_tree": {
+            "d": 0.2,
+            "f": 0.8,
+            "b": 1.0,
+            "e": 1.0,
+            "a": 1.0,
+            "c": 0.6
+          },
+          "bagging": {
+            "d": 0.8,
+            "f": 1.0,
+            "b": 1.0,
+            "e": 1.0,
+            "a": 1.0,
+            "c": 0.8
+          },
+          "boosting": {
+            "d": 1.0,
+            "f": 1.0,
+            "b": 1.0,
+            "e": 1.0,
+            "a": 1.0,
+            "c": 1.0
+          }
+        }
+      }
+    },
+    {
+      "task": "reg",
+      "variant": "standard",
+      "seed": 1,
+      "selector": "featranker_share_tree",
+      "roles": {
+        "signal": [
+          "f7",
+          "f5",
+          "f9",
+          "f0",
+          "f6"
+        ],
+        "neutral": [
+          "f1"
+        ],
+        "noise": [
+          "f2",
+          "f8",
+          "f3",
+          "f4"
+        ]
+      },
+      "status": "ok",
+      "seconds": 8.266658707987517,
+      "selected": [
+        "f0",
+        "f1",
+        "f5",
+        "f6",
+        "f7",
+        "f9"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6,
+      "diagnostics": {
+        "above_shadow_share": {
+          "a": 1.0,
+          "b": 1.0,
+          "e": 1.0,
+          "f": 0.9333333333333332,
+          "c": 0.82,
+          "d": 0.6466666666666666
+        },
+        "family_shares": {
+          "single_tree": {
+            "d": 0.2,
+            "f": 0.8,
+            "b": 1.0,
+            "e": 1.0,
+            "a": 1.0,
+            "c": 0.6
+          },
+          "bagging": {
+            "d": 0.9,
+            "f": 1.0,
+            "b": 1.0,
+            "e": 1.0,
+            "a": 1.0,
+            "c": 0.9
+          },
+          "boosting": {
+            "d": 0.8400000000000001,
+            "f": 1.0,
+            "b": 1.0,
+            "e": 1.0,
+            "a": 1.0,
+            "c": 0.96
+          }
+        }
+      }
+    },
+    {
+      "task": "reg",
+      "variant": "standard",
+      "seed": 2,
+      "selector": "featranker_share_fast",
+      "roles": {
+        "signal": [
+          "f1",
+          "f7",
+          "f4",
+          "f5",
+          "f3"
+        ],
+        "neutral": [
+          "f6"
+        ],
+        "noise": [
+          "f8",
+          "f0",
+          "f9",
+          "f2"
+        ]
+      },
+      "status": "ok",
+      "seconds": 5.669011249905452,
+      "selected": [
+        "f1",
+        "f3",
+        "f4",
+        "f5",
+        "f6",
+        "f7"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6,
+      "diagnostics": {
+        "above_shadow_share": {
+          "a": 1.0,
+          "b": 1.0,
+          "e": 1.0,
+          "f": 0.7200000000000001,
+          "c": 0.6,
+          "d": 0.6799999999999999
+        },
+        "family_shares": {
+          "linear": {
+            "a": 1.0,
+            "e": 1.0,
+            "c": 0.0,
+            "d": 0.0,
+            "f": 0.4,
+            "b": 1.0
+          },
+          "kernel": {
+            "a": 1.0,
+            "e": 1.0,
+            "c": 1.0,
+            "d": 1.0,
+            "f": 1.0,
+            "b": 1.0
+          },
+          "single_tree": {
+            "a": 1.0,
+            "e": 1.0,
+            "c": 0.0,
+            "d": 0.4,
+            "f": 0.4,
+            "b": 1.0
+          },
+          "bagging": {
+            "a": 1.0,
+            "e": 1.0,
+            "c": 1.0,
+            "d": 1.0,
+            "f": 1.0,
+            "b": 1.0
+          },
+          "boosting": {
+            "a": 1.0,
+            "e": 1.0,
+            "c": 1.0,
+            "d": 1.0,
+            "f": 0.8,
+            "b": 1.0
+          }
+        }
+      }
+    },
+    {
+      "task": "reg",
+      "variant": "standard",
+      "seed": 2,
+      "selector": "featranker_share_tree",
+      "roles": {
+        "signal": [
+          "f1",
+          "f7",
+          "f4",
+          "f5",
+          "f3"
+        ],
+        "neutral": [
+          "f6"
+        ],
+        "noise": [
+          "f8",
+          "f0",
+          "f9",
+          "f2"
+        ]
+      },
+      "status": "ok",
+      "seconds": 9.187434207997285,
+      "selected": [
+        "f1",
+        "f3",
+        "f4",
+        "f5",
+        "f6",
+        "f7"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6,
+      "diagnostics": {
+        "above_shadow_share": {
+          "a": 1.0,
+          "b": 1.0,
+          "e": 1.0,
+          "f": 0.7733333333333332,
+          "c": 0.64,
+          "d": 0.7466666666666667
+        },
+        "family_shares": {
+          "single_tree": {
+            "a": 1.0,
+            "e": 1.0,
+            "c": 0.0,
+            "d": 0.4,
+            "f": 0.4,
+            "b": 1.0
+          },
+          "bagging": {
+            "a": 1.0,
+            "e": 1.0,
+            "c": 1.0,
+            "d": 1.0,
+            "f": 1.0,
+            "b": 1.0
+          },
+          "boosting": {
+            "a": 1.0,
+            "e": 1.0,
+            "c": 0.9199999999999999,
+            "d": 0.8400000000000001,
+            "f": 0.9199999999999999,
+            "b": 1.0
+          }
+        }
+      }
+    },
+    {
+      "task": "reg",
+      "variant": "standard",
+      "seed": 3,
+      "selector": "featranker_share_fast",
+      "roles": {
+        "signal": [
+          "f6",
+          "f4",
+          "f7",
+          "f3",
+          "f0"
+        ],
+        "neutral": [
+          "f5"
+        ],
+        "noise": [
+          "f2",
+          "f1",
+          "f8",
+          "f9"
+        ]
+      },
+      "status": "ok",
+      "seconds": 5.731282333959825,
+      "selected": [
+        "f0",
+        "f3",
+        "f4",
+        "f5",
+        "f6",
+        "f7"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6,
+      "diagnostics": {
+        "above_shadow_share": {
+          "a": 1.0,
+          "b": 0.96,
+          "e": 0.9199999999999999,
+          "f": 0.9199999999999999,
+          "d": 0.72,
+          "c": 0.68
+        },
+        "family_shares": {
+          "linear": {
+            "e": 0.6,
+            "d": 0.0,
+            "b": 0.8,
+            "f": 0.8,
+            "a": 1.0,
+            "c": 0.0
+          },
+          "kernel": {
+            "e": 1.0,
+            "d": 1.0,
+            "b": 1.0,
+            "f": 1.0,
+            "a": 1.0,
+            "c": 1.0
+          },
+          "single_tree": {
+            "e": 1.0,
+            "d": 0.6,
+            "b": 1.0,
+            "f": 0.8,
+            "a": 1.0,
+            "c": 0.4
+          },
+          "bagging": {
+            "e": 1.0,
+            "d": 1.0,
+            "b": 1.0,
+            "f": 1.0,
+            "a": 1.0,
+            "c": 1.0
+          },
+          "boosting": {
+            "e": 1.0,
+            "d": 1.0,
+            "b": 1.0,
+            "f": 1.0,
+            "a": 1.0,
+            "c": 1.0
+          }
+        }
+      }
+    },
+    {
+      "task": "reg",
+      "variant": "standard",
+      "seed": 3,
+      "selector": "featranker_share_tree",
+      "roles": {
+        "signal": [
+          "f6",
+          "f4",
+          "f7",
+          "f3",
+          "f0"
+        ],
+        "neutral": [
+          "f5"
+        ],
+        "noise": [
+          "f2",
+          "f1",
+          "f8",
+          "f9"
+        ]
+      },
+      "status": "ok",
+      "seconds": 8.02230354200583,
+      "selected": [
+        "f0",
+        "f3",
+        "f4",
+        "f5",
+        "f6",
+        "f7"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6,
+      "diagnostics": {
+        "above_shadow_share": {
+          "a": 1.0,
+          "b": 1.0,
+          "e": 1.0,
+          "f": 0.9333333333333332,
+          "d": 0.8266666666666665,
+          "c": 0.7466666666666667
+        },
+        "family_shares": {
+          "single_tree": {
+            "e": 1.0,
+            "d": 0.6,
+            "b": 1.0,
+            "f": 0.8,
+            "a": 1.0,
+            "c": 0.4
+          },
+          "bagging": {
+            "e": 1.0,
+            "d": 1.0,
+            "b": 1.0,
+            "f": 1.0,
+            "a": 1.0,
+            "c": 1.0
+          },
+          "boosting": {
+            "e": 1.0,
+            "d": 0.8800000000000001,
+            "b": 1.0,
+            "f": 1.0,
+            "a": 1.0,
+            "c": 0.8400000000000001
+          }
+        }
+      }
+    },
+    {
+      "task": "reg",
+      "variant": "standard",
+      "seed": 4,
+      "selector": "featranker_share_fast",
+      "roles": {
+        "signal": [
+          "f9",
+          "f1",
+          "f0",
+          "f4",
+          "f8"
+        ],
+        "neutral": [
+          "f3"
+        ],
+        "noise": [
+          "f7",
+          "f2",
+          "f6",
+          "f5"
+        ]
+      },
+      "status": "ok",
+      "seconds": 5.971790125011466,
+      "selected": [
+        "f0",
+        "f1",
+        "f3",
+        "f4",
+        "f8",
+        "f9"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6,
+      "diagnostics": {
+        "above_shadow_share": {
+          "a": 1.0,
+          "b": 0.96,
+          "f": 0.8400000000000001,
+          "e": 0.8799999999999999,
+          "c": 0.72,
+          "d": 0.72
+        },
+        "family_shares": {
+          "linear": {
+            "c": 0.0,
+            "b": 0.8,
+            "f": 0.2,
+            "d": 0.0,
+            "e": 1.0,
+            "a": 1.0
+          },
+          "kernel": {
+            "c": 1.0,
+            "b": 1.0,
+            "f": 1.0,
+            "d": 1.0,
+            "e": 1.0,
+            "a": 1.0
+          },
+          "single_tree": {
+            "c": 0.6,
+            "b": 1.0,
+            "f": 1.0,
+            "d": 0.6,
+            "e": 0.4,
+            "a": 1.0
+          },
+          "bagging": {
+            "c": 1.0,
+            "b": 1.0,
+            "f": 1.0,
+            "d": 1.0,
+            "e": 1.0,
+            "a": 1.0
+          },
+          "boosting": {
+            "c": 1.0,
+            "b": 1.0,
+            "f": 1.0,
+            "d": 1.0,
+            "e": 1.0,
+            "a": 1.0
+          }
+        }
+      }
+    },
+    {
+      "task": "reg",
+      "variant": "standard",
+      "seed": 4,
+      "selector": "featranker_share_tree",
+      "roles": {
+        "signal": [
+          "f9",
+          "f1",
+          "f0",
+          "f4",
+          "f8"
+        ],
+        "neutral": [
+          "f3"
+        ],
+        "noise": [
+          "f7",
+          "f2",
+          "f6",
+          "f5"
+        ]
+      },
+      "status": "ok",
+      "seconds": 9.073958958964795,
+      "selected": [
+        "f0",
+        "f1",
+        "f3",
+        "f4",
+        "f8",
+        "f9"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6,
+      "diagnostics": {
+        "above_shadow_share": {
+          "a": 1.0,
+          "b": 1.0,
+          "f": 1.0,
+          "c": 0.8533333333333333,
+          "d": 0.7999999999999999,
+          "e": 0.7999999999999999
+        },
+        "family_shares": {
+          "single_tree": {
+            "c": 0.6,
+            "b": 1.0,
+            "f": 1.0,
+            "d": 0.6,
+            "e": 0.4,
+            "a": 1.0
+          },
+          "bagging": {
+            "c": 1.0,
+            "b": 1.0,
+            "f": 1.0,
+            "d": 1.0,
+            "e": 1.0,
+            "a": 1.0
+          },
+          "boosting": {
+            "c": 0.96,
+            "b": 1.0,
+            "f": 1.0,
+            "d": 0.8,
+            "e": 1.0,
+            "a": 1.0
+          }
+        }
+      }
+    },
+    {
+      "task": "reg",
+      "variant": "hard",
+      "seed": 0,
+      "selector": "featranker_share_fast",
+      "roles": {
+        "signal": [
+          "f1",
+          "f0",
+          "f9",
+          "f6",
+          "f4"
+        ],
+        "neutral": [
+          "f7"
+        ],
+        "noise": [
+          "f5",
+          "f2",
+          "f8",
+          "f3"
+        ]
+      },
+      "status": "ok",
+      "seconds": 6.055935291107744,
+      "selected": [
+        "f0",
+        "f1",
+        "f4",
+        "f6",
+        "f7",
+        "f9"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6,
+      "diagnostics": {
+        "above_shadow_share": {
+          "a": 1.0,
+          "b": 0.9099999999999999,
+          "c": 0.78,
+          "e": 0.8099999999999999,
+          "f": 0.7699999999999999,
+          "d": 0.6799999999999999
+        },
+        "family_shares": {
+          "linear": {
+            "b": 0.6,
+            "a": 1.0,
+            "e": 0.6,
+            "d": 0.0,
+            "f": 0.0,
+            "c": 0.2
+          },
+          "kernel": {
+            "b": 1.0,
+            "a": 1.0,
+            "e": 1.0,
+            "d": 1.0,
+            "f": 1.0,
+            "c": 1.0
+          },
+          "single_tree": {
+            "b": 1.0,
+            "a": 1.0,
+            "e": 0.5,
+            "d": 0.5,
+            "f": 1.0,
+            "c": 0.5
+          },
+          "bagging": {
+            "b": 1.0,
+            "a": 1.0,
+            "e": 1.0,
+            "d": 0.8,
+            "f": 1.0,
+            "c": 1.0
+          },
+          "boosting": {
+            "b": 1.0,
+            "a": 1.0,
+            "e": 0.8,
+            "d": 1.0,
+            "f": 1.0,
+            "c": 1.0
+          }
+        }
+      }
+    },
+    {
+      "task": "reg",
+      "variant": "hard",
+      "seed": 0,
+      "selector": "featranker_share_tree",
+      "roles": {
+        "signal": [
+          "f1",
+          "f0",
+          "f9",
+          "f6",
+          "f4"
+        ],
+        "neutral": [
+          "f7"
+        ],
+        "noise": [
+          "f5",
+          "f2",
+          "f8",
+          "f3"
+        ]
+      },
+      "status": "ok",
+      "seconds": 9.247156291035935,
+      "selected": [
+        "f0",
+        "f1",
+        "f4",
+        "f6",
+        "f7",
+        "f9"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6,
+      "diagnostics": {
+        "above_shadow_share": {
+          "a": 1.0,
+          "b": 1.0,
+          "f": 1.0,
+          "e": 0.8733333333333333,
+          "c": 0.8799999999999999,
+          "d": 0.7466666666666666
+        },
+        "family_shares": {
+          "single_tree": {
+            "b": 1.0,
+            "a": 1.0,
+            "e": 0.5,
+            "d": 0.5,
+            "f": 1.0,
+            "c": 0.5
+          },
+          "bagging": {
+            "b": 1.0,
+            "a": 1.0,
+            "e": 1.0,
+            "d": 0.8,
+            "f": 1.0,
+            "c": 1.0
+          },
+          "boosting": {
+            "b": 1.0,
+            "a": 1.0,
+            "e": 0.8800000000000001,
+            "d": 0.8,
+            "f": 1.0,
+            "c": 0.8800000000000001
+          }
+        }
+      }
+    },
+    {
+      "task": "reg",
+      "variant": "hard",
+      "seed": 1,
+      "selector": "featranker_share_fast",
+      "roles": {
+        "signal": [
+          "f7",
+          "f5",
+          "f9",
+          "f0",
+          "f6"
+        ],
+        "neutral": [
+          "f1"
+        ],
+        "noise": [
+          "f2",
+          "f8",
+          "f3",
+          "f4"
+        ]
+      },
+      "status": "ok",
+      "seconds": 5.5649759999942034,
+      "selected": [
+        "f0",
+        "f1",
+        "f5",
+        "f6",
+        "f7",
+        "f9"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6,
+      "diagnostics": {
+        "above_shadow_share": {
+          "a": 1.0,
+          "b": 0.8699999999999999,
+          "f": 0.8699999999999999,
+          "e": 0.8300000000000001,
+          "c": 0.62,
+          "d": 0.5900000000000001
+        },
+        "family_shares": {
+          "linear": {
+            "d": 0.0,
+            "f": 0.4,
+            "b": 0.4,
+            "e": 0.2,
+            "a": 1.0,
+            "c": 0.0
+          },
+          "kernel": {
+            "d": 1.0,
+            "f": 1.0,
+            "b": 1.0,
+            "e": 1.0,
+            "a": 1.0,
+            "c": 1.0
+          },
+          "single_tree": {
+            "d": 0.25,
+            "f": 1.0,
+            "b": 1.0,
+            "e": 1.0,
+            "a": 1.0,
+            "c": 0.5
+          },
+          "bagging": {
+            "d": 0.6,
+            "f": 1.0,
+            "b": 1.0,
+            "e": 1.0,
+            "a": 1.0,
+            "c": 0.6
+          },
+          "boosting": {
+            "d": 1.0,
+            "f": 1.0,
+            "b": 1.0,
+            "e": 1.0,
+            "a": 1.0,
+            "c": 1.0
+          }
+        }
+      }
+    },
+    {
+      "task": "reg",
+      "variant": "hard",
+      "seed": 1,
+      "selector": "featranker_share_tree",
+      "roles": {
+        "signal": [
+          "f7",
+          "f5",
+          "f9",
+          "f0",
+          "f6"
+        ],
+        "neutral": [
+          "f1"
+        ],
+        "noise": [
+          "f2",
+          "f8",
+          "f3",
+          "f4"
+        ]
+      },
+      "status": "ok",
+      "seconds": 7.5036107919877395,
+      "selected": [
+        "f0",
+        "f1",
+        "f5",
+        "f6",
+        "f7",
+        "f9"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6,
+      "diagnostics": {
+        "above_shadow_share": {
+          "a": 1.0,
+          "b": 1.0,
+          "f": 1.0,
+          "e": 1.0,
+          "c": 0.7433333333333334,
+          "d": 0.6466666666666667
+        },
+        "family_shares": {
+          "single_tree": {
+            "d": 0.25,
+            "f": 1.0,
+            "b": 1.0,
+            "e": 1.0,
+            "a": 1.0,
+            "c": 0.5
+          },
+          "bagging": {
+            "d": 0.7,
+            "f": 1.0,
+            "b": 1.0,
+            "e": 1.0,
+            "a": 1.0,
+            "c": 0.8
+          },
+          "boosting": {
+            "d": 0.8400000000000001,
+            "f": 1.0,
+            "b": 1.0,
+            "e": 1.0,
+            "a": 1.0,
+            "c": 0.8799999999999999
+          }
+        }
+      }
+    },
+    {
+      "task": "reg",
+      "variant": "hard",
+      "seed": 2,
+      "selector": "featranker_share_fast",
+      "roles": {
+        "signal": [
+          "f1",
+          "f7",
+          "f4",
+          "f5",
+          "f3"
+        ],
+        "neutral": [
+          "f6"
+        ],
+        "noise": [
+          "f8",
+          "f0",
+          "f9",
+          "f2"
+        ]
+      },
+      "status": "ok",
+      "seconds": 6.37438083300367,
+      "selected": [
+        "f1",
+        "f3",
+        "f4",
+        "f5",
+        "f6",
+        "f7"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6,
+      "diagnostics": {
+        "above_shadow_share": {
+          "a": 1.0,
+          "b": 1.0,
+          "e": 1.0,
+          "d": 0.7,
+          "f": 0.74,
+          "c": 0.7
+        },
+        "family_shares": {
+          "linear": {
+            "a": 1.0,
+            "e": 1.0,
+            "c": 0.0,
+            "d": 0.0,
+            "f": 0.4,
+            "b": 1.0
+          },
+          "kernel": {
+            "a": 1.0,
+            "e": 1.0,
+            "c": 1.0,
+            "d": 1.0,
+            "f": 1.0,
+            "b": 1.0
+          },
+          "single_tree": {
+            "a": 1.0,
+            "e": 1.0,
+            "c": 0.3333333333333333,
+            "d": 0.3333333333333333,
+            "f": 0.3333333333333333,
+            "b": 1.0
+          },
+          "bagging": {
+            "a": 1.0,
+            "e": 1.0,
+            "c": 1.0,
+            "d": 1.0,
+            "f": 1.0,
+            "b": 1.0
+          },
+          "boosting": {
+            "a": 1.0,
+            "e": 1.0,
+            "c": 1.0,
+            "d": 1.0,
+            "f": 0.8,
+            "b": 1.0
+          }
+        }
+      }
+    },
+    {
+      "task": "reg",
+      "variant": "hard",
+      "seed": 2,
+      "selector": "featranker_share_tree",
+      "roles": {
+        "signal": [
+          "f1",
+          "f7",
+          "f4",
+          "f5",
+          "f3"
+        ],
+        "neutral": [
+          "f6"
+        ],
+        "noise": [
+          "f8",
+          "f0",
+          "f9",
+          "f2"
+        ]
+      },
+      "status": "ok",
+      "seconds": 8.107216750038788,
+      "selected": [
+        "f1",
+        "f3",
+        "f4",
+        "f5",
+        "f6",
+        "f7"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6,
+      "diagnostics": {
+        "above_shadow_share": {
+          "a": 1.0,
+          "b": 1.0,
+          "e": 1.0,
+          "d": 0.82,
+          "c": 0.8266666666666665,
+          "f": 0.8133333333333332
+        },
+        "family_shares": {
+          "single_tree": {
+            "a": 1.0,
+            "e": 1.0,
+            "c": 0.3333333333333333,
+            "d": 0.3333333333333333,
+            "f": 0.3333333333333333,
+            "b": 1.0
+          },
+          "bagging": {
+            "a": 1.0,
+            "e": 1.0,
+            "c": 1.0,
+            "d": 1.0,
+            "f": 1.0,
+            "b": 1.0
+          },
+          "boosting": {
+            "a": 1.0,
+            "e": 1.0,
+            "c": 0.8800000000000001,
+            "d": 0.8799999999999999,
+            "f": 0.8800000000000001,
+            "b": 1.0
+          }
+        }
+      }
+    },
+    {
+      "task": "reg",
+      "variant": "hard",
+      "seed": 3,
+      "selector": "featranker_share_fast",
+      "roles": {
+        "signal": [
+          "f6",
+          "f4",
+          "f7",
+          "f3",
+          "f0"
+        ],
+        "neutral": [
+          "f5"
+        ],
+        "noise": [
+          "f2",
+          "f1",
+          "f8",
+          "f9"
+        ]
+      },
+      "status": "ok",
+      "seconds": 5.772873790934682,
+      "selected": [
+        "f0",
+        "f3",
+        "f4",
+        "f5",
+        "f6",
+        "f7"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6,
+      "diagnostics": {
+        "above_shadow_share": {
+          "a": 0.95,
+          "b": 0.95,
+          "e": 0.8,
+          "d": 0.76,
+          "f": 0.8099999999999999,
+          "c": 0.76
+        },
+        "family_shares": {
+          "linear": {
+            "e": 0.4,
+            "d": 0.0,
+            "b": 0.8,
+            "f": 0.2,
+            "a": 0.8,
+            "c": 0.0
+          },
+          "kernel": {
+            "e": 1.0,
+            "d": 1.0,
+            "b": 1.0,
+            "f": 1.0,
+            "a": 1.0,
+            "c": 1.0
+          },
+          "bagging": {
+            "e": 0.8,
+            "d": 1.0,
+            "b": 1.0,
+            "f": 1.0,
+            "a": 1.0,
+            "c": 1.0
+          },
+          "boosting": {
+            "e": 1.0,
+            "d": 1.0,
+            "b": 1.0,
+            "f": 1.0,
+            "a": 1.0,
+            "c": 1.0
+          },
+          "single_tree": {
+            "e": 1.0,
+            "d": 1.0,
+            "b": 1.0,
+            "f": 1.0,
+            "a": 1.0,
+            "c": 1.0
+          }
+        }
+      }
+    },
+    {
+      "task": "reg",
+      "variant": "hard",
+      "seed": 3,
+      "selector": "featranker_share_tree",
+      "roles": {
+        "signal": [
+          "f6",
+          "f4",
+          "f7",
+          "f3",
+          "f0"
+        ],
+        "neutral": [
+          "f5"
+        ],
+        "noise": [
+          "f2",
+          "f1",
+          "f8",
+          "f9"
+        ]
+      },
+      "status": "ok",
+      "seconds": 9.365392082952894,
+      "selected": [
+        "f0",
+        "f3",
+        "f4",
+        "f5",
+        "f6",
+        "f7"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6,
+      "diagnostics": {
+        "above_shadow_share": {
+          "a": 1.0,
+          "b": 1.0,
+          "f": 1.0,
+          "e": 0.95,
+          "d": 0.96,
+          "c": 0.9466666666666667
+        },
+        "family_shares": {
+          "bagging": {
+            "e": 0.9,
+            "d": 1.0,
+            "b": 1.0,
+            "f": 1.0,
+            "a": 1.0,
+            "c": 1.0
+          },
+          "boosting": {
+            "e": 1.0,
+            "d": 0.9199999999999999,
+            "b": 1.0,
+            "f": 1.0,
+            "a": 1.0,
+            "c": 0.8800000000000001
+          },
+          "single_tree": {
+            "e": 1.0,
+            "d": 1.0,
+            "b": 1.0,
+            "f": 1.0,
+            "a": 1.0,
+            "c": 1.0
+          }
+        }
+      }
+    },
+    {
+      "task": "reg",
+      "variant": "hard",
+      "seed": 4,
+      "selector": "featranker_share_fast",
+      "roles": {
+        "signal": [
+          "f9",
+          "f1",
+          "f0",
+          "f4",
+          "f8"
+        ],
+        "neutral": [
+          "f3"
+        ],
+        "noise": [
+          "f7",
+          "f2",
+          "f6",
+          "f5"
+        ]
+      },
+      "status": "ok",
+      "seconds": 5.597768165986054,
+      "selected": [
+        "f0",
+        "f1",
+        "f3",
+        "f4",
+        "f8",
+        "f9"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6,
+      "diagnostics": {
+        "above_shadow_share": {
+          "a": 1.0,
+          "b": 0.95,
+          "f": 0.9099999999999999,
+          "e": 0.86,
+          "c": 0.72,
+          "d": 0.72
+        },
+        "family_shares": {
+          "linear": {
+            "c": 0.0,
+            "b": 0.8,
+            "f": 0.6,
+            "d": 0.0,
+            "e": 0.4,
+            "a": 1.0
+          },
+          "kernel": {
+            "c": 1.0,
+            "b": 1.0,
+            "f": 1.0,
+            "d": 1.0,
+            "e": 1.0,
+            "a": 1.0
+          },
+          "bagging": {
+            "c": 1.0,
+            "b": 1.0,
+            "f": 1.0,
+            "d": 1.0,
+            "e": 1.0,
+            "a": 1.0
+          },
+          "boosting": {
+            "c": 1.0,
+            "b": 1.0,
+            "f": 1.0,
+            "d": 1.0,
+            "e": 1.0,
+            "a": 1.0
+          },
+          "single_tree": {
+            "c": 0.0,
+            "b": 1.0,
+            "f": 1.0,
+            "d": 0.0,
+            "e": 1.0,
+            "a": 1.0
+          }
+        }
+      }
+    },
+    {
+      "task": "reg",
+      "variant": "hard",
+      "seed": 4,
+      "selector": "featranker_share_tree",
+      "roles": {
+        "signal": [
+          "f9",
+          "f1",
+          "f0",
+          "f4",
+          "f8"
+        ],
+        "neutral": [
+          "f3"
+        ],
+        "noise": [
+          "f7",
+          "f2",
+          "f6",
+          "f5"
+        ]
+      },
+      "status": "ok",
+      "seconds": 7.531791499932297,
+      "selected": [
+        "f0",
+        "f1",
+        "f3",
+        "f4",
+        "f8",
+        "f9"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6,
+      "diagnostics": {
+        "above_shadow_share": {
+          "a": 1.0,
+          "b": 1.0,
+          "f": 1.0,
+          "e": 0.9800000000000001,
+          "c": 0.8933333333333333,
+          "d": 0.8799999999999999
+        },
+        "family_shares": {
+          "bagging": {
+            "c": 1.0,
+            "b": 1.0,
+            "f": 1.0,
+            "d": 1.0,
+            "e": 1.0,
+            "a": 1.0
+          },
+          "boosting": {
+            "c": 0.9199999999999999,
+            "b": 1.0,
+            "f": 1.0,
+            "d": 0.8799999999999999,
+            "e": 0.96,
+            "a": 1.0
+          },
+          "single_tree": {
+            "c": 0.0,
+            "b": 1.0,
+            "f": 1.0,
+            "d": 0.0,
+            "e": 1.0,
+            "a": 1.0
+          }
+        }
+      }
+    },
+    {
+      "task": "clf",
+      "variant": "standard",
+      "seed": 0,
+      "selector": "featranker_share_fast",
+      "roles": {
+        "signal": [
+          "f1",
+          "f0",
+          "f9",
+          "f6",
+          "f4"
+        ],
+        "neutral": [
+          "f7"
+        ],
+        "noise": [
+          "f5",
+          "f2",
+          "f8",
+          "f3"
+        ]
+      },
+      "status": "ok",
+      "seconds": 3.137197333970107,
+      "selected": [
+        "f0",
+        "f1",
+        "f4",
+        "f7"
+      ],
+      "recall": 0.6,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 4,
+      "diagnostics": {
+        "above_shadow_share": {
+          "a": 1.0,
+          "b": 0.9714285714285715,
+          "e": 0.8857142857142858,
+          "f": 0.6857142857142857,
+          "c": 0.48571428571428577,
+          "d": 0.3142857142857142
+        },
+        "family_shares": {
+          "logistic": {
+            "b": 1.0,
+            "a": 1.0,
+            "e": 1.0,
+            "d": 0.0,
+            "f": 0.8,
+            "c": 0.4
+          },
+          "linear_margin": {
+            "b": 1.0,
+            "a": 1.0,
+            "e": 0.8,
+            "d": 0.0,
+            "f": 0.2,
+            "c": 0.4
+          },
+          "discriminant": {
+            "b": 1.0,
+            "a": 1.0,
+            "e": 0.8,
+            "d": 0.0,
+            "f": 0.2,
+            "c": 0.2
+          },
+          "naive_bayes": {
+            "b": 1.0,
+            "a": 1.0,
+            "e": 1.0,
+            "d": 0.2,
+            "f": 1.0,
+            "c": 0.0
+          },
+          "single_tree": {
+            "b": 0.8,
+            "a": 1.0,
+            "e": 0.8,
+            "d": 0.2,
+            "f": 0.8,
+            "c": 0.4
+          },
+          "bagging": {
+            "b": 1.0,
+            "a": 1.0,
+            "e": 0.8,
+            "d": 0.8,
+            "f": 1.0,
+            "c": 1.0
+          },
+          "boosting": {
+            "b": 1.0,
+            "a": 1.0,
+            "e": 1.0,
+            "d": 1.0,
+            "f": 0.8,
+            "c": 1.0
+          }
+        }
+      }
+    },
+    {
+      "task": "clf",
+      "variant": "standard",
+      "seed": 0,
+      "selector": "featranker_share_tree",
+      "roles": {
+        "signal": [
+          "f1",
+          "f0",
+          "f9",
+          "f6",
+          "f4"
+        ],
+        "neutral": [
+          "f7"
+        ],
+        "noise": [
+          "f5",
+          "f2",
+          "f8",
+          "f3"
+        ]
+      },
+      "status": "ok",
+      "seconds": 7.874989292002283,
+      "selected": [
+        "f0",
+        "f1",
+        "f4",
+        "f6",
+        "f7",
+        "f9"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6,
+      "diagnostics": {
+        "above_shadow_share": {
+          "a": 1.0,
+          "b": 0.9333333333333332,
+          "e": 0.8755555555555556,
+          "f": 0.8577777777777778,
+          "c": 0.7244444444444443,
+          "d": 0.5555555555555556
+        },
+        "family_shares": {
+          "single_tree": {
+            "b": 0.8,
+            "a": 1.0,
+            "e": 0.8,
+            "d": 0.2,
+            "f": 0.8,
+            "c": 0.4
+          },
+          "bagging": {
+            "b": 1.0,
+            "a": 1.0,
+            "e": 0.8666666666666666,
+            "d": 0.6666666666666666,
+            "f": 0.9333333333333332,
+            "c": 0.9333333333333332
+          },
+          "boosting": {
+            "b": 1.0,
+            "a": 1.0,
+            "e": 0.96,
+            "d": 0.8,
+            "f": 0.8400000000000001,
+            "c": 0.8400000000000001
+          }
+        }
+      }
+    },
+    {
+      "task": "clf",
+      "variant": "standard",
+      "seed": 1,
+      "selector": "featranker_share_fast",
+      "roles": {
+        "signal": [
+          "f7",
+          "f5",
+          "f9",
+          "f0",
+          "f6"
+        ],
+        "neutral": [
+          "f1"
+        ],
+        "noise": [
+          "f2",
+          "f8",
+          "f3",
+          "f4"
+        ]
+      },
+      "status": "ok",
+      "seconds": 3.2934844159753993,
+      "selected": [
+        "f5",
+        "f6",
+        "f7"
+      ],
+      "recall": 0.6,
+      "noise_selected": 0,
+      "neutral_selected": 0,
+      "n_selected": 3,
+      "diagnostics": {
+        "above_shadow_share": {
+          "a": 1.0,
+          "b": 0.8285714285714285,
+          "e": 0.7428571428571429,
+          "f": 0.45714285714285713,
+          "c": 0.4,
+          "d": 0.2857142857142857
+        },
+        "family_shares": {
+          "logistic": {
+            "d": 0.0,
+            "f": 0.2,
+            "b": 1.0,
+            "e": 0.8,
+            "a": 1.0,
+            "c": 0.0
+          },
+          "linear_margin": {
+            "d": 0.0,
+            "f": 0.0,
+            "b": 0.6,
+            "e": 0.6,
+            "a": 1.0,
+            "c": 0.0
+          },
+          "discriminant": {
+            "d": 0.0,
+            "f": 0.0,
+            "b": 0.2,
+            "e": 0.6,
+            "a": 1.0,
+            "c": 0.0
+          },
+          "naive_bayes": {
+            "d": 0.0,
+            "f": 0.8,
+            "b": 1.0,
+            "e": 0.8,
+            "a": 1.0,
+            "c": 0.2
+          },
+          "single_tree": {
+            "d": 0.4,
+            "f": 0.4,
+            "b": 1.0,
+            "e": 0.6,
+            "a": 1.0,
+            "c": 0.6
+          },
+          "bagging": {
+            "d": 0.6,
+            "f": 0.8,
+            "b": 1.0,
+            "e": 0.8,
+            "a": 1.0,
+            "c": 1.0
+          },
+          "boosting": {
+            "d": 1.0,
+            "f": 1.0,
+            "b": 1.0,
+            "e": 1.0,
+            "a": 1.0,
+            "c": 1.0
+          }
+        }
+      }
+    },
+    {
+      "task": "clf",
+      "variant": "standard",
+      "seed": 1,
+      "selector": "featranker_share_tree",
+      "roles": {
+        "signal": [
+          "f7",
+          "f5",
+          "f9",
+          "f0",
+          "f6"
+        ],
+        "neutral": [
+          "f1"
+        ],
+        "noise": [
+          "f2",
+          "f8",
+          "f3",
+          "f4"
+        ]
+      },
+      "status": "ok",
+      "seconds": 7.888498874963261,
+      "selected": [
+        "f0",
+        "f1",
+        "f5",
+        "f6",
+        "f7",
+        "f9"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6,
+      "diagnostics": {
+        "above_shadow_share": {
+          "a": 1.0,
+          "b": 1.0,
+          "e": 0.7866666666666666,
+          "c": 0.7644444444444444,
+          "d": 0.64,
+          "f": 0.6799999999999999
+        },
+        "family_shares": {
+          "single_tree": {
+            "d": 0.4,
+            "f": 0.4,
+            "b": 1.0,
+            "e": 0.6,
+            "a": 1.0,
+            "c": 0.6
+          },
+          "bagging": {
+            "d": 0.8,
+            "f": 0.8,
+            "b": 1.0,
+            "e": 0.8,
+            "a": 1.0,
+            "c": 0.9333333333333333
+          },
+          "boosting": {
+            "d": 0.72,
+            "f": 0.8400000000000001,
+            "b": 1.0,
+            "e": 0.96,
+            "a": 1.0,
+            "c": 0.76
+          }
+        }
+      }
+    },
+    {
+      "task": "clf",
+      "variant": "standard",
+      "seed": 2,
+      "selector": "featranker_share_fast",
+      "roles": {
+        "signal": [
+          "f1",
+          "f7",
+          "f4",
+          "f5",
+          "f3"
+        ],
+        "neutral": [
+          "f6"
+        ],
+        "noise": [
+          "f8",
+          "f0",
+          "f9",
+          "f2"
+        ]
+      },
+      "status": "ok",
+      "seconds": 3.5782413330161944,
+      "selected": [
+        "f1",
+        "f3",
+        "f6",
+        "f7"
+      ],
+      "recall": 0.6,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 4,
+      "diagnostics": {
+        "above_shadow_share": {
+          "a": 1.0,
+          "b": 0.8285714285714285,
+          "e": 0.9142857142857143,
+          "f": 0.5428571428571428,
+          "d": 0.39999999999999997,
+          "c": 0.37142857142857144
+        },
+        "family_shares": {
+          "logistic": {
+            "a": 1.0,
+            "e": 1.0,
+            "c": 0.0,
+            "d": 0.0,
+            "f": 0.6,
+            "b": 0.8
+          },
+          "linear_margin": {
+            "a": 1.0,
+            "e": 0.8,
+            "c": 0.0,
+            "d": 0.0,
+            "f": 0.0,
+            "b": 0.6
+          },
+          "discriminant": {
+            "a": 1.0,
+            "e": 0.8,
+            "c": 0.0,
+            "d": 0.0,
+            "f": 0.0,
+            "b": 0.6
+          },
+          "naive_bayes": {
+            "a": 1.0,
+            "e": 1.0,
+            "c": 0.0,
+            "d": 0.4,
+            "f": 1.0,
+            "b": 1.0
+          },
+          "single_tree": {
+            "a": 1.0,
+            "e": 0.8,
+            "c": 0.8,
+            "d": 0.8,
+            "f": 0.6,
+            "b": 0.8
+          },
+          "bagging": {
+            "a": 1.0,
+            "e": 1.0,
+            "c": 0.8,
+            "d": 0.6,
+            "f": 1.0,
+            "b": 1.0
+          },
+          "boosting": {
+            "a": 1.0,
+            "e": 1.0,
+            "c": 1.0,
+            "d": 1.0,
+            "f": 0.6,
+            "b": 1.0
+          }
+        }
+      }
+    },
+    {
+      "task": "clf",
+      "variant": "standard",
+      "seed": 2,
+      "selector": "featranker_share_tree",
+      "roles": {
+        "signal": [
+          "f1",
+          "f7",
+          "f4",
+          "f5",
+          "f3"
+        ],
+        "neutral": [
+          "f6"
+        ],
+        "noise": [
+          "f8",
+          "f0",
+          "f9",
+          "f2"
+        ]
+      },
+      "status": "ok",
+      "seconds": 8.173635125043802,
+      "selected": [
+        "f1",
+        "f3",
+        "f4",
+        "f5",
+        "f6",
+        "f7"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6,
+      "diagnostics": {
+        "above_shadow_share": {
+          "a": 1.0,
+          "b": 0.9333333333333332,
+          "e": 0.8977777777777778,
+          "f": 0.8,
+          "d": 0.8044444444444444,
+          "c": 0.7644444444444444
+        },
+        "family_shares": {
+          "single_tree": {
+            "a": 1.0,
+            "e": 0.8,
+            "c": 0.8,
+            "d": 0.8,
+            "f": 0.6,
+            "b": 0.8
+          },
+          "bagging": {
+            "a": 1.0,
+            "e": 0.9333333333333332,
+            "c": 0.7333333333333333,
+            "d": 0.7333333333333333,
+            "f": 1.0,
+            "b": 1.0
+          },
+          "boosting": {
+            "a": 1.0,
+            "e": 0.96,
+            "c": 0.76,
+            "d": 0.8800000000000001,
+            "f": 0.8,
+            "b": 1.0
+          }
+        }
+      }
+    },
+    {
+      "task": "clf",
+      "variant": "standard",
+      "seed": 3,
+      "selector": "featranker_share_fast",
+      "roles": {
+        "signal": [
+          "f6",
+          "f4",
+          "f7",
+          "f3",
+          "f0"
+        ],
+        "neutral": [
+          "f5"
+        ],
+        "noise": [
+          "f2",
+          "f1",
+          "f8",
+          "f9"
+        ]
+      },
+      "status": "ok",
+      "seconds": 3.1476096250116825,
+      "selected": [
+        "f4",
+        "f5",
+        "f6"
+      ],
+      "recall": 0.4,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 3,
+      "diagnostics": {
+        "above_shadow_share": {
+          "a": 1.0,
+          "b": 1.0,
+          "f": 1.0,
+          "e": 0.48571428571428565,
+          "d": 0.2857142857142857,
+          "c": 0.37142857142857144
+        },
+        "family_shares": {
+          "logistic": {
+            "e": 0.0,
+            "d": 0.0,
+            "b": 1.0,
+            "f": 1.0,
+            "a": 1.0,
+            "c": 0.0
+          },
+          "linear_margin": {
+            "e": 0.2,
+            "d": 0.0,
+            "b": 1.0,
+            "f": 1.0,
+            "a": 1.0,
+            "c": 0.0
+          },
+          "discriminant": {
+            "e": 0.4,
+            "d": 0.0,
+            "b": 1.0,
+            "f": 1.0,
+            "a": 1.0,
+            "c": 0.0
+          },
+          "naive_bayes": {
+            "e": 0.8,
+            "d": 0.0,
+            "b": 1.0,
+            "f": 1.0,
+            "a": 1.0,
+            "c": 0.0
+          },
+          "single_tree": {
+            "e": 0.8,
+            "d": 0.2,
+            "b": 1.0,
+            "f": 1.0,
+            "a": 1.0,
+            "c": 0.6
+          },
+          "bagging": {
+            "e": 0.4,
+            "d": 0.8,
+            "b": 1.0,
+            "f": 1.0,
+            "a": 1.0,
+            "c": 1.0
+          },
+          "boosting": {
+            "e": 0.8,
+            "d": 1.0,
+            "b": 1.0,
+            "f": 1.0,
+            "a": 1.0,
+            "c": 1.0
+          }
+        }
+      }
+    },
+    {
+      "task": "clf",
+      "variant": "standard",
+      "seed": 3,
+      "selector": "featranker_share_tree",
+      "roles": {
+        "signal": [
+          "f6",
+          "f4",
+          "f7",
+          "f3",
+          "f0"
+        ],
+        "neutral": [
+          "f5"
+        ],
+        "noise": [
+          "f2",
+          "f1",
+          "f8",
+          "f9"
+        ]
+      },
+      "status": "ok",
+      "seconds": 8.08595258393325,
+      "selected": [
+        "f0",
+        "f3",
+        "f4",
+        "f5",
+        "f6",
+        "f7"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6,
+      "diagnostics": {
+        "above_shadow_share": {
+          "a": 1.0,
+          "b": 1.0,
+          "f": 1.0,
+          "c": 0.72,
+          "d": 0.5644444444444445,
+          "e": 0.7022222222222222
+        },
+        "family_shares": {
+          "single_tree": {
+            "e": 0.8,
+            "d": 0.2,
+            "b": 1.0,
+            "f": 1.0,
+            "a": 1.0,
+            "c": 0.6
+          },
+          "bagging": {
+            "e": 0.6666666666666666,
+            "d": 0.7333333333333333,
+            "b": 1.0,
+            "f": 1.0,
+            "a": 1.0,
+            "c": 0.7999999999999999
+          },
+          "boosting": {
+            "e": 0.64,
+            "d": 0.7600000000000001,
+            "b": 1.0,
+            "f": 1.0,
+            "a": 1.0,
+            "c": 0.76
+          }
+        }
+      }
+    },
+    {
+      "task": "clf",
+      "variant": "standard",
+      "seed": 4,
+      "selector": "featranker_share_fast",
+      "roles": {
+        "signal": [
+          "f9",
+          "f1",
+          "f0",
+          "f4",
+          "f8"
+        ],
+        "neutral": [
+          "f3"
+        ],
+        "noise": [
+          "f7",
+          "f2",
+          "f6",
+          "f5"
+        ]
+      },
+      "status": "ok",
+      "seconds": 3.1328271250240505,
+      "selected": [
+        "f1",
+        "f8",
+        "f9"
+      ],
+      "recall": 0.6,
+      "noise_selected": 0,
+      "neutral_selected": 0,
+      "n_selected": 3,
+      "diagnostics": {
+        "above_shadow_share": {
+          "a": 0.9714285714285715,
+          "b": 0.9142857142857143,
+          "e": 0.9714285714285715,
+          "f": 0.39999999999999997,
+          "c": 0.42857142857142855,
+          "d": 0.3142857142857143
+        },
+        "family_shares": {
+          "logistic": {
+            "c": 0.0,
+            "b": 1.0,
+            "f": 0.0,
+            "d": 0.0,
+            "e": 1.0,
+            "a": 1.0
+          },
+          "linear_margin": {
+            "c": 0.0,
+            "b": 0.8,
+            "f": 0.2,
+            "d": 0.0,
+            "e": 1.0,
+            "a": 1.0
+          },
+          "discriminant": {
+            "c": 0.0,
+            "b": 0.6,
+            "f": 0.2,
+            "d": 0.0,
+            "e": 1.0,
+            "a": 0.8
+          },
+          "naive_bayes": {
+            "c": 0.2,
+            "b": 1.0,
+            "f": 0.8,
+            "d": 0.0,
+            "e": 0.8,
+            "a": 1.0
+          },
+          "single_tree": {
+            "c": 0.8,
+            "b": 1.0,
+            "f": 0.4,
+            "d": 0.4,
+            "e": 1.0,
+            "a": 1.0
+          },
+          "bagging": {
+            "c": 1.0,
+            "b": 1.0,
+            "f": 0.8,
+            "d": 0.8,
+            "e": 1.0,
+            "a": 1.0
+          },
+          "boosting": {
+            "c": 1.0,
+            "b": 1.0,
+            "f": 0.4,
+            "d": 1.0,
+            "e": 1.0,
+            "a": 1.0
+          }
+        }
+      }
+    },
+    {
+      "task": "clf",
+      "variant": "standard",
+      "seed": 4,
+      "selector": "featranker_share_tree",
+      "roles": {
+        "signal": [
+          "f9",
+          "f1",
+          "f0",
+          "f4",
+          "f8"
+        ],
+        "neutral": [
+          "f3"
+        ],
+        "noise": [
+          "f7",
+          "f2",
+          "f6",
+          "f5"
+        ]
+      },
+      "status": "ok",
+      "seconds": 8.012850417057052,
+      "selected": [
+        "f0",
+        "f1",
+        "f3",
+        "f4",
+        "f8",
+        "f9"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6,
+      "diagnostics": {
+        "above_shadow_share": {
+          "a": 1.0,
+          "b": 1.0,
+          "e": 0.9777777777777779,
+          "c": 0.8799999999999999,
+          "d": 0.6799999999999999,
+          "f": 0.5022222222222222
+        },
+        "family_shares": {
+          "single_tree": {
+            "c": 0.8,
+            "b": 1.0,
+            "f": 0.4,
+            "d": 0.4,
+            "e": 1.0,
+            "a": 1.0
+          },
+          "bagging": {
+            "c": 1.0,
+            "b": 1.0,
+            "f": 0.6666666666666666,
+            "d": 0.8,
+            "e": 0.9333333333333333,
+            "a": 1.0
+          },
+          "boosting": {
+            "c": 0.8400000000000001,
+            "b": 1.0,
+            "f": 0.44000000000000006,
+            "d": 0.8400000000000001,
+            "e": 1.0,
+            "a": 1.0
+          }
+        }
+      }
+    },
+    {
+      "task": "clf",
+      "variant": "hard",
+      "seed": 0,
+      "selector": "featranker_share_fast",
+      "roles": {
+        "signal": [
+          "f1",
+          "f0",
+          "f9",
+          "f6",
+          "f4"
+        ],
+        "neutral": [
+          "f7"
+        ],
+        "noise": [
+          "f5",
+          "f2",
+          "f8",
+          "f3"
+        ]
+      },
+      "status": "ok",
+      "seconds": 3.16828758304473,
+      "selected": [
+        "f0",
+        "f1",
+        "f4",
+        "f7"
+      ],
+      "recall": 0.6,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 4,
+      "diagnostics": {
+        "above_shadow_share": {
+          "a": 1.0,
+          "b": 0.9428571428571428,
+          "e": 0.7142857142857142,
+          "f": 0.5428571428571428,
+          "c": 0.34285714285714286,
+          "d": 0.3142857142857142
+        },
+        "family_shares": {
+          "logistic": {
+            "b": 1.0,
+            "a": 1.0,
+            "e": 0.8,
+            "d": 0.0,
+            "f": 0.4,
+            "c": 0.2
+          },
+          "linear_margin": {
+            "b": 1.0,
+            "a": 1.0,
+            "e": 0.8,
+            "d": 0.0,
+            "f": 0.0,
+            "c": 0.0
+          },
+          "discriminant": {
+            "b": 0.8,
+            "a": 1.0,
+            "e": 0.8,
+            "d": 0.0,
+            "f": 0.0,
+            "c": 0.0
+          },
+          "naive_bayes": {
+            "b": 1.0,
+            "a": 1.0,
+            "e": 0.8,
+            "d": 0.4,
+            "f": 1.0,
+            "c": 0.0
+          },
+          "single_tree": {
+            "b": 0.8,
+            "a": 1.0,
+            "e": 0.4,
+            "d": 0.0,
+            "f": 0.4,
+            "c": 0.4
+          },
+          "bagging": {
+            "b": 1.0,
+            "a": 1.0,
+            "e": 0.6,
+            "d": 0.8,
+            "f": 1.0,
+            "c": 0.8
+          },
+          "boosting": {
+            "b": 1.0,
+            "a": 1.0,
+            "e": 0.8,
+            "d": 1.0,
+            "f": 1.0,
+            "c": 1.0
+          }
+        }
+      }
+    },
+    {
+      "task": "clf",
+      "variant": "hard",
+      "seed": 0,
+      "selector": "featranker_share_tree",
+      "roles": {
+        "signal": [
+          "f1",
+          "f0",
+          "f9",
+          "f6",
+          "f4"
+        ],
+        "neutral": [
+          "f7"
+        ],
+        "noise": [
+          "f5",
+          "f2",
+          "f8",
+          "f3"
+        ]
+      },
+      "status": "ok",
+      "seconds": 8.655160624999553,
+      "selected": [
+        "f0",
+        "f1",
+        "f4",
+        "f7",
+        "f9"
+      ],
+      "recall": 0.8,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 5,
+      "diagnostics": {
+        "above_shadow_share": {
+          "a": 1.0,
+          "b": 0.9333333333333333,
+          "c": 0.6711111111111111,
+          "f": 0.7288888888888889,
+          "e": 0.5822222222222222,
+          "d": 0.48
+        },
+        "family_shares": {
+          "single_tree": {
+            "b": 0.8,
+            "a": 1.0,
+            "e": 0.4,
+            "d": 0.0,
+            "f": 0.4,
+            "c": 0.4
+          },
+          "bagging": {
+            "b": 1.0,
+            "a": 1.0,
+            "e": 0.6666666666666666,
+            "d": 0.6,
+            "f": 0.8666666666666666,
+            "c": 0.7333333333333333
+          },
+          "boosting": {
+            "b": 1.0,
+            "a": 1.0,
+            "e": 0.68,
+            "d": 0.8400000000000001,
+            "f": 0.9199999999999999,
+            "c": 0.8800000000000001
+          }
+        }
+      }
+    },
+    {
+      "task": "clf",
+      "variant": "hard",
+      "seed": 1,
+      "selector": "featranker_share_fast",
+      "roles": {
+        "signal": [
+          "f7",
+          "f5",
+          "f9",
+          "f0",
+          "f6"
+        ],
+        "neutral": [
+          "f1"
+        ],
+        "noise": [
+          "f2",
+          "f8",
+          "f3",
+          "f4"
+        ]
+      },
+      "status": "ok",
+      "seconds": 3.142117917072028,
+      "selected": [
+        "f1",
+        "f5",
+        "f6",
+        "f7"
+      ],
+      "recall": 0.6,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 4,
+      "diagnostics": {
+        "above_shadow_share": {
+          "a": 0.9142857142857143,
+          "b": 0.8,
+          "e": 0.9428571428571428,
+          "f": 0.5428571428571428,
+          "c": 0.3714285714285714,
+          "d": 0.2857142857142857
+        },
+        "family_shares": {
+          "logistic": {
+            "d": 0.0,
+            "f": 0.2,
+            "b": 0.8,
+            "e": 1.0,
+            "a": 1.0,
+            "c": 0.4
+          },
+          "linear_margin": {
+            "d": 0.0,
+            "f": 0.4,
+            "b": 0.6,
+            "e": 0.8,
+            "a": 0.8,
+            "c": 0.2
+          },
+          "discriminant": {
+            "d": 0.0,
+            "f": 0.4,
+            "b": 0.4,
+            "e": 0.8,
+            "a": 0.8,
+            "c": 0.2
+          },
+          "naive_bayes": {
+            "d": 0.0,
+            "f": 1.0,
+            "b": 1.0,
+            "e": 1.0,
+            "a": 1.0,
+            "c": 0.2
+          },
+          "single_tree": {
+            "d": 0.2,
+            "f": 0.4,
+            "b": 0.8,
+            "e": 1.0,
+            "a": 0.8,
+            "c": 0.0
+          },
+          "bagging": {
+            "d": 0.8,
+            "f": 0.8,
+            "b": 1.0,
+            "e": 1.0,
+            "a": 1.0,
+            "c": 0.6
+          },
+          "boosting": {
+            "d": 1.0,
+            "f": 0.6,
+            "b": 1.0,
+            "e": 1.0,
+            "a": 1.0,
+            "c": 1.0
+          }
+        }
+      }
+    },
+    {
+      "task": "clf",
+      "variant": "hard",
+      "seed": 1,
+      "selector": "featranker_share_tree",
+      "roles": {
+        "signal": [
+          "f7",
+          "f5",
+          "f9",
+          "f0",
+          "f6"
+        ],
+        "neutral": [
+          "f1"
+        ],
+        "noise": [
+          "f2",
+          "f8",
+          "f3",
+          "f4"
+        ]
+      },
+      "status": "ok",
+      "seconds": 8.556978541077115,
+      "selected": [
+        "f0",
+        "f1",
+        "f5",
+        "f6",
+        "f7",
+        "f9"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6,
+      "diagnostics": {
+        "above_shadow_share": {
+          "a": 0.9333333333333332,
+          "b": 0.9333333333333332,
+          "e": 0.9422222222222223,
+          "d": 0.6088888888888888,
+          "f": 0.6888888888888889,
+          "c": 0.5111111111111111
+        },
+        "family_shares": {
+          "single_tree": {
+            "d": 0.2,
+            "f": 0.4,
+            "b": 0.8,
+            "e": 1.0,
+            "a": 0.8,
+            "c": 0.0
+          },
+          "bagging": {
+            "d": 0.8666666666666666,
+            "f": 0.8666666666666666,
+            "b": 1.0,
+            "e": 0.8666666666666666,
+            "a": 1.0,
+            "c": 0.7333333333333333
+          },
+          "boosting": {
+            "d": 0.76,
+            "f": 0.8,
+            "b": 1.0,
+            "e": 0.96,
+            "a": 1.0,
+            "c": 0.8
+          }
+        }
+      }
+    },
+    {
+      "task": "clf",
+      "variant": "hard",
+      "seed": 2,
+      "selector": "featranker_share_fast",
+      "roles": {
+        "signal": [
+          "f1",
+          "f7",
+          "f4",
+          "f5",
+          "f3"
+        ],
+        "neutral": [
+          "f6"
+        ],
+        "noise": [
+          "f8",
+          "f0",
+          "f9",
+          "f2"
+        ]
+      },
+      "status": "ok",
+      "seconds": 3.1766002910444513,
+      "selected": [
+        "f1",
+        "f3",
+        "f6",
+        "f7"
+      ],
+      "recall": 0.6,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 4,
+      "diagnostics": {
+        "above_shadow_share": {
+          "a": 0.9714285714285715,
+          "b": 0.8285714285714286,
+          "e": 0.8285714285714285,
+          "f": 0.5428571428571428,
+          "d": 0.42857142857142855,
+          "c": 0.2857142857142857
+        },
+        "family_shares": {
+          "logistic": {
+            "a": 1.0,
+            "e": 0.8,
+            "c": 0.0,
+            "d": 0.2,
+            "f": 0.6,
+            "b": 1.0
+          },
+          "linear_margin": {
+            "a": 1.0,
+            "e": 0.6,
+            "c": 0.0,
+            "d": 0.0,
+            "f": 0.0,
+            "b": 0.4
+          },
+          "discriminant": {
+            "a": 0.8,
+            "e": 0.6,
+            "c": 0.0,
+            "d": 0.0,
+            "f": 0.0,
+            "b": 0.4
+          },
+          "naive_bayes": {
+            "a": 1.0,
+            "e": 1.0,
+            "c": 0.0,
+            "d": 0.6,
+            "f": 1.0,
+            "b": 1.0
+          },
+          "single_tree": {
+            "a": 1.0,
+            "e": 0.8,
+            "c": 0.0,
+            "d": 0.2,
+            "f": 0.4,
+            "b": 1.0
+          },
+          "bagging": {
+            "a": 1.0,
+            "e": 1.0,
+            "c": 1.0,
+            "d": 1.0,
+            "f": 1.0,
+            "b": 1.0
+          },
+          "boosting": {
+            "a": 1.0,
+            "e": 1.0,
+            "c": 1.0,
+            "d": 1.0,
+            "f": 0.8,
+            "b": 1.0
+          }
+        }
+      }
+    },
+    {
+      "task": "clf",
+      "variant": "hard",
+      "seed": 2,
+      "selector": "featranker_share_tree",
+      "roles": {
+        "signal": [
+          "f1",
+          "f7",
+          "f4",
+          "f5",
+          "f3"
+        ],
+        "neutral": [
+          "f6"
+        ],
+        "noise": [
+          "f8",
+          "f0",
+          "f9",
+          "f2"
+        ]
+      },
+      "status": "ok",
+      "seconds": 7.583201749948785,
+      "selected": [
+        "f1",
+        "f3",
+        "f4",
+        "f5",
+        "f6",
+        "f7"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6,
+      "diagnostics": {
+        "above_shadow_share": {
+          "a": 1.0,
+          "b": 1.0,
+          "e": 0.9199999999999999,
+          "f": 0.7866666666666666,
+          "d": 0.6755555555555555,
+          "c": 0.5333333333333334
+        },
+        "family_shares": {
+          "single_tree": {
+            "a": 1.0,
+            "e": 0.8,
+            "c": 0.0,
+            "d": 0.2,
+            "f": 0.4,
+            "b": 1.0
+          },
+          "bagging": {
+            "a": 1.0,
+            "e": 1.0,
+            "c": 0.8,
+            "d": 0.8666666666666666,
+            "f": 1.0,
+            "b": 1.0
+          },
+          "boosting": {
+            "a": 1.0,
+            "e": 0.96,
+            "c": 0.8,
+            "d": 0.96,
+            "f": 0.96,
+            "b": 1.0
+          }
+        }
+      }
+    },
+    {
+      "task": "clf",
+      "variant": "hard",
+      "seed": 3,
+      "selector": "featranker_share_fast",
+      "roles": {
+        "signal": [
+          "f6",
+          "f4",
+          "f7",
+          "f3",
+          "f0"
+        ],
+        "neutral": [
+          "f5"
+        ],
+        "noise": [
+          "f2",
+          "f1",
+          "f8",
+          "f9"
+        ]
+      },
+      "status": "ok",
+      "seconds": 3.145245583029464,
+      "selected": [
+        "f0",
+        "f4",
+        "f5",
+        "f6"
+      ],
+      "recall": 0.6,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 4,
+      "diagnostics": {
+        "above_shadow_share": {
+          "a": 1.0,
+          "b": 1.0,
+          "f": 0.9714285714285715,
+          "e": 0.5428571428571429,
+          "d": 0.3142857142857142,
+          "c": 0.2857142857142857
+        },
+        "family_shares": {
+          "logistic": {
+            "e": 0.4,
+            "d": 0.0,
+            "b": 1.0,
+            "f": 1.0,
+            "a": 1.0,
+            "c": 0.0
+          },
+          "linear_margin": {
+            "e": 0.6,
+            "d": 0.0,
+            "b": 1.0,
+            "f": 1.0,
+            "a": 1.0,
+            "c": 0.0
+          },
+          "discriminant": {
+            "e": 0.6,
+            "d": 0.0,
+            "b": 1.0,
+            "f": 1.0,
+            "a": 1.0,
+            "c": 0.0
+          },
+          "naive_bayes": {
+            "e": 1.0,
+            "d": 0.0,
+            "b": 1.0,
+            "f": 1.0,
+            "a": 1.0,
+            "c": 0.0
+          },
+          "single_tree": {
+            "e": 0.0,
+            "d": 0.2,
+            "b": 1.0,
+            "f": 0.8,
+            "a": 1.0,
+            "c": 0.0
+          },
+          "bagging": {
+            "e": 0.8,
+            "d": 1.0,
+            "b": 1.0,
+            "f": 1.0,
+            "a": 1.0,
+            "c": 1.0
+          },
+          "boosting": {
+            "e": 0.4,
+            "d": 1.0,
+            "b": 1.0,
+            "f": 1.0,
+            "a": 1.0,
+            "c": 1.0
+          }
+        }
+      }
+    },
+    {
+      "task": "clf",
+      "variant": "hard",
+      "seed": 3,
+      "selector": "featranker_share_tree",
+      "roles": {
+        "signal": [
+          "f6",
+          "f4",
+          "f7",
+          "f3",
+          "f0"
+        ],
+        "neutral": [
+          "f5"
+        ],
+        "noise": [
+          "f2",
+          "f1",
+          "f8",
+          "f9"
+        ]
+      },
+      "status": "ok",
+      "seconds": 7.503640334005468,
+      "selected": [
+        "f3",
+        "f4",
+        "f5",
+        "f6",
+        "f7"
+      ],
+      "recall": 0.8,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 5,
+      "diagnostics": {
+        "above_shadow_share": {
+          "a": 1.0,
+          "b": 1.0,
+          "f": 0.9199999999999999,
+          "d": 0.5288888888888889,
+          "c": 0.5066666666666666,
+          "e": 0.3911111111111111
+        },
+        "family_shares": {
+          "single_tree": {
+            "e": 0.0,
+            "d": 0.2,
+            "b": 1.0,
+            "f": 0.8,
+            "a": 1.0,
+            "c": 0.0
+          },
+          "bagging": {
+            "e": 0.5333333333333333,
+            "d": 0.6666666666666666,
+            "b": 1.0,
+            "f": 1.0,
+            "a": 1.0,
+            "c": 0.7999999999999999
+          },
+          "boosting": {
+            "e": 0.64,
+            "d": 0.72,
+            "b": 1.0,
+            "f": 0.96,
+            "a": 1.0,
+            "c": 0.72
+          }
+        }
+      }
+    },
+    {
+      "task": "clf",
+      "variant": "hard",
+      "seed": 4,
+      "selector": "featranker_share_fast",
+      "roles": {
+        "signal": [
+          "f9",
+          "f1",
+          "f0",
+          "f4",
+          "f8"
+        ],
+        "neutral": [
+          "f3"
+        ],
+        "noise": [
+          "f7",
+          "f2",
+          "f6",
+          "f5"
+        ]
+      },
+      "status": "ok",
+      "seconds": 3.1286016670055687,
+      "selected": [
+        "f1",
+        "f8",
+        "f9"
+      ],
+      "recall": 0.6,
+      "noise_selected": 0,
+      "neutral_selected": 0,
+      "n_selected": 3,
+      "diagnostics": {
+        "above_shadow_share": {
+          "a": 1.0,
+          "b": 0.8285714285714285,
+          "e": 0.7428571428571429,
+          "f": 0.42857142857142855,
+          "d": 0.2857142857142857,
+          "c": 0.2857142857142857
+        },
+        "family_shares": {
+          "logistic": {
+            "c": 0.0,
+            "b": 0.8,
+            "f": 0.0,
+            "d": 0.0,
+            "e": 0.8,
+            "a": 1.0
+          },
+          "linear_margin": {
+            "c": 0.0,
+            "b": 0.6,
+            "f": 0.2,
+            "d": 0.0,
+            "e": 0.6,
+            "a": 1.0
+          },
+          "discriminant": {
+            "c": 0.0,
+            "b": 0.6,
+            "f": 0.2,
+            "d": 0.0,
+            "e": 0.6,
+            "a": 1.0
+          },
+          "naive_bayes": {
+            "c": 0.2,
+            "b": 1.0,
+            "f": 0.8,
+            "d": 0.0,
+            "e": 0.8,
+            "a": 1.0
+          },
+          "single_tree": {
+            "c": 0.2,
+            "b": 0.8,
+            "f": 0.6,
+            "d": 0.4,
+            "e": 0.6,
+            "a": 1.0
+          },
+          "bagging": {
+            "c": 0.6,
+            "b": 1.0,
+            "f": 0.8,
+            "d": 0.6,
+            "e": 0.8,
+            "a": 1.0
+          },
+          "boosting": {
+            "c": 1.0,
+            "b": 1.0,
+            "f": 0.4,
+            "d": 1.0,
+            "e": 1.0,
+            "a": 1.0
+          }
+        }
+      }
+    },
+    {
+      "task": "clf",
+      "variant": "hard",
+      "seed": 4,
+      "selector": "featranker_share_tree",
+      "roles": {
+        "signal": [
+          "f9",
+          "f1",
+          "f0",
+          "f4",
+          "f8"
+        ],
+        "neutral": [
+          "f3"
+        ],
+        "noise": [
+          "f7",
+          "f2",
+          "f6",
+          "f5"
+        ]
+      },
+      "status": "ok",
+      "seconds": 7.500629874994047,
+      "selected": [
+        "f0",
+        "f1",
+        "f3",
+        "f4",
+        "f8",
+        "f9"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6,
+      "diagnostics": {
+        "above_shadow_share": {
+          "a": 1.0,
+          "b": 0.9333333333333332,
+          "e": 0.8088888888888889,
+          "d": 0.5688888888888889,
+          "f": 0.5777777777777777,
+          "c": 0.5333333333333333
+        },
+        "family_shares": {
+          "single_tree": {
+            "c": 0.2,
+            "b": 0.8,
+            "f": 0.6,
+            "d": 0.4,
+            "e": 0.6,
+            "a": 1.0
+          },
+          "bagging": {
+            "c": 0.6,
+            "b": 1.0,
+            "f": 0.7333333333333334,
+            "d": 0.4666666666666666,
+            "e": 0.8666666666666668,
+            "a": 1.0
+          },
+          "boosting": {
+            "c": 0.8,
+            "b": 1.0,
+            "f": 0.4,
+            "d": 0.8400000000000001,
+            "e": 0.96,
+            "a": 1.0
+          }
+        }
+      }
+    }
+  ],
+  "total_seconds": 253.98828625003807,
+  "summary": [
+    {
+      "task": "reg",
+      "variant": "standard",
+      "selector": "featranker_share_fast",
+      "n_runs": 5,
+      "status": "ok",
+      "recall_mean": 1.0,
+      "recall_std": 0.0,
+      "noise_mean": 0.0,
+      "noise_std": 0.0,
+      "copy_mean": 1.0,
+      "copy_std": 0.0,
+      "seconds_mean": 5.7346434749895705,
+      "seconds_std": 0.136736313068246
+    },
+    {
+      "task": "reg",
+      "variant": "standard",
+      "selector": "featranker_share_tree",
+      "n_runs": 5,
+      "status": "ok",
+      "recall_mean": 1.0,
+      "recall_std": 0.0,
+      "noise_mean": 0.0,
+      "noise_std": 0.0,
+      "copy_mean": 1.0,
+      "copy_std": 0.0,
+      "seconds_mean": 8.451853449991905,
+      "seconds_std": 0.6517029189000859
+    },
+    {
+      "task": "reg",
+      "variant": "hard",
+      "selector": "featranker_share_fast",
+      "n_runs": 5,
+      "status": "ok",
+      "recall_mean": 1.0,
+      "recall_std": 0.0,
+      "noise_mean": 0.0,
+      "noise_std": 0.0,
+      "copy_mean": 1.0,
+      "copy_std": 0.0,
+      "seconds_mean": 5.873186816205271,
+      "seconds_std": 0.34113944755433206
+    },
+    {
+      "task": "reg",
+      "variant": "hard",
+      "selector": "featranker_share_tree",
+      "n_runs": 5,
+      "status": "ok",
+      "recall_mean": 1.0,
+      "recall_std": 0.0,
+      "noise_mean": 0.0,
+      "noise_std": 0.0,
+      "copy_mean": 1.0,
+      "copy_std": 0.0,
+      "seconds_mean": 8.35103348318953,
+      "seconds_std": 0.9056335765246959
+    },
+    {
+      "task": "clf",
+      "variant": "standard",
+      "selector": "featranker_share_fast",
+      "n_runs": 5,
+      "status": "ok",
+      "recall_mean": 0.5599999999999999,
+      "recall_std": 0.08944271909999157,
+      "noise_mean": 0.0,
+      "noise_std": 0.0,
+      "copy_mean": 0.6,
+      "copy_std": 0.5477225575051662,
+      "seconds_mean": 3.257871966599487,
+      "seconds_std": 0.19122051460688125
+    },
+    {
+      "task": "clf",
+      "variant": "standard",
+      "selector": "featranker_share_tree",
+      "n_runs": 5,
+      "status": "ok",
+      "recall_mean": 1.0,
+      "recall_std": 0.0,
+      "noise_mean": 0.0,
+      "noise_std": 0.0,
+      "copy_mean": 1.0,
+      "copy_std": 0.0,
+      "seconds_mean": 8.007185258599929,
+      "seconds_std": 0.12796891697315482
+    },
+    {
+      "task": "clf",
+      "variant": "hard",
+      "selector": "featranker_share_fast",
+      "n_runs": 5,
+      "status": "ok",
+      "recall_mean": 0.6,
+      "recall_std": 0.0,
+      "noise_mean": 0.0,
+      "noise_std": 0.0,
+      "copy_mean": 0.8,
+      "copy_std": 0.4472135954999579,
+      "seconds_mean": 3.152170608239248,
+      "seconds_std": 0.019755213511752204
+    },
+    {
+      "task": "clf",
+      "variant": "hard",
+      "selector": "featranker_share_tree",
+      "n_runs": 5,
+      "status": "ok",
+      "recall_mean": 0.9199999999999999,
+      "recall_std": 0.1095445115010332,
+      "noise_mean": 0.0,
+      "noise_std": 0.0,
+      "copy_mean": 1.0,
+      "copy_std": 0.0,
+      "seconds_mean": 7.959922225004993,
+      "seconds_std": 0.591796759991947
+    }
+  ]
+}

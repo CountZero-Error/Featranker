@@ -1,0 +1,3081 @@
+{
+  "environment": {
+    "featranker": {
+      "version": "1.4.0",
+      "commit": "e486fbf",
+      "dirty": false,
+      "imported_from": "/Users/countzero/Desktop/CodeHouse/Featranker/featranker"
+    },
+    "packages": {
+      "numpy": "1.26.4",
+      "scipy": "1.13.1",
+      "scikit-learn": "1.5.1",
+      "pandas": "2.2.2",
+      "joblib": "1.4.2",
+      "xgboost": "3.1.3",
+      "catboost": "1.2.8",
+      "boruta": "0.4.3",
+      "feature-engine": "1.9.4"
+    },
+    "python": "3.12.7",
+    "platform": "macOS-27.0.1-arm64-arm-64bit",
+    "machine": "arm64",
+    "cpu_count": 10
+  },
+  "settings": {
+    "n_rows": 1000,
+    "n_features": 10,
+    "n_trees": 100,
+    "seeds": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "tasks": [
+      "reg",
+      "clf"
+    ],
+    "variants": [
+      "standard",
+      "hard"
+    ],
+    "selectors": [
+      "featranker_share_fast",
+      "featranker_share_all",
+      "featranker_q_fast",
+      "featranker_q_all",
+      "boruta",
+      "permutation_rule",
+      "select_by_shuffling"
+    ],
+    "noise_sd": {
+      "standard": 1.0,
+      "hard": 2.0
+    }
+  },
+  "dropped": [],
+  "started": "2026-10-19T23:23:05",
+  "runs": [
+    {
+      "task": "reg",
+      "variant": "standard",
+      "seed": 0,
+      "selector": "featranker_share_fast",
+      "status": "ok",
+      "seconds": 7.904703375068493,
+      "selected": [
+        "f0",
+        "f1",
+        "f4",
+        "f6",
+        "f7",
+        "f9"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6
+    },
+    {
+      "task": "reg",
+      "variant": "standard",
+      "seed": 0,
+      "selector": "featranker_share_all",
+      "status": "ok",
+      "seconds": 11.475384791032411,
+      "selected": [
+        "f0",
+        "f1",
+        "f4",
+        "f6",
+        "f7",
+        "f9"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6
+    },
+    {
+      "task": "reg",
+      "variant": "standard",
+      "seed": 0,
+      "selector": "featranker_q_fast",
+      "status": "ok",
+      "seconds": 11.32371233298909,
+      "selected": [
+        "f0",
+        "f1",
+        "f4",
+        "f6",
+        "f7",
+        "f9"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6
+    },
+    {
+      "task": "reg",
+      "variant": "standard",
+      "seed": 0,
+      "selector": "featranker_q_all",
+      "status": "ok",
+      "seconds": 19.624101166962646,
+      "selected": [
+        "f0",
+        "f1",
+        "f4",
+        "f6",
+        "f7",
+        "f9"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6
+    },
+    {
+      "task": "reg",
+      "variant": "standard",
+      "seed": 0,
+      "selector": "boruta",
+      "status": "ok",
+      "seconds": 1.3853907500160858,
+      "selected": [
+        "f0",
+        "f1",
+        "f4",
+        "f6",
+        "f7",
+        "f9"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6
+    },
+    {
+      "task": "reg",
+      "variant": "standard",
+      "seed": 0,
+      "selector": "permutation_rule",
+      "status": "ok",
+      "seconds": 0.3382744170958176,
+      "selected": [
+        "f0",
+        "f1",
+        "f4",
+        "f6",
+        "f7",
+        "f9"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6
+    },
+    {
+      "task": "reg",
+      "variant": "standard",
+      "seed": 0,
+      "selector": "select_by_shuffling",
+      "status": "ok",
+      "seconds": 0.693673999980092,
+      "selected": [
+        "f0",
+        "f1"
+      ],
+      "recall": 0.4,
+      "noise_selected": 0,
+      "neutral_selected": 0,
+      "n_selected": 2
+    },
+    {
+      "task": "reg",
+      "variant": "standard",
+      "seed": 1,
+      "selector": "featranker_share_fast",
+      "status": "ok",
+      "seconds": 5.9019923330051824,
+      "selected": [
+        "f0",
+        "f1",
+        "f5",
+        "f6",
+        "f7",
+        "f9"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6
+    },
+    {
+      "task": "reg",
+      "variant": "standard",
+      "seed": 1,
+      "selector": "featranker_share_all",
+      "status": "ok",
+      "seconds": 10.296962500084192,
+      "selected": [
+        "f0",
+        "f1",
+        "f5",
+        "f6",
+        "f7",
+        "f9"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6
+    },
+    {
+      "task": "reg",
+      "variant": "standard",
+      "seed": 1,
+      "selector": "featranker_q_fast",
+      "status": "ok",
+      "seconds": 11.197693333029747,
+      "selected": [
+        "f0",
+        "f1",
+        "f5",
+        "f6",
+        "f7",
+        "f9"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6
+    },
+    {
+      "task": "reg",
+      "variant": "standard",
+      "seed": 1,
+      "selector": "featranker_q_all",
+      "status": "ok",
+      "seconds": 19.150574125000276,
+      "selected": [
+        "f0",
+        "f1",
+        "f5",
+        "f6",
+        "f7",
+        "f9"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6
+    },
+    {
+      "task": "reg",
+      "variant": "standard",
+      "seed": 1,
+      "selector": "boruta",
+      "status": "ok",
+      "seconds": 0.9798275000648573,
+      "selected": [
+        "f0",
+        "f1",
+        "f5",
+        "f6",
+        "f7",
+        "f9"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6
+    },
+    {
+      "task": "reg",
+      "variant": "standard",
+      "seed": 1,
+      "selector": "permutation_rule",
+      "status": "ok",
+      "seconds": 0.40677558293100446,
+      "selected": [
+        "f0",
+        "f1",
+        "f5",
+        "f6",
+        "f7",
+        "f9"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6
+    },
+    {
+      "task": "reg",
+      "variant": "standard",
+      "seed": 1,
+      "selector": "select_by_shuffling",
+      "status": "ok",
+      "seconds": 0.6621160419890657,
+      "selected": [
+        "f5",
+        "f7"
+      ],
+      "recall": 0.4,
+      "noise_selected": 0,
+      "neutral_selected": 0,
+      "n_selected": 2
+    },
+    {
+      "task": "reg",
+      "variant": "standard",
+      "seed": 2,
+      "selector": "featranker_share_fast",
+      "status": "ok",
+      "seconds": 5.91752262506634,
+      "selected": [
+        "f1",
+        "f3",
+        "f4",
+        "f5",
+        "f6",
+        "f7"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6
+    },
+    {
+      "task": "reg",
+      "variant": "standard",
+      "seed": 2,
+      "selector": "featranker_share_all",
+      "status": "ok",
+      "seconds": 9.174873541924171,
+      "selected": [
+        "f1",
+        "f3",
+        "f4",
+        "f5",
+        "f6",
+        "f7"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6
+    },
+    {
+      "task": "reg",
+      "variant": "standard",
+      "seed": 2,
+      "selector": "featranker_q_fast",
+      "status": "ok",
+      "seconds": 11.449859207961708,
+      "selected": [
+        "f1",
+        "f3",
+        "f4",
+        "f5",
+        "f6",
+        "f7"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6
+    },
+    {
+      "task": "reg",
+      "variant": "standard",
+      "seed": 2,
+      "selector": "featranker_q_all",
+      "status": "ok",
+      "seconds": 20.34322129096836,
+      "selected": [
+        "f1",
+        "f3",
+        "f4",
+        "f5",
+        "f6",
+        "f7"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6
+    },
+    {
+      "task": "reg",
+      "variant": "standard",
+      "seed": 2,
+      "selector": "boruta",
+      "status": "ok",
+      "seconds": 9.740075042005628,
+      "selected": [
+        "f1",
+        "f3",
+        "f4",
+        "f5",
+        "f6",
+        "f7"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6
+    },
+    {
+      "task": "reg",
+      "variant": "standard",
+      "seed": 2,
+      "selector": "permutation_rule",
+      "status": "ok",
+      "seconds": 0.35740762506611645,
+      "selected": [
+        "f1",
+        "f3",
+        "f4",
+        "f5",
+        "f6",
+        "f7"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6
+    },
+    {
+      "task": "reg",
+      "variant": "standard",
+      "seed": 2,
+      "selector": "select_by_shuffling",
+      "status": "ok",
+      "seconds": 0.6393363330280408,
+      "selected": [
+        "f1",
+        "f3",
+        "f7"
+      ],
+      "recall": 0.6,
+      "noise_selected": 0,
+      "neutral_selected": 0,
+      "n_selected": 3
+    },
+    {
+      "task": "reg",
+      "variant": "standard",
+      "seed": 3,
+      "selector": "featranker_share_fast",
+      "status": "ok",
+      "seconds": 5.597635000012815,
+      "selected": [
+        "f0",
+        "f3",
+        "f4",
+        "f5",
+        "f6",
+        "f7"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6
+    },
+    {
+      "task": "reg",
+      "variant": "standard",
+      "seed": 3,
+      "selector": "featranker_share_all",
+      "status": "ok",
+      "seconds": 10.43812608299777,
+      "selected": [
+        "f0",
+        "f3",
+        "f4",
+        "f5",
+        "f6",
+        "f7"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6
+    },
+    {
+      "task": "reg",
+      "variant": "standard",
+      "seed": 3,
+      "selector": "featranker_q_fast",
+      "status": "ok",
+      "seconds": 11.57879891700577,
+      "selected": [
+        "f0",
+        "f3",
+        "f4",
+        "f5",
+        "f6",
+        "f7"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6
+    },
+    {
+      "task": "reg",
+      "variant": "standard",
+      "seed": 3,
+      "selector": "featranker_q_all",
+      "status": "ok",
+      "seconds": 18.23044304107316,
+      "selected": [
+        "f0",
+        "f3",
+        "f4",
+        "f5",
+        "f6",
+        "f7"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6
+    },
+    {
+      "task": "reg",
+      "variant": "standard",
+      "seed": 3,
+      "selector": "boruta",
+      "status": "ok",
+      "seconds": 2.0528840828919783,
+      "selected": [
+        "f0",
+        "f3",
+        "f4",
+        "f5",
+        "f6",
+        "f7",
+        "f9"
+      ],
+      "recall": 1.0,
+      "noise_selected": 1,
+      "neutral_selected": 1,
+      "n_selected": 7
+    },
+    {
+      "task": "reg",
+      "variant": "standard",
+      "seed": 3,
+      "selector": "permutation_rule",
+      "status": "ok",
+      "seconds": 0.652062541921623,
+      "selected": [
+        "f0",
+        "f3",
+        "f4",
+        "f5",
+        "f6",
+        "f7"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6
+    },
+    {
+      "task": "reg",
+      "variant": "standard",
+      "seed": 3,
+      "selector": "select_by_shuffling",
+      "status": "ok",
+      "seconds": 0.6354510410455987,
+      "selected": [
+        "f4",
+        "f6"
+      ],
+      "recall": 0.4,
+      "noise_selected": 0,
+      "neutral_selected": 0,
+      "n_selected": 2
+    },
+    {
+      "task": "reg",
+      "variant": "standard",
+      "seed": 4,
+      "selector": "featranker_share_fast",
+      "status": "ok",
+      "seconds": 5.572135707945563,
+      "selected": [
+        "f0",
+        "f1",
+        "f3",
+        "f4",
+        "f8",
+        "f9"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6
+    },
+    {
+      "task": "reg",
+      "variant": "standard",
+      "seed": 4,
+      "selector": "featranker_share_all",
+      "status": "ok",
+      "seconds": 9.99283825000748,
+      "selected": [
+        "f0",
+        "f1",
+        "f3",
+        "f4",
+        "f8",
+        "f9"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6
+    },
+    {
+      "task": "reg",
+      "variant": "standard",
+      "seed": 4,
+      "selector": "featranker_q_fast",
+      "status": "ok",
+      "seconds": 11.049278582911938,
+      "selected": [
+        "f0",
+        "f1",
+        "f3",
+        "f4",
+        "f8",
+        "f9"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6
+    },
+    {
+      "task": "reg",
+      "variant": "standard",
+      "seed": 4,
+      "selector": "featranker_q_all",
+      "status": "ok",
+      "seconds": 19.14483050000854,
+      "selected": [
+        "f0",
+        "f1",
+        "f3",
+        "f4",
+        "f8",
+        "f9"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6
+    },
+    {
+      "task": "reg",
+      "variant": "standard",
+      "seed": 4,
+      "selector": "boruta",
+      "status": "ok",
+      "seconds": 9.934983332990669,
+      "selected": [
+        "f0",
+        "f1",
+        "f3",
+        "f4",
+        "f8",
+        "f9"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6
+    },
+    {
+      "task": "reg",
+      "variant": "standard",
+      "seed": 4,
+      "selector": "permutation_rule",
+      "status": "ok",
+      "seconds": 0.3221115419873968,
+      "selected": [
+        "f0",
+        "f1",
+        "f3",
+        "f4",
+        "f8",
+        "f9"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6
+    },
+    {
+      "task": "reg",
+      "variant": "standard",
+      "seed": 4,
+      "selector": "select_by_shuffling",
+      "status": "ok",
+      "seconds": 0.6383788340026513,
+      "selected": [
+        "f1",
+        "f9"
+      ],
+      "recall": 0.4,
+      "noise_selected": 0,
+      "neutral_selected": 0,
+      "n_selected": 2
+    },
+    {
+      "task": "reg",
+      "variant": "hard",
+      "seed": 0,
+      "selector": "featranker_share_fast",
+      "status": "ok",
+      "seconds": 5.892387750092894,
+      "selected": [
+        "f0",
+        "f1",
+        "f4",
+        "f6",
+        "f7",
+        "f9"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6
+    },
+    {
+      "task": "reg",
+      "variant": "hard",
+      "seed": 0,
+      "selector": "featranker_share_all",
+      "status": "ok",
+      "seconds": 8.377086707972921,
+      "selected": [
+        "f0",
+        "f1",
+        "f4",
+        "f6",
+        "f7",
+        "f9"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6
+    },
+    {
+      "task": "reg",
+      "variant": "hard",
+      "seed": 0,
+      "selector": "featranker_q_fast",
+      "status": "ok",
+      "seconds": 11.915696125011891,
+      "selected": [
+        "f0",
+        "f1",
+        "f4",
+        "f7",
+        "f9"
+      ],
+      "recall": 0.8,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 5
+    },
+    {
+      "task": "reg",
+      "variant": "hard",
+      "seed": 0,
+      "selector": "featranker_q_all",
+      "status": "ok",
+      "seconds": 19.078430332941934,
+      "selected": [
+        "f0",
+        "f1",
+        "f4",
+        "f7",
+        "f9"
+      ],
+      "recall": 0.8,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 5
+    },
+    {
+      "task": "reg",
+      "variant": "hard",
+      "seed": 0,
+      "selector": "boruta",
+      "status": "ok",
+      "seconds": 1.383287499891594,
+      "selected": [
+        "f0",
+        "f1",
+        "f4",
+        "f6",
+        "f7",
+        "f9"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6
+    },
+    {
+      "task": "reg",
+      "variant": "hard",
+      "seed": 0,
+      "selector": "permutation_rule",
+      "status": "ok",
+      "seconds": 0.3207323750248179,
+      "selected": [
+        "f0",
+        "f1",
+        "f4",
+        "f6",
+        "f7",
+        "f9"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6
+    },
+    {
+      "task": "reg",
+      "variant": "hard",
+      "seed": 0,
+      "selector": "select_by_shuffling",
+      "status": "ok",
+      "seconds": 0.6365027920110151,
+      "selected": [
+        "f0",
+        "f1"
+      ],
+      "recall": 0.4,
+      "noise_selected": 0,
+      "neutral_selected": 0,
+      "n_selected": 2
+    },
+    {
+      "task": "reg",
+      "variant": "hard",
+      "seed": 1,
+      "selector": "featranker_share_fast",
+      "status": "ok",
+      "seconds": 6.038433416979387,
+      "selected": [
+        "f0",
+        "f1",
+        "f5",
+        "f6",
+        "f7",
+        "f9"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6
+    },
+    {
+      "task": "reg",
+      "variant": "hard",
+      "seed": 1,
+      "selector": "featranker_share_all",
+      "status": "ok",
+      "seconds": 10.028268708032556,
+      "selected": [
+        "f0",
+        "f1",
+        "f5",
+        "f6",
+        "f7",
+        "f9"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6
+    },
+    {
+      "task": "reg",
+      "variant": "hard",
+      "seed": 1,
+      "selector": "featranker_q_fast",
+      "status": "ok",
+      "seconds": 11.272987500065938,
+      "selected": [
+        "f1",
+        "f5",
+        "f6",
+        "f7"
+      ],
+      "recall": 0.6,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 4
+    },
+    {
+      "task": "reg",
+      "variant": "hard",
+      "seed": 1,
+      "selector": "featranker_q_all",
+      "status": "ok",
+      "seconds": 19.31026804097928,
+      "selected": [
+        "f1",
+        "f5",
+        "f6",
+        "f7",
+        "f9"
+      ],
+      "recall": 0.8,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 5
+    },
+    {
+      "task": "reg",
+      "variant": "hard",
+      "seed": 1,
+      "selector": "boruta",
+      "status": "ok",
+      "seconds": 1.351447332999669,
+      "selected": [
+        "f0",
+        "f1",
+        "f5",
+        "f6",
+        "f7",
+        "f9"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6
+    },
+    {
+      "task": "reg",
+      "variant": "hard",
+      "seed": 1,
+      "selector": "permutation_rule",
+      "status": "ok",
+      "seconds": 0.3109834589995444,
+      "selected": [
+        "f0",
+        "f1",
+        "f2",
+        "f5",
+        "f6",
+        "f7",
+        "f9"
+      ],
+      "recall": 1.0,
+      "noise_selected": 1,
+      "neutral_selected": 1,
+      "n_selected": 7
+    },
+    {
+      "task": "reg",
+      "variant": "hard",
+      "seed": 1,
+      "selector": "select_by_shuffling",
+      "status": "ok",
+      "seconds": 0.6389071670128033,
+      "selected": [
+        "f5",
+        "f7"
+      ],
+      "recall": 0.4,
+      "noise_selected": 0,
+      "neutral_selected": 0,
+      "n_selected": 2
+    },
+    {
+      "task": "reg",
+      "variant": "hard",
+      "seed": 2,
+      "selector": "featranker_share_fast",
+      "status": "ok",
+      "seconds": 5.497226833016612,
+      "selected": [
+        "f1",
+        "f3",
+        "f4",
+        "f5",
+        "f6",
+        "f7"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6
+    },
+    {
+      "task": "reg",
+      "variant": "hard",
+      "seed": 2,
+      "selector": "featranker_share_all",
+      "status": "ok",
+      "seconds": 10.34386933397036,
+      "selected": [
+        "f1",
+        "f3",
+        "f4",
+        "f5",
+        "f6",
+        "f7"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6
+    },
+    {
+      "task": "reg",
+      "variant": "hard",
+      "seed": 2,
+      "selector": "featranker_q_fast",
+      "status": "ok",
+      "seconds": 11.814553166972473,
+      "selected": [
+        "f1",
+        "f3",
+        "f4",
+        "f5",
+        "f6",
+        "f7"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6
+    },
+    {
+      "task": "reg",
+      "variant": "hard",
+      "seed": 2,
+      "selector": "featranker_q_all",
+      "status": "ok",
+      "seconds": 18.98858950007707,
+      "selected": [
+        "f1",
+        "f3",
+        "f4",
+        "f5",
+        "f6",
+        "f7"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6
+    },
+    {
+      "task": "reg",
+      "variant": "hard",
+      "seed": 2,
+      "selector": "boruta",
+      "status": "ok",
+      "seconds": 1.7503430410288274,
+      "selected": [
+        "f1",
+        "f3",
+        "f4",
+        "f5",
+        "f6",
+        "f7",
+        "f9"
+      ],
+      "recall": 1.0,
+      "noise_selected": 1,
+      "neutral_selected": 1,
+      "n_selected": 7
+    },
+    {
+      "task": "reg",
+      "variant": "hard",
+      "seed": 2,
+      "selector": "permutation_rule",
+      "status": "ok",
+      "seconds": 0.3535168339731172,
+      "selected": [
+        "f1",
+        "f3",
+        "f4",
+        "f5",
+        "f6",
+        "f7"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6
+    },
+    {
+      "task": "reg",
+      "variant": "hard",
+      "seed": 2,
+      "selector": "select_by_shuffling",
+      "status": "ok",
+      "seconds": 0.7042814580490813,
+      "selected": [
+        "f1",
+        "f3",
+        "f7"
+      ],
+      "recall": 0.6,
+      "noise_selected": 0,
+      "neutral_selected": 0,
+      "n_selected": 3
+    },
+    {
+      "task": "reg",
+      "variant": "hard",
+      "seed": 3,
+      "selector": "featranker_share_fast",
+      "status": "ok",
+      "seconds": 5.951160124968737,
+      "selected": [
+        "f0",
+        "f3",
+        "f4",
+        "f5",
+        "f6",
+        "f7"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6
+    },
+    {
+      "task": "reg",
+      "variant": "hard",
+      "seed": 3,
+      "selector": "featranker_share_all",
+      "status": "ok",
+      "seconds": 10.249108290998265,
+      "selected": [
+        "f0",
+        "f3",
+        "f4",
+        "f5",
+        "f6",
+        "f7"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6
+    },
+    {
+      "task": "reg",
+      "variant": "hard",
+      "seed": 3,
+      "selector": "featranker_q_fast",
+      "status": "ok",
+      "seconds": 11.485514750005677,
+      "selected": [
+        "f0",
+        "f3",
+        "f4",
+        "f5",
+        "f6",
+        "f7"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6
+    },
+    {
+      "task": "reg",
+      "variant": "hard",
+      "seed": 3,
+      "selector": "featranker_q_all",
+      "status": "ok",
+      "seconds": 18.483207207988016,
+      "selected": [
+        "f0",
+        "f3",
+        "f4",
+        "f5",
+        "f6",
+        "f7"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6
+    },
+    {
+      "task": "reg",
+      "variant": "hard",
+      "seed": 3,
+      "selector": "boruta",
+      "status": "ok",
+      "seconds": 8.584875375032425,
+      "selected": [
+        "f0",
+        "f3",
+        "f4",
+        "f5",
+        "f6",
+        "f7",
+        "f9"
+      ],
+      "recall": 1.0,
+      "noise_selected": 1,
+      "neutral_selected": 1,
+      "n_selected": 7
+    },
+    {
+      "task": "reg",
+      "variant": "hard",
+      "seed": 3,
+      "selector": "permutation_rule",
+      "status": "ok",
+      "seconds": 0.32487804198171943,
+      "selected": [
+        "f0",
+        "f3",
+        "f4",
+        "f5",
+        "f6",
+        "f7"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6
+    },
+    {
+      "task": "reg",
+      "variant": "hard",
+      "seed": 3,
+      "selector": "select_by_shuffling",
+      "status": "ok",
+      "seconds": 0.7076717090094462,
+      "selected": [
+        "f4",
+        "f6"
+      ],
+      "recall": 0.4,
+      "noise_selected": 0,
+      "neutral_selected": 0,
+      "n_selected": 2
+    },
+    {
+      "task": "reg",
+      "variant": "hard",
+      "seed": 4,
+      "selector": "featranker_share_fast",
+      "status": "ok",
+      "seconds": 6.14759912493173,
+      "selected": [
+        "f0",
+        "f1",
+        "f3",
+        "f4",
+        "f8",
+        "f9"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6
+    },
+    {
+      "task": "reg",
+      "variant": "hard",
+      "seed": 4,
+      "selector": "featranker_share_all",
+      "status": "ok",
+      "seconds": 10.336883999989368,
+      "selected": [
+        "f0",
+        "f1",
+        "f3",
+        "f4",
+        "f8",
+        "f9"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6
+    },
+    {
+      "task": "reg",
+      "variant": "hard",
+      "seed": 4,
+      "selector": "featranker_q_fast",
+      "status": "ok",
+      "seconds": 11.361748958937824,
+      "selected": [
+        "f0",
+        "f1",
+        "f3",
+        "f4",
+        "f8",
+        "f9"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6
+    },
+    {
+      "task": "reg",
+      "variant": "hard",
+      "seed": 4,
+      "selector": "featranker_q_all",
+      "status": "ok",
+      "seconds": 21.214443124947138,
+      "selected": [
+        "f0",
+        "f1",
+        "f3",
+        "f4",
+        "f8",
+        "f9"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6
+    },
+    {
+      "task": "reg",
+      "variant": "hard",
+      "seed": 4,
+      "selector": "boruta",
+      "status": "ok",
+      "seconds": 2.0930293339770287,
+      "selected": [
+        "f0",
+        "f1",
+        "f2",
+        "f3",
+        "f4",
+        "f8",
+        "f9"
+      ],
+      "recall": 1.0,
+      "noise_selected": 1,
+      "neutral_selected": 1,
+      "n_selected": 7
+    },
+    {
+      "task": "reg",
+      "variant": "hard",
+      "seed": 4,
+      "selector": "permutation_rule",
+      "status": "ok",
+      "seconds": 0.6925567500293255,
+      "selected": [
+        "f0",
+        "f1",
+        "f3",
+        "f4",
+        "f8",
+        "f9"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6
+    },
+    {
+      "task": "reg",
+      "variant": "hard",
+      "seed": 4,
+      "selector": "select_by_shuffling",
+      "status": "ok",
+      "seconds": 0.7101265420205891,
+      "selected": [
+        "f1",
+        "f9"
+      ],
+      "recall": 0.4,
+      "noise_selected": 0,
+      "neutral_selected": 0,
+      "n_selected": 2
+    },
+    {
+      "task": "clf",
+      "variant": "standard",
+      "seed": 0,
+      "selector": "featranker_share_fast",
+      "status": "ok",
+      "seconds": 3.279916708008386,
+      "selected": [
+        "f0",
+        "f1",
+        "f4",
+        "f7"
+      ],
+      "recall": 0.6,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 4
+    },
+    {
+      "task": "clf",
+      "variant": "standard",
+      "seed": 0,
+      "selector": "featranker_share_all",
+      "status": "ok",
+      "seconds": 10.509661708958447,
+      "selected": [
+        "f0",
+        "f1",
+        "f4",
+        "f7",
+        "f9"
+      ],
+      "recall": 0.8,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 5
+    },
+    {
+      "task": "clf",
+      "variant": "standard",
+      "seed": 0,
+      "selector": "featranker_q_fast",
+      "status": "ok",
+      "seconds": 6.175648291944526,
+      "selected": [
+        "f0",
+        "f1"
+      ],
+      "recall": 0.4,
+      "noise_selected": 0,
+      "neutral_selected": 0,
+      "n_selected": 2
+    },
+    {
+      "task": "clf",
+      "variant": "standard",
+      "seed": 0,
+      "selector": "featranker_q_all",
+      "status": "ok",
+      "seconds": 17.51999950001482,
+      "selected": [
+        "f0",
+        "f1"
+      ],
+      "recall": 0.4,
+      "noise_selected": 0,
+      "neutral_selected": 0,
+      "n_selected": 2
+    },
+    {
+      "task": "clf",
+      "variant": "standard",
+      "seed": 0,
+      "selector": "boruta",
+      "status": "ok",
+      "seconds": 0.9374137499835342,
+      "selected": [
+        "f0",
+        "f1",
+        "f4",
+        "f6",
+        "f7",
+        "f9"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6
+    },
+    {
+      "task": "clf",
+      "variant": "standard",
+      "seed": 0,
+      "selector": "permutation_rule",
+      "status": "ok",
+      "seconds": 0.6318919999757782,
+      "selected": [
+        "f0",
+        "f1",
+        "f9"
+      ],
+      "recall": 0.6,
+      "noise_selected": 0,
+      "neutral_selected": 0,
+      "n_selected": 3
+    },
+    {
+      "task": "clf",
+      "variant": "standard",
+      "seed": 0,
+      "selector": "select_by_shuffling",
+      "status": "ok",
+      "seconds": 0.6646839580498636,
+      "selected": [
+        "f0",
+        "f1"
+      ],
+      "recall": 0.4,
+      "noise_selected": 0,
+      "neutral_selected": 0,
+      "n_selected": 2
+    },
+    {
+      "task": "clf",
+      "variant": "standard",
+      "seed": 1,
+      "selector": "featranker_share_fast",
+      "status": "ok",
+      "seconds": 3.2665734589099884,
+      "selected": [
+        "f5",
+        "f6",
+        "f7"
+      ],
+      "recall": 0.6,
+      "noise_selected": 0,
+      "neutral_selected": 0,
+      "n_selected": 3
+    },
+    {
+      "task": "clf",
+      "variant": "standard",
+      "seed": 1,
+      "selector": "featranker_share_all",
+      "status": "ok",
+      "seconds": 9.554980541928671,
+      "selected": [
+        "f1",
+        "f5",
+        "f6",
+        "f7"
+      ],
+      "recall": 0.6,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 4
+    },
+    {
+      "task": "clf",
+      "variant": "standard",
+      "seed": 1,
+      "selector": "featranker_q_fast",
+      "status": "ok",
+      "seconds": 6.249578999937512,
+      "selected": [
+        "f5",
+        "f6",
+        "f7"
+      ],
+      "recall": 0.6,
+      "noise_selected": 0,
+      "neutral_selected": 0,
+      "n_selected": 3
+    },
+    {
+      "task": "clf",
+      "variant": "standard",
+      "seed": 1,
+      "selector": "featranker_q_all",
+      "status": "ok",
+      "seconds": 17.317689917050302,
+      "selected": [
+        "f1",
+        "f5",
+        "f6",
+        "f7"
+      ],
+      "recall": 0.6,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 4
+    },
+    {
+      "task": "clf",
+      "variant": "standard",
+      "seed": 1,
+      "selector": "boruta",
+      "status": "ok",
+      "seconds": 4.397924292017706,
+      "selected": [
+        "f0",
+        "f1",
+        "f5",
+        "f6",
+        "f7",
+        "f9"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6
+    },
+    {
+      "task": "clf",
+      "variant": "standard",
+      "seed": 1,
+      "selector": "permutation_rule",
+      "status": "ok",
+      "seconds": 0.23776287492364645,
+      "selected": [
+        "f0",
+        "f1",
+        "f3",
+        "f5",
+        "f7",
+        "f8"
+      ],
+      "recall": 0.6,
+      "noise_selected": 2,
+      "neutral_selected": 1,
+      "n_selected": 6
+    },
+    {
+      "task": "clf",
+      "variant": "standard",
+      "seed": 1,
+      "selector": "select_by_shuffling",
+      "status": "ok",
+      "seconds": 0.6687787920236588,
+      "selected": [
+        "f5",
+        "f7"
+      ],
+      "recall": 0.4,
+      "noise_selected": 0,
+      "neutral_selected": 0,
+      "n_selected": 2
+    },
+    {
+      "task": "clf",
+      "variant": "standard",
+      "seed": 2,
+      "selector": "featranker_share_fast",
+      "status": "ok",
+      "seconds": 3.1689457080792636,
+      "selected": [
+        "f1",
+        "f3",
+        "f6",
+        "f7"
+      ],
+      "recall": 0.6,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 4
+    },
+    {
+      "task": "clf",
+      "variant": "standard",
+      "seed": 2,
+      "selector": "featranker_share_all",
+      "status": "ok",
+      "seconds": 9.06439600000158,
+      "selected": [
+        "f1",
+        "f3",
+        "f6",
+        "f7"
+      ],
+      "recall": 0.6,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 4
+    },
+    {
+      "task": "clf",
+      "variant": "standard",
+      "seed": 2,
+      "selector": "featranker_q_fast",
+      "status": "ok",
+      "seconds": 6.568658833974041,
+      "selected": [
+        "f1",
+        "f7"
+      ],
+      "recall": 0.4,
+      "noise_selected": 0,
+      "neutral_selected": 0,
+      "n_selected": 2
+    },
+    {
+      "task": "clf",
+      "variant": "standard",
+      "seed": 2,
+      "selector": "featranker_q_all",
+      "status": "ok",
+      "seconds": 18.393239374971017,
+      "selected": [
+        "f1",
+        "f3",
+        "f7"
+      ],
+      "recall": 0.6,
+      "noise_selected": 0,
+      "neutral_selected": 0,
+      "n_selected": 3
+    },
+    {
+      "task": "clf",
+      "variant": "standard",
+      "seed": 2,
+      "selector": "boruta",
+      "status": "ok",
+      "seconds": 1.752834792016074,
+      "selected": [
+        "f1",
+        "f3",
+        "f4",
+        "f5",
+        "f6",
+        "f7",
+        "f9"
+      ],
+      "recall": 1.0,
+      "noise_selected": 1,
+      "neutral_selected": 1,
+      "n_selected": 7
+    },
+    {
+      "task": "clf",
+      "variant": "standard",
+      "seed": 2,
+      "selector": "permutation_rule",
+      "status": "ok",
+      "seconds": 0.24108283291570842,
+      "selected": [
+        "f1",
+        "f3",
+        "f6",
+        "f7"
+      ],
+      "recall": 0.6,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 4
+    },
+    {
+      "task": "clf",
+      "variant": "standard",
+      "seed": 2,
+      "selector": "select_by_shuffling",
+      "status": "ok",
+      "seconds": 0.6739948750473559,
+      "selected": [
+        "f1",
+        "f7"
+      ],
+      "recall": 0.4,
+      "noise_selected": 0,
+      "neutral_selected": 0,
+      "n_selected": 2
+    },
+    {
+      "task": "clf",
+      "variant": "standard",
+      "seed": 3,
+      "selector": "featranker_share_fast",
+      "status": "ok",
+      "seconds": 3.1075053749373183,
+      "selected": [
+        "f4",
+        "f5",
+        "f6"
+      ],
+      "recall": 0.4,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 3
+    },
+    {
+      "task": "clf",
+      "variant": "standard",
+      "seed": 3,
+      "selector": "featranker_share_all",
+      "status": "ok",
+      "seconds": 8.81917649996467,
+      "selected": [
+        "f0",
+        "f4",
+        "f5",
+        "f6"
+      ],
+      "recall": 0.6,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 4
+    },
+    {
+      "task": "clf",
+      "variant": "standard",
+      "seed": 3,
+      "selector": "featranker_q_fast",
+      "status": "ok",
+      "seconds": 6.386855375021696,
+      "selected": [
+        "f4",
+        "f5",
+        "f6"
+      ],
+      "recall": 0.4,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 3
+    },
+    {
+      "task": "clf",
+      "variant": "standard",
+      "seed": 3,
+      "selector": "featranker_q_all",
+      "status": "ok",
+      "seconds": 17.967223667073995,
+      "selected": [
+        "f4",
+        "f5",
+        "f6"
+      ],
+      "recall": 0.4,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 3
+    },
+    {
+      "task": "clf",
+      "variant": "standard",
+      "seed": 3,
+      "selector": "boruta",
+      "status": "ok",
+      "seconds": 1.4339943330269307,
+      "selected": [
+        "f0",
+        "f3",
+        "f4",
+        "f5",
+        "f6",
+        "f7"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6
+    },
+    {
+      "task": "clf",
+      "variant": "standard",
+      "seed": 3,
+      "selector": "permutation_rule",
+      "status": "ok",
+      "seconds": 0.23568183300085366,
+      "selected": [
+        "f0",
+        "f1",
+        "f4",
+        "f5",
+        "f6",
+        "f8"
+      ],
+      "recall": 0.6,
+      "noise_selected": 2,
+      "neutral_selected": 1,
+      "n_selected": 6
+    },
+    {
+      "task": "clf",
+      "variant": "standard",
+      "seed": 3,
+      "selector": "select_by_shuffling",
+      "status": "ok",
+      "seconds": 0.6714274580590427,
+      "selected": [
+        "f4",
+        "f6"
+      ],
+      "recall": 0.4,
+      "noise_selected": 0,
+      "neutral_selected": 0,
+      "n_selected": 2
+    },
+    {
+      "task": "clf",
+      "variant": "standard",
+      "seed": 4,
+      "selector": "featranker_share_fast",
+      "status": "ok",
+      "seconds": 3.0777834590990096,
+      "selected": [
+        "f1",
+        "f8",
+        "f9"
+      ],
+      "recall": 0.6,
+      "noise_selected": 0,
+      "neutral_selected": 0,
+      "n_selected": 3
+    },
+    {
+      "task": "clf",
+      "variant": "standard",
+      "seed": 4,
+      "selector": "featranker_share_all",
+      "status": "ok",
+      "seconds": 9.111521207960322,
+      "selected": [
+        "f1",
+        "f8",
+        "f9"
+      ],
+      "recall": 0.6,
+      "noise_selected": 0,
+      "neutral_selected": 0,
+      "n_selected": 3
+    },
+    {
+      "task": "clf",
+      "variant": "standard",
+      "seed": 4,
+      "selector": "featranker_q_fast",
+      "status": "ok",
+      "seconds": 6.232937542023137,
+      "selected": [
+        "f1",
+        "f8",
+        "f9"
+      ],
+      "recall": 0.6,
+      "noise_selected": 0,
+      "neutral_selected": 0,
+      "n_selected": 3
+    },
+    {
+      "task": "clf",
+      "variant": "standard",
+      "seed": 4,
+      "selector": "featranker_q_all",
+      "status": "ok",
+      "seconds": 17.117001040955074,
+      "selected": [
+        "f1",
+        "f8",
+        "f9"
+      ],
+      "recall": 0.6,
+      "noise_selected": 0,
+      "neutral_selected": 0,
+      "n_selected": 3
+    },
+    {
+      "task": "clf",
+      "variant": "standard",
+      "seed": 4,
+      "selector": "boruta",
+      "status": "ok",
+      "seconds": 1.7635963329812512,
+      "selected": [
+        "f0",
+        "f1",
+        "f3",
+        "f4",
+        "f7",
+        "f8",
+        "f9"
+      ],
+      "recall": 1.0,
+      "noise_selected": 1,
+      "neutral_selected": 1,
+      "n_selected": 7
+    },
+    {
+      "task": "clf",
+      "variant": "standard",
+      "seed": 4,
+      "selector": "permutation_rule",
+      "status": "ok",
+      "seconds": 0.22153512493241578,
+      "selected": [
+        "f1",
+        "f4",
+        "f8",
+        "f9"
+      ],
+      "recall": 0.8,
+      "noise_selected": 0,
+      "neutral_selected": 0,
+      "n_selected": 4
+    },
+    {
+      "task": "clf",
+      "variant": "standard",
+      "seed": 4,
+      "selector": "select_by_shuffling",
+      "status": "ok",
+      "seconds": 0.6460796250030398,
+      "selected": [
+        "f1",
+        "f9"
+      ],
+      "recall": 0.4,
+      "noise_selected": 0,
+      "neutral_selected": 0,
+      "n_selected": 2
+    },
+    {
+      "task": "clf",
+      "variant": "hard",
+      "seed": 0,
+      "selector": "featranker_share_fast",
+      "status": "ok",
+      "seconds": 3.61019204207696,
+      "selected": [
+        "f0",
+        "f1",
+        "f4",
+        "f7"
+      ],
+      "recall": 0.6,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 4
+    },
+    {
+      "task": "clf",
+      "variant": "hard",
+      "seed": 0,
+      "selector": "featranker_share_all",
+      "status": "ok",
+      "seconds": 9.49794029199984,
+      "selected": [
+        "f0",
+        "f1",
+        "f4",
+        "f7"
+      ],
+      "recall": 0.6,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 4
+    },
+    {
+      "task": "clf",
+      "variant": "hard",
+      "seed": 0,
+      "selector": "featranker_q_fast",
+      "status": "ok",
+      "seconds": 6.312849916983396,
+      "selected": [
+        "f0",
+        "f1"
+      ],
+      "recall": 0.4,
+      "noise_selected": 0,
+      "neutral_selected": 0,
+      "n_selected": 2
+    },
+    {
+      "task": "clf",
+      "variant": "hard",
+      "seed": 0,
+      "selector": "featranker_q_all",
+      "status": "ok",
+      "seconds": 18.421784917009063,
+      "selected": [
+        "f0",
+        "f1"
+      ],
+      "recall": 0.4,
+      "noise_selected": 0,
+      "neutral_selected": 0,
+      "n_selected": 2
+    },
+    {
+      "task": "clf",
+      "variant": "hard",
+      "seed": 0,
+      "selector": "boruta",
+      "status": "ok",
+      "seconds": 1.197738750022836,
+      "selected": [
+        "f0",
+        "f1",
+        "f4",
+        "f6",
+        "f7",
+        "f9"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6
+    },
+    {
+      "task": "clf",
+      "variant": "hard",
+      "seed": 0,
+      "selector": "permutation_rule",
+      "status": "ok",
+      "seconds": 0.23422750004101545,
+      "selected": [
+        "f0",
+        "f1",
+        "f4",
+        "f7",
+        "f9"
+      ],
+      "recall": 0.8,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 5
+    },
+    {
+      "task": "clf",
+      "variant": "hard",
+      "seed": 0,
+      "selector": "select_by_shuffling",
+      "status": "ok",
+      "seconds": 0.7044633749173954,
+      "selected": [
+        "f0",
+        "f1"
+      ],
+      "recall": 0.4,
+      "noise_selected": 0,
+      "neutral_selected": 0,
+      "n_selected": 2
+    },
+    {
+      "task": "clf",
+      "variant": "hard",
+      "seed": 1,
+      "selector": "featranker_share_fast",
+      "status": "ok",
+      "seconds": 3.1741665840381756,
+      "selected": [
+        "f1",
+        "f5",
+        "f6",
+        "f7"
+      ],
+      "recall": 0.6,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 4
+    },
+    {
+      "task": "clf",
+      "variant": "hard",
+      "seed": 1,
+      "selector": "featranker_share_all",
+      "status": "ok",
+      "seconds": 9.005960041075014,
+      "selected": [
+        "f1",
+        "f5",
+        "f6",
+        "f7"
+      ],
+      "recall": 0.6,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 4
+    },
+    {
+      "task": "clf",
+      "variant": "hard",
+      "seed": 1,
+      "selector": "featranker_q_fast",
+      "status": "ok",
+      "seconds": 6.2908112910808995,
+      "selected": [
+        "f7"
+      ],
+      "recall": 0.2,
+      "noise_selected": 0,
+      "neutral_selected": 0,
+      "n_selected": 1
+    },
+    {
+      "task": "clf",
+      "variant": "hard",
+      "seed": 1,
+      "selector": "featranker_q_all",
+      "status": "ok",
+      "seconds": 17.269890125025995,
+      "selected": [
+        "f5",
+        "f6",
+        "f7"
+      ],
+      "recall": 0.6,
+      "noise_selected": 0,
+      "neutral_selected": 0,
+      "n_selected": 3
+    },
+    {
+      "task": "clf",
+      "variant": "hard",
+      "seed": 1,
+      "selector": "boruta",
+      "status": "ok",
+      "seconds": 2.1701843339251354,
+      "selected": [
+        "f0",
+        "f1",
+        "f5",
+        "f6",
+        "f7",
+        "f9"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6
+    },
+    {
+      "task": "clf",
+      "variant": "hard",
+      "seed": 1,
+      "selector": "permutation_rule",
+      "status": "ok",
+      "seconds": 0.24545141600538045,
+      "selected": [
+        "f0",
+        "f5",
+        "f6",
+        "f7",
+        "f9"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 0,
+      "n_selected": 5
+    },
+    {
+      "task": "clf",
+      "variant": "hard",
+      "seed": 1,
+      "selector": "select_by_shuffling",
+      "status": "ok",
+      "seconds": 0.6471702500712126,
+      "selected": [
+        "f5",
+        "f7",
+        "f9"
+      ],
+      "recall": 0.6,
+      "noise_selected": 0,
+      "neutral_selected": 0,
+      "n_selected": 3
+    },
+    {
+      "task": "clf",
+      "variant": "hard",
+      "seed": 2,
+      "selector": "featranker_share_fast",
+      "status": "ok",
+      "seconds": 3.1237676249584183,
+      "selected": [
+        "f1",
+        "f3",
+        "f6",
+        "f7"
+      ],
+      "recall": 0.6,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 4
+    },
+    {
+      "task": "clf",
+      "variant": "hard",
+      "seed": 2,
+      "selector": "featranker_share_all",
+      "status": "ok",
+      "seconds": 9.598956250003539,
+      "selected": [
+        "f1",
+        "f3",
+        "f6",
+        "f7"
+      ],
+      "recall": 0.6,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 4
+    },
+    {
+      "task": "clf",
+      "variant": "hard",
+      "seed": 2,
+      "selector": "featranker_q_fast",
+      "status": "ok",
+      "seconds": 6.291324750054628,
+      "selected": [
+        "f1",
+        "f3",
+        "f7"
+      ],
+      "recall": 0.6,
+      "noise_selected": 0,
+      "neutral_selected": 0,
+      "n_selected": 3
+    },
+    {
+      "task": "clf",
+      "variant": "hard",
+      "seed": 2,
+      "selector": "featranker_q_all",
+      "status": "ok",
+      "seconds": 18.172009916976094,
+      "selected": [
+        "f1",
+        "f3",
+        "f6",
+        "f7"
+      ],
+      "recall": 0.6,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 4
+    },
+    {
+      "task": "clf",
+      "variant": "hard",
+      "seed": 2,
+      "selector": "boruta",
+      "status": "ok",
+      "seconds": 0.9607486249879003,
+      "selected": [
+        "f1",
+        "f3",
+        "f4",
+        "f5",
+        "f6",
+        "f7",
+        "f9"
+      ],
+      "recall": 1.0,
+      "noise_selected": 1,
+      "neutral_selected": 1,
+      "n_selected": 7
+    },
+    {
+      "task": "clf",
+      "variant": "hard",
+      "seed": 2,
+      "selector": "permutation_rule",
+      "status": "ok",
+      "seconds": 0.2199462919961661,
+      "selected": [
+        "f1",
+        "f7"
+      ],
+      "recall": 0.4,
+      "noise_selected": 0,
+      "neutral_selected": 0,
+      "n_selected": 2
+    },
+    {
+      "task": "clf",
+      "variant": "hard",
+      "seed": 2,
+      "selector": "select_by_shuffling",
+      "status": "ok",
+      "seconds": 0.6855982500128448,
+      "selected": [
+        "f1",
+        "f7"
+      ],
+      "recall": 0.4,
+      "noise_selected": 0,
+      "neutral_selected": 0,
+      "n_selected": 2
+    },
+    {
+      "task": "clf",
+      "variant": "hard",
+      "seed": 3,
+      "selector": "featranker_share_fast",
+      "status": "ok",
+      "seconds": 3.212035540957004,
+      "selected": [
+        "f0",
+        "f4",
+        "f5",
+        "f6"
+      ],
+      "recall": 0.6,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 4
+    },
+    {
+      "task": "clf",
+      "variant": "hard",
+      "seed": 3,
+      "selector": "featranker_share_all",
+      "status": "ok",
+      "seconds": 8.452554083080031,
+      "selected": [
+        "f4",
+        "f5",
+        "f6"
+      ],
+      "recall": 0.4,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 3
+    },
+    {
+      "task": "clf",
+      "variant": "hard",
+      "seed": 3,
+      "selector": "featranker_q_fast",
+      "status": "ok",
+      "seconds": 6.701716874958947,
+      "selected": [
+        "f4",
+        "f5",
+        "f6"
+      ],
+      "recall": 0.4,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 3
+    },
+    {
+      "task": "clf",
+      "variant": "hard",
+      "seed": 3,
+      "selector": "featranker_q_all",
+      "status": "ok",
+      "seconds": 18.16510662494693,
+      "selected": [
+        "f4",
+        "f5",
+        "f6"
+      ],
+      "recall": 0.4,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 3
+    },
+    {
+      "task": "clf",
+      "variant": "hard",
+      "seed": 3,
+      "selector": "boruta",
+      "status": "ok",
+      "seconds": 4.283610667102039,
+      "selected": [
+        "f0",
+        "f3",
+        "f4",
+        "f5",
+        "f6",
+        "f7"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6
+    },
+    {
+      "task": "clf",
+      "variant": "hard",
+      "seed": 3,
+      "selector": "permutation_rule",
+      "status": "ok",
+      "seconds": 0.6606498330365866,
+      "selected": [
+        "f4",
+        "f6"
+      ],
+      "recall": 0.4,
+      "noise_selected": 0,
+      "neutral_selected": 0,
+      "n_selected": 2
+    },
+    {
+      "task": "clf",
+      "variant": "hard",
+      "seed": 3,
+      "selector": "select_by_shuffling",
+      "status": "ok",
+      "seconds": 0.6883014589548111,
+      "selected": [
+        "f4",
+        "f6"
+      ],
+      "recall": 0.4,
+      "noise_selected": 0,
+      "neutral_selected": 0,
+      "n_selected": 2
+    },
+    {
+      "task": "clf",
+      "variant": "hard",
+      "seed": 4,
+      "selector": "featranker_share_fast",
+      "status": "ok",
+      "seconds": 3.3713668329874054,
+      "selected": [
+        "f1",
+        "f8",
+        "f9"
+      ],
+      "recall": 0.6,
+      "noise_selected": 0,
+      "neutral_selected": 0,
+      "n_selected": 3
+    },
+    {
+      "task": "clf",
+      "variant": "hard",
+      "seed": 4,
+      "selector": "featranker_share_all",
+      "status": "ok",
+      "seconds": 9.8080360830063,
+      "selected": [
+        "f1",
+        "f8",
+        "f9"
+      ],
+      "recall": 0.6,
+      "noise_selected": 0,
+      "neutral_selected": 0,
+      "n_selected": 3
+    },
+    {
+      "task": "clf",
+      "variant": "hard",
+      "seed": 4,
+      "selector": "featranker_q_fast",
+      "status": "ok",
+      "seconds": 6.301910707959905,
+      "selected": [
+        "f1",
+        "f8",
+        "f9"
+      ],
+      "recall": 0.6,
+      "noise_selected": 0,
+      "neutral_selected": 0,
+      "n_selected": 3
+    },
+    {
+      "task": "clf",
+      "variant": "hard",
+      "seed": 4,
+      "selector": "featranker_q_all",
+      "status": "ok",
+      "seconds": 17.772283124970272,
+      "selected": [
+        "f1",
+        "f8",
+        "f9"
+      ],
+      "recall": 0.6,
+      "noise_selected": 0,
+      "neutral_selected": 0,
+      "n_selected": 3
+    },
+    {
+      "task": "clf",
+      "variant": "hard",
+      "seed": 4,
+      "selector": "boruta",
+      "status": "ok",
+      "seconds": 7.365177207975648,
+      "selected": [
+        "f0",
+        "f1",
+        "f3",
+        "f4",
+        "f8",
+        "f9"
+      ],
+      "recall": 1.0,
+      "noise_selected": 0,
+      "neutral_selected": 1,
+      "n_selected": 6
+    },
+    {
+      "task": "clf",
+      "variant": "hard",
+      "seed": 4,
+      "selector": "permutation_rule",
+      "status": "ok",
+      "seconds": 0.24988624989055097,
+      "selected": [
+        "f1",
+        "f4",
+        "f9"
+      ],
+      "recall": 0.6,
+      "noise_selected": 0,
+      "neutral_selected": 0,
+      "n_selected": 3
+    },
+    {
+      "task": "clf",
+      "variant": "hard",
+      "seed": 4,
+      "selector": "select_by_shuffling",
+      "status": "ok",
+      "seconds": 0.6695907500106841,
+      "selected": [
+        "f1",
+        "f8",
+        "f9"
+      ],
+      "recall": 0.6,
+      "noise_selected": 0,
+      "neutral_selected": 0,
+      "n_selected": 3
+    }
+  ],
+  "total_seconds": 922.8779782089405,
+  "summary": [
+    {
+      "task": "reg",
+      "variant": "standard",
+      "selector": "featranker_share_fast",
+      "n_runs": 5,
+      "status": "ok",
+      "recall_mean": 1.0,
+      "recall_std": 0.0,
+      "noise_mean": 0.0,
+      "noise_std": 0.0,
+      "copy_mean": 1.0,
+      "copy_std": 0.0,
+      "seconds_mean": 6.178797808219679,
+      "seconds_std": 0.9784458507848238
+    },
+    {
+      "task": "reg",
+      "variant": "standard",
+      "selector": "featranker_share_all",
+      "n_runs": 5,
+      "status": "ok",
+      "recall_mean": 1.0,
+      "recall_std": 0.0,
+      "noise_mean": 0.0,
+      "noise_std": 0.0,
+      "copy_mean": 1.0,
+      "copy_std": 0.0,
+      "seconds_mean": 10.275637033209204,
+      "seconds_std": 0.8303474520896102
+    },
+    {
+      "task": "reg",
+      "variant": "standard",
+      "selector": "featranker_q_fast",
+      "n_runs": 5,
+      "status": "ok",
+      "recall_mean": 1.0,
+      "recall_std": 0.0,
+      "noise_mean": 0.0,
+      "noise_std": 0.0,
+      "copy_mean": 1.0,
+      "copy_std": 0.0,
+      "seconds_mean": 11.31986847477965,
+      "seconds_std": 0.20742648981816794
+    },
+    {
+      "task": "reg",
+      "variant": "standard",
+      "selector": "featranker_q_all",
+      "n_runs": 5,
+      "status": "ok",
+      "recall_mean": 1.0,
+      "recall_std": 0.0,
+      "noise_mean": 0.0,
+      "noise_std": 0.0,
+      "copy_mean": 1.0,
+      "copy_std": 0.0,
+      "seconds_mean": 19.298634024802595,
+      "seconds_std": 0.7719618923805281
+    },
+    {
+      "task": "reg",
+      "variant": "standard",
+      "selector": "boruta",
+      "n_runs": 5,
+      "status": "ok",
+      "recall_mean": 1.0,
+      "recall_std": 0.0,
+      "noise_mean": 0.2,
+      "noise_std": 0.447213595499958,
+      "copy_mean": 1.0,
+      "copy_std": 0.0,
+      "seconds_mean": 4.818632141593843,
+      "seconds_std": 4.598113188814562
+    },
+    {
+      "task": "reg",
+      "variant": "standard",
+      "selector": "permutation_rule",
+      "n_runs": 5,
+      "status": "ok",
+      "recall_mean": 1.0,
+      "recall_std": 0.0,
+      "noise_mean": 0.0,
+      "noise_std": 0.0,
+      "copy_mean": 1.0,
+      "copy_std": 0.0,
+      "seconds_mean": 0.4153263418003917,
+      "seconds_std": 0.136104481629081
+    },
+    {
+      "task": "reg",
+      "variant": "standard",
+      "selector": "select_by_shuffling",
+      "n_runs": 5,
+      "status": "ok",
+      "recall_mean": 0.43999999999999995,
+      "recall_std": 0.08944271909999157,
+      "noise_mean": 0.0,
+      "noise_std": 0.0,
+      "copy_mean": 0.0,
+      "copy_std": 0.0,
+      "seconds_mean": 0.6537912500090897,
+      "seconds_std": 0.02471227611769306
+    },
+    {
+      "task": "reg",
+      "variant": "hard",
+      "selector": "featranker_share_fast",
+      "n_runs": 5,
+      "status": "ok",
+      "recall_mean": 1.0,
+      "recall_std": 0.0,
+      "noise_mean": 0.0,
+      "noise_std": 0.0,
+      "copy_mean": 1.0,
+      "copy_std": 0.0,
+      "seconds_mean": 5.905361449997872,
+      "seconds_std": 0.24760196922199681
+    },
+    {
+      "task": "reg",
+      "variant": "hard",
+      "selector": "featranker_share_all",
+      "n_runs": 5,
+      "status": "ok",
+      "recall_mean": 1.0,
+      "recall_std": 0.0,
+      "noise_mean": 0.0,
+      "noise_std": 0.0,
+      "copy_mean": 1.0,
+      "copy_std": 0.0,
+      "seconds_mean": 9.867043408192695,
+      "seconds_std": 0.8426225854000501
+    },
+    {
+      "task": "reg",
+      "variant": "hard",
+      "selector": "featranker_q_fast",
+      "n_runs": 5,
+      "status": "ok",
+      "recall_mean": 0.8800000000000001,
+      "recall_std": 0.17888543819998318,
+      "noise_mean": 0.0,
+      "noise_std": 0.0,
+      "copy_mean": 1.0,
+      "copy_std": 0.0,
+      "seconds_mean": 11.570100100198761,
+      "seconds_std": 0.28197282267597146
+    },
+    {
+      "task": "reg",
+      "variant": "hard",
+      "selector": "featranker_q_all",
+      "n_runs": 5,
+      "status": "ok",
+      "recall_mean": 0.9199999999999999,
+      "recall_std": 0.1095445115010332,
+      "noise_mean": 0.0,
+      "noise_std": 0.0,
+      "copy_mean": 1.0,
+      "copy_std": 0.0,
+      "seconds_mean": 19.414987641386688,
+      "seconds_std": 1.0502746313309856
+    },
+    {
+      "task": "reg",
+      "variant": "hard",
+      "selector": "boruta",
+      "n_runs": 5,
+      "status": "ok",
+      "recall_mean": 1.0,
+      "recall_std": 0.0,
+      "noise_mean": 0.6,
+      "noise_std": 0.5477225575051662,
+      "copy_mean": 1.0,
+      "copy_std": 0.0,
+      "seconds_mean": 3.032596516585909,
+      "seconds_std": 3.1185430812395314
+    },
+    {
+      "task": "reg",
+      "variant": "hard",
+      "selector": "permutation_rule",
+      "n_runs": 5,
+      "status": "ok",
+      "recall_mean": 1.0,
+      "recall_std": 0.0,
+      "noise_mean": 0.2,
+      "noise_std": 0.44721359549995804,
+      "copy_mean": 1.0,
+      "copy_std": 0.0,
+      "seconds_mean": 0.40053349200170485,
+      "seconds_std": 0.16401167882228448
+    },
+    {
+      "task": "reg",
+      "variant": "hard",
+      "selector": "select_by_shuffling",
+      "n_runs": 5,
+      "status": "ok",
+      "recall_mean": 0.43999999999999995,
+      "recall_std": 0.08944271909999157,
+      "noise_mean": 0.0,
+      "noise_std": 0.0,
+      "copy_mean": 0.0,
+      "copy_std": 0.0,
+      "seconds_mean": 0.679497933620587,
+      "seconds_std": 0.03821743349282841
+    },
+    {
+      "task": "clf",
+      "variant": "standard",
+      "selector": "featranker_share_fast",
+      "n_runs": 5,
+      "status": "ok",
+      "recall_mean": 0.5599999999999999,
+      "recall_std": 0.08944271909999157,
+      "noise_mean": 0.0,
+      "noise_std": 0.0,
+      "copy_mean": 0.6,
+      "copy_std": 0.5477225575051662,
+      "seconds_mean": 3.1801449418067933,
+      "seconds_std": 0.0912470500247094
+    },
+    {
+      "task": "clf",
+      "variant": "standard",
+      "selector": "featranker_share_all",
+      "n_runs": 5,
+      "status": "ok",
+      "recall_mean": 0.64,
+      "recall_std": 0.08944271909999163,
+      "noise_mean": 0.0,
+      "noise_std": 0.0,
+      "copy_mean": 0.8,
+      "copy_std": 0.4472135954999579,
+      "seconds_mean": 9.411947191762739,
+      "seconds_std": 0.6685544847308466
+    },
+    {
+      "task": "clf",
+      "variant": "standard",
+      "selector": "featranker_q_fast",
+      "n_runs": 5,
+      "status": "ok",
+      "recall_mean": 0.48,
+      "recall_std": 0.1095445115010332,
+      "noise_mean": 0.0,
+      "noise_std": 0.0,
+      "copy_mean": 0.2,
+      "copy_std": 0.447213595499958,
+      "seconds_mean": 6.322735808580182,
+      "seconds_std": 0.1578288931857781
+    },
+    {
+      "task": "clf",
+      "variant": "standard",
+      "selector": "featranker_q_all",
+      "n_runs": 5,
+      "status": "ok",
+      "recall_mean": 0.52,
+      "recall_std": 0.1095445115010332,
+      "noise_mean": 0.0,
+      "noise_std": 0.0,
+      "copy_mean": 0.4,
+      "copy_std": 0.5477225575051662,
+      "seconds_mean": 17.663030700013042,
+      "seconds_std": 0.5156560479899461
+    },
+    {
+      "task": "clf",
+      "variant": "standard",
+      "selector": "boruta",
+      "n_runs": 5,
+      "status": "ok",
+      "recall_mean": 1.0,
+      "recall_std": 0.0,
+      "noise_mean": 0.4,
+      "noise_std": 0.5477225575051662,
+      "copy_mean": 1.0,
+      "copy_std": 0.0,
+      "seconds_mean": 2.057152700005099,
+      "seconds_std": 1.350938381482163
+    },
+    {
+      "task": "clf",
+      "variant": "standard",
+      "selector": "permutation_rule",
+      "n_runs": 5,
+      "status": "ok",
+      "recall_mean": 0.64,
+      "recall_std": 0.08944271909999162,
+      "noise_mean": 0.8,
+      "noise_std": 1.0954451150103324,
+      "copy_mean": 0.6,
+      "copy_std": 0.5477225575051662,
+      "seconds_mean": 0.3135909331496805,
+      "seconds_std": 0.17809196210738723
+    },
+    {
+      "task": "clf",
+      "variant": "standard",
+      "selector": "select_by_shuffling",
+      "n_runs": 5,
+      "status": "ok",
+      "recall_mean": 0.4,
+      "recall_std": 0.0,
+      "noise_mean": 0.0,
+      "noise_std": 0.0,
+      "copy_mean": 0.0,
+      "copy_std": 0.0,
+      "seconds_mean": 0.6649929416365922,
+      "seconds_std": 0.01111957156114543
+    },
+    {
+      "task": "clf",
+      "variant": "hard",
+      "selector": "featranker_share_fast",
+      "n_runs": 5,
+      "status": "ok",
+      "recall_mean": 0.6,
+      "recall_std": 0.0,
+      "noise_mean": 0.0,
+      "noise_std": 0.0,
+      "copy_mean": 0.8,
+      "copy_std": 0.4472135954999579,
+      "seconds_mean": 3.2983057250035928,
+      "seconds_std": 0.1974383572281832
+    },
+    {
+      "task": "clf",
+      "variant": "hard",
+      "selector": "featranker_share_all",
+      "n_runs": 5,
+      "status": "ok",
+      "recall_mean": 0.5599999999999999,
+      "recall_std": 0.08944271909999157,
+      "noise_mean": 0.0,
+      "noise_std": 0.0,
+      "copy_mean": 0.8,
+      "copy_std": 0.4472135954999579,
+      "seconds_mean": 9.272689349832945,
+      "seconds_std": 0.5448739720650415
+    },
+    {
+      "task": "clf",
+      "variant": "hard",
+      "selector": "featranker_q_fast",
+      "n_runs": 5,
+      "status": "ok",
+      "recall_mean": 0.44000000000000006,
+      "recall_std": 0.16733200530681508,
+      "noise_mean": 0.0,
+      "noise_std": 0.0,
+      "copy_mean": 0.2,
+      "copy_std": 0.447213595499958,
+      "seconds_mean": 6.379722708207555,
+      "seconds_std": 0.1802264964646226
+    },
+    {
+      "task": "clf",
+      "variant": "hard",
+      "selector": "featranker_q_all",
+      "n_runs": 5,
+      "status": "ok",
+      "recall_mean": 0.52,
+      "recall_std": 0.1095445115010332,
+      "noise_mean": 0.0,
+      "noise_std": 0.0,
+      "copy_mean": 0.4,
+      "copy_std": 0.5477225575051662,
+      "seconds_mean": 17.960214941785672,
+      "seconds_std": 0.4504862028348108
+    },
+    {
+      "task": "clf",
+      "variant": "hard",
+      "selector": "boruta",
+      "n_runs": 5,
+      "status": "ok",
+      "recall_mean": 1.0,
+      "recall_std": 0.0,
+      "noise_mean": 0.2,
+      "noise_std": 0.44721359549995804,
+      "copy_mean": 1.0,
+      "copy_std": 0.0,
+      "seconds_mean": 3.1954919168027116,
+      "seconds_std": 2.6742582512433932
+    },
+    {
+      "task": "clf",
+      "variant": "hard",
+      "selector": "permutation_rule",
+      "n_runs": 5,
+      "status": "ok",
+      "recall_mean": 0.64,
+      "recall_std": 0.2607680962081059,
+      "noise_mean": 0.0,
+      "noise_std": 0.0,
+      "copy_mean": 0.2,
+      "copy_std": 0.44721359549995804,
+      "seconds_mean": 0.32203225819393994,
+      "seconds_std": 0.1896462192778726
+    },
+    {
+      "task": "clf",
+      "variant": "hard",
+      "selector": "select_by_shuffling",
+      "n_runs": 5,
+      "status": "ok",
+      "recall_mean": 0.48,
+      "recall_std": 0.1095445115010332,
+      "noise_mean": 0.0,
+      "noise_std": 0.0,
+      "copy_mean": 0.0,
+      "copy_std": 0.0,
+      "seconds_mean": 0.6790248167933897,
+      "seconds_std": 0.021680067980914475
+    }
+  ]
+}
