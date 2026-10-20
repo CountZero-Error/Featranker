@@ -78,7 +78,7 @@ With shadows on, `rank_resampled()` SHALL add to every stability row:
 - `shadow_p_value`: the one-sided binomial probability of at least `shadow_hits` successes in `n_splits` trials with success probability 0.5;
 - `shadow_q_value`: the Benjamini–Hochberg adjusted p-value across all stability rows, capped at 1 and monotone in `shadow_p_value`.
 
-The resampled report SHALL include `shadow_test` with `method` `"binomial"`, `hit` `"above_shadow_share > 0.5"`, `null_probability` `0.5`, `correction` `"benjamini-hochberg"`, `n_trials` (equal to `n_splits`), and `min_p_value` (`0.5 ** n_splits`). Without shadows, none of these keys SHALL appear. All values SHALL be JSON-safe.
+The resampled report SHALL include `shadow_test` with `method` `"binomial"`, `hit` `"above_shadow_share > 0.5"`, `null_probability` `0.5`, `correction` `"benjamini-hochberg"`, `n_trials` (equal to `n_splits`), `min_p_value` (`0.5 ** n_splits`), `calibrated` (`false`), and `note`, a string stating that the values are binomial reference values whose null and false-discovery control are not established for arbitrary estimators or overlapping splits. Without shadows, none of these keys SHALL appear. All values SHALL be JSON-safe.
 
 #### Scenario: Hits and p-value
 - **WHEN** a group's per-split shares over 10 splits are 1.0 nine times and 0.0 once
@@ -99,6 +99,10 @@ The resampled report SHALL include `shadow_test` with `method` `"binomial"`, `hi
 #### Scenario: Few splits
 - **WHEN** `cv=5` with shadows
 - **THEN** `shadow_test.min_p_value == 0.03125`
+
+#### Scenario: Uncalibrated label
+- **WHEN** `rank_resampled()` runs with shadows
+- **THEN** `shadow_test.calibrated is False` and `shadow_test.note` mentions that the values are not calibrated
 
 #### Scenario: No shadows
 - **WHEN** `rank_resampled()` runs without shadows

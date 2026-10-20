@@ -11,8 +11,8 @@ Every family present in the task's full registry SHALL have exactly one represen
 - **WHEN** `FeatureRanker("clf", group="fast").fit(X, y)` runs
 - **THEN** `trained_models` has exactly the seven classification representatives
 
-#### Scenario: Same candidate families as all
-- **WHEN** the families of the fast models and of all built-in models for a task are compared
+#### Scenario: Same families as all
+- **WHEN** the candidate families of the fast models and of all built-in models for a task are compared
 - **THEN** they are the same set, and each family appears once among the fast models
 
 #### Scenario: No optional dependency
