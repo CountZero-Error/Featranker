@@ -31,14 +31,21 @@ context: |
     1.1  evidence-for-why: SHAP extra (TreeExplainer/LinearExplainer),
          group correlation, train-vs-eval score; no LLM use;
          explain()/to_prompt() deprecated (removed in 2.0)
-    1.2  llm-investigator: not built
-  Planned after 1.1 (weaknesses review, 2026-10-19):
-    1.2  fast-preset: group="fast", one model per family; skip permutations
-         for models that lose to the dummy (preset only, schema unchanged)
-    1.3  auto-groups: feature_groups="auto" via Spearman clustering on
-         training data
-    1.4  shadow-test: binomial hits test over resampled splits, BH correction
-    docs benchmark vs Boruta / sklearn / feature-engine on planted data
+    --   llm-investigator: not built (was planned as 1.2; spike NO-GO)
+  Done after 1.1 (weaknesses review, 2026-10-19/20):
+    1.2  fast-preset: group="fast", one model per family (dummy-loser skip
+         dropped: schema edge cases for little saving)
+    1.3  auto-groups: auto_groups() and feature_groups="auto" (selector, CLI)
+    1.4  shadow-test: binomial hits test over resampled splits, BH q-values,
+         ConsensusSelector(max_shadow_q=)
+    docs benchmark vs Boruta / sklearn / feature-engine (docs/benchmark.md)
+  Candidates from the benchmark (not scheduled; maintainer decides):
+    - interaction blind spot: the family-averaged shadow share hides effects
+      only some families can model (classification c·d: 0.44-0.64 recall;
+      group="tree" 0.92-1.00)
+    - shadow block shares one row order, so collinear real pairs stay
+      collinear in the shadows and inflate shadow_max for linear models
+      (observed on one seed)
 
 rules:
   proposal:
