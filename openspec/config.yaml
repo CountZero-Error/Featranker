@@ -39,13 +39,55 @@ context: |
     1.4  shadow-test: binomial hits test over resampled splits, BH q-values,
          ConsensusSelector(max_shadow_q=)
     docs benchmark vs Boruta / sklearn / feature-engine (docs/benchmark.md)
-  Candidates from the benchmark (not scheduled; maintainer decides):
-    - interaction blind spot: the family-averaged shadow share hides effects
-      only some families can model (classification c·d: 0.44-0.64 recall;
-      group="tree" 0.92-1.00)
-    - shadow block shares one row order, so collinear real pairs stay
-      collinear in the shadows and inflate shadow_max for linear models
-      (observed on one seed)
+  Known limitations (found 2026-10-19/20 in reviews and the benchmark;
+  not scheduled; maintainer decides):
+    Method and statistics
+    L1  interaction blind spot: above_shadow_share averages families, so
+        effects only some families can model fail the 0.5 rule
+        (classification c*d recall 0.44-0.64; group="tree" 0.92-1.00)
+    L2  shadow block uses one shared row order: collinear real pairs stay
+        collinear in the shadows and inflate shadow_max for linear models
+        (observed on one seed)
+    L3  shadow hits test is approximate (overlapping splits), its 0.5 null
+        is conservative, and at cv=5 only 5/5 reaches p=0.031; in the
+        benchmark max_shadow_q never beat min_shadow_share
+    L4  correlated features still split permutation importance unless
+        grouped; auto_groups threshold is fixed at 0.7 in the selector and
+        CLI; small samples inflate |rho|
+    L5  SHAP only for linear and tree models (no model-agnostic fallback);
+        mean |SHAP| not comparable across models; linear direction is
+        always +/-1; shap < 0.52 untested
+    L6  group="all" showed no consistent gain over "fast" in the benchmark;
+        a one-model family vote is less robust than a family median
+    Data coverage
+    L7  missing values rejected, even for models that handle NaN natively
+        (HistGradientBoosting, XGBoost, CatBoost)
+    L8  numeric input only: no categorical or string columns; estimators
+        receive float arrays without column names
+    L9  no sample weights
+    L10 tabular data and scikit-learn-style estimators only
+    Performance
+    L11 slower than single-model selectors (benchmark means 3-19 s vs
+        0.3-5 s); SVR in "fast" is quadratic in rows; models that lose to
+        the dummy are still permuted
+    L12 correlation evidence and auto_groups are O(columns^2)
+    Traceability
+    L13 the report does not record the model group/preset or the
+        auto_groups threshold and method used
+    L14 rankers with evidence=True pickle their training data (about 2x
+        with shadows)
+    API and deprecation
+    L15 explain()/to_prompt() deprecated, removal in 2.0; the prompt rules
+        do not describe the hits test (only the shadow_test block is shown)
+    Engineering
+    L16 small open review items: fast tag is a truthiness check; the scaler
+        test covers one model; no CLI test for an unknown --group; odd
+        unsupported reason for "passthrough" pipeline steps
+    L17 n_jobs tests and mypy with types-PyYAML are verified only in CI,
+        not in the local sandbox
+    Release
+    L18 1.0-1.4 unreleased; local main is ahead of origin; six older
+        commits carry Claude-Session lines
 
 rules:
   proposal:
