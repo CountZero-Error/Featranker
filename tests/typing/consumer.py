@@ -18,3 +18,7 @@ selector = ConsensusSelector("reg", "r2", k=np.int64(2))
 fast_selector = ConsensusSelector("reg", "r2", k=2, group="fast")
 selector.report_.plot()
 q_selector = ConsensusSelector("reg", "r2", max_shadow_q=0.05)
+family_selector = ConsensusSelector(
+    "reg", "r2", min_shadow_families=2, shadow_mode="independent"
+)
+independent_ranker = FeatureRanker(task="reg", shadows=True, shadow_mode="independent")

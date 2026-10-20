@@ -334,9 +334,12 @@ def _build_consensus(model_reports: Dict[str, Any]) -> List[Dict[str, Any]]:
             }
         )
         if group_name in above_by_group:
-            consensus[-1]["above_shadow_share"] = float(
-                np.mean([np.mean(flags) for flags in above_by_group[group_name].values()])
-            )
+            fractions = {
+                family: float(np.mean(flags))
+                for family, flags in above_by_group[group_name].items()
+            }
+            consensus[-1]["above_shadow_share"] = float(np.mean(list(fractions.values())))
+            consensus[-1]["family_above_shadow"] = dict(sorted(fractions.items()))
     return sorted(
         consensus,
         key=lambda row: (
@@ -446,6 +449,8 @@ def _build_stability(
     group_names = list(split_reports[0]["report"]["feature_groups"]) if split_reports else []
     split_ranks: Dict[str, List[Optional[int]]] = {name: [] for name in group_names}
     shadow_shares: Dict[str, List[float]] = {}
+    # group -> family -> per-split fractions, for the splits where the family voted.
+    family_fractions: Dict[str, Dict[str, List[float]]] = {}
     for entry in split_reports:
         by_group = _consensus_positions(entry["report"]["consensus"])
         for name in group_names:
@@ -455,6 +460,10 @@ def _build_stability(
                 shadow_shares.setdefault(row["feature_group"], []).append(
                     row["above_shadow_share"]
                 )
+                for family, fraction in row.get("family_above_shadow", {}).items():
+                    family_fractions.setdefault(row["feature_group"], {}).setdefault(
+                        family, []
+                    ).append(fraction)
 
     if not any(entry["report"]["consensus"] for entry in split_reports):
         warnings.warn(
@@ -486,6 +495,15 @@ def _build_stability(
             hits = sum(share > 0.5 for share in shadow_shares[name])
             rows[-1]["shadow_hits"] = hits
             rows[-1]["shadow_p_value"] = float(binom.sf(hits - 1, n_splits, 0.5))
+        if name in family_fractions:
+            # Splits where the family did not vote, failed, or were empty count
+            # as 0, like shadow_hits: a family seen in a few splits cannot pass.
+            shares = {
+                family: float(np.sum(values) / n_splits)
+                for family, values in sorted(family_fractions[name].items())
+            }
+            rows[-1]["family_above_shadow_share"] = shares
+            rows[-1]["shadow_families"] = sum(share > 0.5 for share in shares.values())
     if shadow_shares:
         q_values = _benjamini_hochberg([row["shadow_p_value"] for row in rows])
         for row, q_value in zip(rows, q_values):
@@ -509,10 +527,21 @@ def _run_models(
     return Parallel(n_jobs=n_jobs)(delayed(worker)(*job) for job in jobs)
 
 
-def _with_shadows(X_values: np.ndarray, seed: Any) -> np.ndarray:
-    """Real columns followed by a shadow block: the same rows in one shuffled order."""
-    row_order = np.random.default_rng(seed).permutation(len(X_values))
-    return np.hstack([X_values, X_values[row_order]])
+def _with_shadows(X_values: np.ndarray, seed: Any, mode: str = "joint") -> np.ndarray:
+    """
+    Real columns followed by a shadow block.
+
+    "joint": the same rows in one shuffled order. "independent": each column
+    in its own shuffled order, drawn in column order from one generator.
+    """
+    rng = np.random.default_rng(seed)
+    if mode == "independent":
+        shadow = np.column_stack(
+            [X_values[rng.permutation(len(X_values)), j] for j in range(X_values.shape[1])]
+        )
+    else:
+        shadow = X_values[rng.permutation(len(X_values))]
+    return np.hstack([X_values, shadow])
 
 
 def _fit_model(
@@ -653,6 +682,7 @@ class FeatureRanker:
         shadows: bool = False,
         shadow_seed: Optional[int] = None,
         evidence: bool = False,
+        shadow_mode: Literal["joint", "independent"] = "joint",
     ) -> None:
         """
         Initialize configured models without loading or fitting data.
@@ -672,6 +702,9 @@ class FeatureRanker:
             evidence: Keep the training data so rank_features() can add
                 mechanism evidence: train score, overfit gap, correlated
                 groups, and (with the shap extra) a SHAP summary.
+            shadow_mode: "joint" shuffles all columns with one shared row
+                order (collinear columns stay collinear in the shadows);
+                "independent" shuffles each shadow column on its own.
         """
         if task not in {"clf", "reg"}:
             raise ValueError("[!] task must be 'clf' or 'reg'.")
@@ -692,12 +725,15 @@ class FeatureRanker:
         if shadow_seed is not None and shadow_seed < 0:
             # NumPy generators only accept non-negative integer seeds.
             raise ValueError("[!] shadow_seed must be non-negative.")
+        if not isinstance(shadow_mode, str) or shadow_mode not in {"joint", "independent"}:
+            raise ValueError("[!] shadow_mode must be 'joint' or 'independent'.")
         self.task = task
         self.group = group
         self.n_jobs = n_jobs
         self.verbose = verbose
         self.shadows = shadows
         self.shadow_seed = shadow_seed
+        self.shadow_mode = shadow_mode
         self.evidence = evidence
         self.label_encoder = None
         self.initialization_failures_: List[Dict[str, str]] = []
@@ -719,6 +755,8 @@ class FeatureRanker:
         self.__dict__.setdefault("shadow_seed", None)
         # ... and those pickled by 1.0 lack the 1.1 evidence flag.
         self.__dict__.setdefault("evidence", False)
+        # ... and those pickled by 1.5 lack the 1.6 shadow mode.
+        self.__dict__.setdefault("shadow_mode", "joint")
         if "model_families_" not in self.__dict__:
             self.model_families_ = (
                 _registry_families() if self.user_models is None else {}
@@ -757,7 +795,9 @@ class FeatureRanker:
         self.fit_failures_ = []
         # Models see the shadow block too; the dummy below sees real columns only.
         X_models = (
-            _with_shadows(X_values, self.shadow_seed) if self.shadows else X_values
+            _with_shadows(X_values, self.shadow_seed, self.shadow_mode)
+            if self.shadows
+            else X_values
         )
         jobs = [(name, model, X_models, y_values) for name, model in candidates.items()]
         for name, fitted, failure in _run_models(
@@ -828,7 +868,7 @@ class FeatureRanker:
         if self.shadows:
             # An independent, reproducible shuffle of the evaluation rows.
             eval_seed = None if self.shadow_seed is None else [self.shadow_seed, 1]
-            X_models = _with_shadows(X_values, eval_seed)
+            X_models = _with_shadows(X_values, eval_seed, self.shadow_mode)
             offset = len(self.feature_names_)
             shadow_groups = {
                 name: [index + offset for index in indices]
@@ -876,6 +916,7 @@ class FeatureRanker:
         if self.shadows:
             report["shadows"] = True
             report["shadow_seed"] = self.shadow_seed
+            report["shadow_mode"] = self.shadow_mode
         if self.evidence:
             n_real = len(self.feature_names_)
             shap_block, shap_models = shap_evidence(
@@ -940,6 +981,7 @@ class FeatureRanker:
                         None if self.shadow_seed is None else self.shadow_seed + index
                     ),
                     evidence=self.evidence,
+                    shadow_mode=self.shadow_mode,
                 )
                 ranker.fit(X_values[train], y_values[train], feature_names=names)
                 report = ranker.rank_features(
@@ -984,6 +1026,7 @@ class FeatureRanker:
         if self.shadows:
             result["shadows"] = True
             result["shadow_seed"] = self.shadow_seed
+            result["shadow_mode"] = self.shadow_mode
             result["shadow_test"] = {
                 "method": "binomial",
                 "hit": "above_shadow_share > 0.5",

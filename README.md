@@ -156,6 +156,8 @@ Permutation importance splits credit between near-copies. `auto_groups(X)` propo
 
 To see how stable a ranking is, `rank_resampled()` repeats this over cross-validation splits and reports each group's rank range and how often it lands in the top *k* ([details](https://github.com/CountZero-Error/Featranker/blob/main/docs/usage.md#resampled-ranking)).
 
+With `shadows=True`, each stability row also shows which model families beat their shuffled shadows (`shadow_families`), and `ConsensusSelector(min_shadow_families=2)` keeps groups that at least two families find, for effects such as interactions that only some model types capture. It is a heuristic: its false-selection rate is not yet measured (see the calibration study) ([details](https://github.com/CountZero-Error/Featranker/blob/main/docs/usage.md#family-evidence)).
+
 Built-in linear models are wrapped in a `StandardScaler` pipeline fit on training data only; tree models and your own models are used as given.
 
 > [!IMPORTANT]
@@ -165,7 +167,7 @@ Built-in linear models are wrapped in a `StandardScaler` pipeline fit on trainin
 
 | Page | Contents |
 |---|---|
-| [**Usage**](https://github.com/CountZero-Error/Featranker/blob/main/docs/usage.md) | API and defaults, working with reports (`summary`, `to_frame`, `plot`), choosing a scorer, your own models, parallel runs, the CLI, resampled ranking, shadow features and the shadow hits test, mechanism evidence, pipeline feature selection, `summarize`, LLM interpretation (deprecated), labels, troubleshooting |
+| [**Usage**](https://github.com/CountZero-Error/Featranker/blob/main/docs/usage.md) | API and defaults, working with reports (`summary`, `to_frame`, `plot`), choosing a scorer, your own models, parallel runs, the CLI, resampled ranking, shadow features, the shadow hits test, per-family evidence and `min_shadow_families`, mechanism evidence, pipeline feature selection, `summarize`, LLM interpretation (deprecated), labels, troubleshooting |
 | [**Report**](https://github.com/CountZero-Error/Featranker/blob/main/docs/report.md) | How to read the results, resampled (stability) reports, full report structure, ranking and failure rules |
 | [**Models**](https://github.com/CountZero-Error/Featranker/blob/main/docs/models.md) | All 40 built-in models, optional extras, known issues |
 | [**API**](https://github.com/CountZero-Error/Featranker/blob/main/docs/api.md) | Public API, stability policy, typing, releases |

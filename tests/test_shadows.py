@@ -8,8 +8,9 @@ from sklearn.linear_model import LinearRegression, Ridge
 
 from featranker import FeatureRanker
 
-SHADOW_KEYS = {"shadows", "shadow_seed", "shadow_importance", "shadow_max",
-               "above_shadow", "above_shadow_share"}
+SHADOW_KEYS = {"shadows", "shadow_seed", "shadow_mode", "shadow_importance", "shadow_max",
+               "above_shadow", "above_shadow_share", "family_above_shadow",
+               "family_above_shadow_share", "shadow_families"}
 
 RNG = np.random.default_rng(0)
 X_DATA = np.column_stack([np.arange(40.0), RNG.normal(size=40), RNG.normal(size=40)])
@@ -364,3 +365,232 @@ def test_fewer_split_reports_than_n_splits_still_uses_n_splits_trials():
 
     assert row["shadow_hits"] == 3
     assert row["shadow_p_value"] == pytest.approx(binom.sf(2, 5, 0.5))
+
+
+# --- per-family shadow evidence -------------------------------------------------
+
+FAMILY_KEYS = {"family_above_shadow", "family_above_shadow_share", "shadow_families"}
+
+
+def test_family_above_shadow_is_the_fraction_of_voting_members():
+    rows = _build_consensus({
+        "a1": _model("F1", True),
+        "a2": _model("F1", True),
+        "b1": _model("F2", False),
+        "gated": _model("F3", True, in_consensus=False),
+    })
+
+    assert rows[0]["family_above_shadow"] == {"F1": 1.0, "F2": 0.0}
+    assert rows[0]["above_shadow_share"] == 0.5
+
+
+def test_above_shadow_share_is_the_mean_of_family_fractions_with_sorted_keys():
+    rows = _build_consensus({
+        "z1": _model("Z", True),
+        "z2": _model("Z", False),
+        "a1": _model("A", True),
+    })
+
+    families = rows[0]["family_above_shadow"]
+    assert list(families) == ["A", "Z"]
+    assert families == {"A": 1.0, "Z": 0.5}
+    assert rows[0]["above_shadow_share"] == np.mean(list(families.values())) == 0.75
+
+
+def test_no_family_evidence_without_shadows():
+    model = {"family": "F", "in_consensus": True,
+             "importance": {"g": {"mean": 0.5, "rank": 1}}}
+
+    assert not FAMILY_KEYS & set(_build_consensus({"m": model})[0])
+
+
+def _family_split(index, families):
+    """A split whose consensus has one group g with these family fractions (None = no row)."""
+    consensus = [] if families is None else [
+        {"feature_group": "g", "median_rank": 1.0, "mean_rank": 1.0,
+         "above_shadow_share": float(np.mean(list(families.values()))),
+         "family_above_shadow": families}
+    ]
+    return {"split": index, "n_train": 4, "n_eval": 2,
+            "report": {"feature_groups": {"g": ["g"]}, "consensus": consensus}}
+
+
+def test_stability_family_share_divides_by_n_splits():
+    splits = [
+        _family_split(0, {"F1": 1.0, "F2": 1.0}),
+        _family_split(1, {"F1": 1.0}),
+        _family_split(2, {"F1": 0.0}),
+    ]
+
+    row = _build_stability(splits, 3, 1)[0]
+
+    assert row["family_above_shadow_share"] == pytest.approx({"F1": 2 / 3, "F2": 1 / 3})
+    assert row["shadow_families"] == 1
+
+
+def test_a_family_that_rarely_votes_cannot_pass_alone():
+    splits = [_family_split(i, {"F": 1.0} if i < 2 else None) for i in range(10)]
+
+    row = _build_stability(splits, 10, 1)[0]
+
+    assert row["family_above_shadow_share"] == pytest.approx({"F": 0.2})
+    assert row["shadow_families"] == 0
+
+
+def test_failed_splits_count_as_zero_in_family_share():
+    splits = [_family_split(i, {"F": 1.0}) for i in range(3)]  # 3 reports of 5 splits
+
+    row = _build_stability(splits, 5, 1)[0]
+
+    assert row["family_above_shadow_share"] == pytest.approx({"F": 0.6})
+    assert row["shadow_families"] == 1
+
+
+def test_shadow_families_counts_shares_strictly_above_half():
+    splits = [_family_split(0, {"A": 1.0, "B": 0.0}), _family_split(1, {"A": 0.0, "B": 1.0}),
+              _family_split(2, {"A": 1.0, "B": 1.0, "C": 0.2})]
+
+    row = _build_stability(splits, 3, 1)[0]
+
+    assert list(row["family_above_shadow_share"]) == ["A", "B", "C"]
+    assert row["family_above_shadow_share"]["A"] == pytest.approx(2 / 3)
+    assert row["family_above_shadow_share"]["C"] == pytest.approx(0.2 / 3)
+    assert row["shadow_families"] == 2  # A and B; C is below
+    halves = _build_stability([_family_split(0, {"A": 1.0}), _family_split(1, {"A": 0.0})], 2, 1)
+    assert halves[0]["family_above_shadow_share"] == {"A": 0.5}
+    assert halves[0]["shadow_families"] == 0
+
+
+def test_stability_has_no_family_keys_without_shadows():
+    split = _split(0, 1.0)
+    del split["report"]["consensus"][0]["above_shadow_share"]
+
+    assert not FAMILY_KEYS & set(_build_stability([split], 1, 1)[0])
+
+
+FAMILY_MODELS = {"lin": LinearRegression(), "ridge": Ridge()}
+
+
+def test_resampled_report_has_family_evidence_that_matches_existing_columns():
+    report = ranker(FAMILY_MODELS, shadows=True, shadow_seed=0).rank_resampled(
+        X_DATA, Y_DATA, feature_names=NAMES, scoring="r2", cv=3, n_repeats=1, random_state=0)
+
+    for split in report["splits"]:
+        for row in split["report"]["consensus"]:
+            fractions = row["family_above_shadow"]
+            assert row["above_shadow_share"] == pytest.approx(np.mean(list(fractions.values())))
+            assert list(fractions) == sorted(fractions)
+    for row in report["stability"]:
+        assert {"family_above_shadow_share", "shadow_families"} <= set(row)
+        assert row["shadow_families"] == sum(
+            v > 0.5 for v in row["family_above_shadow_share"].values())
+    json.dumps(report, allow_nan=False)
+
+
+def test_resampled_report_without_shadows_has_no_family_keys():
+    report = ranker(FAMILY_MODELS).rank_resampled(
+        X_DATA, Y_DATA, feature_names=NAMES, scoring="r2", cv=3, n_repeats=1, random_state=0)
+
+    assert not all_keys(report) & SHADOW_KEYS
+
+
+# --- shadow mode ----------------------------------------------------------------
+
+from featranker.importance import _with_shadows
+
+COPY_X = np.column_stack([X_DATA[:, 0], X_DATA[:, 0], X_DATA[:, 1]])  # e, f = e, noise
+
+
+@pytest.mark.parametrize("mode", ["per-column", "Joint", "", None, 1, ["joint"]])
+def test_invalid_shadow_mode_is_rejected_at_construction(mode):
+    with pytest.raises(ValueError, match="shadow_mode"):
+        ranker(shadow_mode=mode)
+    with pytest.raises(ValueError, match="shadow_mode"):
+        ranker(shadows=True, shadow_mode=mode)
+
+
+@pytest.mark.parametrize("seed", [0, 7, [3, 1]])
+def test_default_joint_mode_keeps_the_original_random_stream(seed):
+    expected = np.hstack([X_DATA, X_DATA[np.random.default_rng(seed).permutation(40)]])
+
+    np.testing.assert_array_equal(_with_shadows(X_DATA, seed), expected)
+    np.testing.assert_array_equal(_with_shadows(X_DATA, seed, "joint"), expected)
+
+
+def test_independent_shadows_are_per_column_permutations_from_one_generator():
+    block = _with_shadows(COPY_X, 5, "independent")
+
+    rng = np.random.default_rng(5)
+    for column in range(3):
+        np.testing.assert_array_equal(
+            block[:, 3 + column], COPY_X[rng.permutation(40), column])
+    np.testing.assert_array_equal(block[:, :3], COPY_X)
+    np.testing.assert_array_equal(block, _with_shadows(COPY_X, 5, "independent"))  # seeded
+
+
+def test_independent_mode_breaks_an_exact_copy_pair_that_joint_keeps():
+    joint = _with_shadows(COPY_X, 5, "joint")
+    independent = _with_shadows(COPY_X, 5, "independent")
+
+    np.testing.assert_array_equal(joint[:, 3], joint[:, 4])
+    assert not np.array_equal(independent[:, 3], independent[:, 4])
+    np.testing.assert_array_equal(np.sort(independent[:, 3]), np.sort(COPY_X[:, 0]))
+    np.testing.assert_array_equal(np.sort(independent[:, 4]), np.sort(COPY_X[:, 1]))
+
+
+def test_fit_trains_on_independent_shadow_block():
+    SEEN.clear()
+    r = ranker({"rec": RecordingRegressor()}, shadows=True, shadow_seed=2,
+               shadow_mode="independent")
+    r.fit(X_DATA[:30], Y_DATA[:30], NAMES)
+
+    np.testing.assert_array_equal(SEEN[0], _with_shadows(X_DATA[:30], 2, "independent"))
+
+
+def test_eval_shadow_block_is_independent_per_column_from_eval_rows():
+    SEEN.clear()
+    run(ranker({"rec": PredictRecorder()}, shadows=True, shadow_seed=1,
+               shadow_mode="independent"), n_repeats=1)
+
+    unpermuted = SEEN[1]
+    np.testing.assert_array_equal(unpermuted, _with_shadows(X_DATA[30:], [1, 1], "independent"))
+
+
+def test_report_records_shadow_mode_only_with_shadows():
+    off = run(ranker(shadow_mode="independent"))
+    default = run(ranker(shadows=True, shadow_seed=0))
+    independent = run(ranker(shadows=True, shadow_seed=0, shadow_mode="independent"))
+
+    assert "shadow_mode" not in all_keys(off)
+    assert default["shadow_mode"] == "joint"
+    assert independent["shadow_mode"] == "independent"
+    assert default == run(ranker(shadows=True, shadow_seed=0, shadow_mode="joint"))
+
+
+def test_independent_seeded_runs_are_reproducible():
+    def make():
+        return run(ranker(shadows=True, shadow_seed=3, shadow_mode="independent"))
+
+    assert make() == make()
+
+
+def test_ranker_pickled_without_shadow_mode_loads_as_joint():
+    r = ranker(shadows=True, shadow_seed=0)
+    r.fit(X_DATA[:30], Y_DATA[:30], NAMES)
+    del r.__dict__["shadow_mode"]  # what a 1.5 pickle holds
+
+    loaded = pickle.loads(pickle.dumps(r))
+    report = loaded.rank_features(X_DATA[30:], Y_DATA[30:], scoring="r2", n_repeats=1)
+
+    assert loaded.shadow_mode == "joint" and report["shadow_mode"] == "joint"
+
+
+def test_resampled_passes_shadow_mode_to_every_split():
+    report = ranker(shadows=True, shadow_seed=0, shadow_mode="independent").rank_resampled(
+        X_DATA, Y_DATA, feature_names=NAMES, scoring="r2", cv=3, n_repeats=1, random_state=0)
+
+    assert report["shadow_mode"] == "independent"
+    assert [s["report"]["shadow_mode"] for s in report["splits"]] == ["independent"] * 3
+    assert "shadow_mode" not in all_keys(
+        ranker().rank_resampled(X_DATA, Y_DATA, feature_names=NAMES, scoring="r2", cv=3,
+                                n_repeats=1, random_state=0))

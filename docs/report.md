@@ -29,6 +29,7 @@ Each model family casts one vote. Voting models are grouped by `family` (for exa
 | `family_ranks` | Each voting family's rank for this group. Use it to see which families drive or disagree with the consensus. |
 | `n_models` | How many models voted. Every voting model ranks every group, so it is the same for all groups. It measures coverage, not confidence; `n_families` is the better count of independent views. |
 | `above_shadow_share` | Only with [shadows](usage.md#shadow-features) on. Each voting family contributes its fraction of members whose mean importance beat that model's strongest shadow group; this is their average. Near 1 means it beats the shuffled reference almost everywhere. It is relative and descriptive, not a p-value or proof of useful signal. |
+| `family_above_shadow` | Only with shadows on: family name to the fraction of that family's voting members that beat their model's strongest shadow, with keys sorted by family. `above_shadow_share` is the mean of these values. See [family evidence](usage.md#family-evidence). |
 
 **5. Look at the importances behind a rank.** A rank is relative: it says a group's shuffle hurt the score more than other groups' shuffles did, not that it hurt a lot. For a group you care about, open `models[<name>]["importance"][<group>]` for a few models:
 
@@ -91,6 +92,8 @@ How to read `stability`, which is sorted by `median_rank`, then `top_k_share` (h
 | `shadow_hits` | Only with shadows on: the number of splits in which the group's consensus `above_shadow_share` was above 0.5. A split with no consensus row for the group is a non-hit. |
 | `shadow_p_value` | Only with shadows on: the one-sided binomial probability of at least `shadow_hits` hits in `n_splits` trials at probability 0.5. An uncalibrated reference value: splits overlap and the 0.5 null is not established for arbitrary estimators. See [the hits test](usage.md#shadow-test). |
 | `shadow_q_value` | Only with shadows on: `shadow_p_value` adjusted with Benjamini-Hochberg across all groups. Also a reference value, not a calibrated false-discovery rate. |
+| `family_above_shadow_share` | Only with shadows on: family name to the sum of that family's per-split `family_above_shadow` divided by `n_splits`, for each family that voted in at least one split. A split in which it did not vote, failed, or was empty counts as 0 (as for `shadow_hits`). Keys are sorted by family. |
+| `shadow_families` | Only with shadows on: the number of families whose `family_above_shadow_share` is strictly above 0.5. `ConsensusSelector(min_shadow_families=N)` keeps groups with at least `N`. |
 
 With shadows on, the report also has a top-level `shadow_test`: `method` (`"binomial"`), `hit` (`"above_shadow_share > 0.5"`), `null_probability` (0.5), `correction` (`"benjamini-hochberg"`), `n_trials` (equal to `n_splits`), `min_p_value` (`0.5 ** n_splits`, the smallest p-value the test can give; with `cv=5` it is 0.03125, so use 10 or more splits), `calibrated` (always `false`), and `note` (a sentence saying that the values are binomial reference values whose null and false-discovery-rate control are not established for arbitrary estimators or overlapping splits). Read the p and q values as reference values, not significance.
 
@@ -102,7 +105,7 @@ Within each split, `rank_std` still measures disagreement between model families
 
 `evaluation_mode` is always `"held_out"`. It names the workflow (scoring on data passed to `rank_features()`); FeatRanker cannot check that this data is really separate from the training data.
 
-With `shadows=True`, the report also has top-level `shadows: true` and `shadow_seed` (resampled reports add the `shadow_test` block, and their stability rows gain `shadow_hits`, `shadow_p_value`, and `shadow_q_value`); each model gains `shadow_importance` and `shadow_max`; each importance entry gains `above_shadow`; and each consensus row gains `above_shadow_share`. Without shadows, none of these keys appear.
+With `shadows=True`, the report also has top-level `shadows: true`, `shadow_seed`, and `shadow_mode` (`"joint"` or `"independent"`; resampled reports add the `shadow_test` block, and their stability rows gain `shadow_hits`, `shadow_p_value`, `shadow_q_value`, `family_above_shadow_share`, and `shadow_families`); each model gains `shadow_importance` and `shadow_max`; each importance entry gains `above_shadow`; and each consensus row gains `above_shadow_share` and `family_above_shadow`. Without shadows, none of these keys appear.
 
 With `evidence=True`, each model also has `train_score` and `overfit_gap` (`null` if the training score could not be computed, with a `failures` entry at stage `"evidence"`), the report has a top-level `evidence` block, and models SHAP can explain have `shap`. Without `evidence`, none of these keys appear. See [Evidence](usage.md#evidence).
 

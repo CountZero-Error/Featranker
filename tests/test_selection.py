@@ -19,9 +19,11 @@ def selector(**kwargs):
 
 
 def test_parameters_are_stored_raw_and_clone_round_trips():
-    s = ConsensusSelector("reg", "r2", k=3, cv=4, min_shadow_share=0.5, max_shadow_q=0.05)
+    s = ConsensusSelector("reg", "r2", k=3, cv=4, min_shadow_share=0.5, max_shadow_q=0.05,
+                          min_shadow_families=2, shadow_mode="independent")
 
     assert s.k == 3 and s.cv == 4 and s.min_shadow_share == 0.5 and s.max_shadow_q == 0.05
+    assert s.min_shadow_families == 2 and s.shadow_mode == "independent"
     assert clone(s).get_params() == s.get_params()
     assert s.set_params(k=5).k == 5
 
@@ -33,7 +35,10 @@ def test_parameters_are_stored_raw_and_clone_round_trips():
      {"k": None, "min_shadow_share": "half"}, {"k": None, "min_shadow_share": float("nan")},
      {"k": 1, "max_shadow_q": 0}, {"k": 1, "max_shadow_q": 1.5}, {"k": 1, "max_shadow_q": -0.1},
      {"k": 1, "max_shadow_q": "low"}, {"k": 1, "max_shadow_q": float("nan")},
-     {"k": 1, "max_shadow_q": True}],
+     {"k": 1, "max_shadow_q": True},
+     {"k": None, "min_shadow_families": 0}, {"k": 1, "min_shadow_families": -1},
+     {"k": 1, "min_shadow_families": 1.5}, {"k": 1, "min_shadow_families": "2"},
+     {"k": 1, "min_shadow_families": True}, {"k": 1, "shadow_mode": "per-column"}],
 )
 def test_invalid_rule_raises_before_ranking(kwargs, monkeypatch):
     def fail(*args, **kw):
@@ -53,6 +58,7 @@ def fake_resampled(stability, groups=None):
 
     def rank_resampled(self, X, y, **kwargs):
         CALLS.append({"shadows": self.shadows, "shadow_seed": self.shadow_seed,
+                      "shadow_mode": self.shadow_mode,
                       "X": np.asarray(X), "y": np.asarray(y), **kwargs})
         names = kwargs.get("feature_names") or list(X.columns)
         return {
@@ -64,12 +70,14 @@ def fake_resampled(stability, groups=None):
     return rank_resampled
 
 
-def _rows(order, shares=None, qs=None):
+def _rows(order, shares=None, qs=None, families=None):
     return [
         {"feature_group": g,
          **({} if shares is None else {"above_shadow_share": s}),
-         **({} if qs is None else {"shadow_q_value": q})}
-        for g, s, q in zip(order, shares or [None] * len(order), qs or [None] * len(order))
+         **({} if qs is None else {"shadow_q_value": q}),
+         **({} if families is None else {"shadow_families": n})}
+        for g, s, q, n in zip(order, shares or [None] * len(order),
+                              qs or [None] * len(order), families or [None] * len(order))
     ]
 
 
@@ -112,8 +120,10 @@ def test_shadows_on_with_max_shadow_q_alone(patched):
     assert s.selected_groups_ == ["x0", "x1", "x2"]
 
 
-def test_no_rule_error_names_all_three(patched):
-    with pytest.raises(ValueError, match="k, min_shadow_share, or max_shadow_q"):
+def test_no_rule_error_names_all_four(patched):
+    with pytest.raises(
+        ValueError, match="k, min_shadow_share, max_shadow_q, or min_shadow_families"
+    ):
         selector(k=None).fit(X_DATA, Y_DATA)
 
 
@@ -450,3 +460,74 @@ def test_selector_pickled_without_max_shadow_q_loads_clones_and_refits():
     assert refit.max_shadow_q is None
     np.testing.assert_array_equal(refit.transform(X_DATA), expected)
     old.fit(X_DATA, Y_DATA)  # refitting the loaded object itself also works
+
+
+# -- min_shadow_families and shadow_mode -----------------------------------------
+
+def test_shadows_on_with_min_shadow_families_alone(patched):
+    patched(_rows(["x0", "x1", "x2"], families=[2, 2, 2]))
+
+    s = selector(k=None, min_shadow_families=2, shadow_seed=4).fit(X_DATA, Y_DATA)
+
+    assert [(c["shadows"], c["shadow_seed"]) for c in CALLS] == [(True, 4)]
+    assert s.selected_groups_ == ["x0", "x1", "x2"]
+
+
+def test_shadow_mode_reaches_the_ranker(patched):
+    patched(_rows(["x0", "x1", "x2"], [1.0, 1.0, 1.0]))
+
+    selector(k=None, min_shadow_share=0.5).fit(X_DATA, Y_DATA)
+    selector(k=None, min_shadow_share=0.5, shadow_mode="independent").fit(X_DATA, Y_DATA)
+
+    assert [c["shadow_mode"] for c in CALLS] == ["joint", "independent"]
+
+
+def test_family_filter_keeps_an_interaction_the_share_would_drop(patched):
+    patched(_rows(["a", "b", "c"], [0.9, 0.3, 0.1], families=[5, 2, 1]),
+            groups={"a": ["x0"], "b": ["x1"], "c": ["x2"]})
+
+    s = selector(k=None, min_shadow_families=2).fit(X_DATA, Y_DATA)
+
+    assert s.selected_groups_ == ["a", "b"]
+    only_share = selector(k=None, min_shadow_share=0.5).fit(X_DATA, Y_DATA)
+    assert only_share.selected_groups_ == ["a"]
+
+
+def test_family_filter_combines_with_other_filters_then_k(patched):
+    patched(_rows(["x0", "x1", "x2"], [0.9, 0.9, 0.2], [0.5, 0.01, 0.01], [3, 3, 3]))
+    s = selector(k=None, min_shadow_share=0.5, max_shadow_q=0.05, min_shadow_families=2)
+
+    assert s.fit(X_DATA, Y_DATA).selected_groups_ == ["x1"]
+
+    patched(_rows(["x0", "x1", "x2"], families=[1, 3, 2]))
+    assert selector(k=1, min_shadow_families=2).fit(X_DATA, Y_DATA).selected_groups_ == ["x1"]
+    assert selector(k=5, min_shadow_families=2).fit(X_DATA, Y_DATA).selected_groups_ == [
+        "x1", "x2"]
+
+
+def test_family_rule_alone_gives_real_report_with_shadow_families():
+    s = selector(k=None, min_shadow_families=1, shadow_seed=0).fit(X_DATA, Y_DATA)
+
+    assert s.report_["shadow_mode"] == "joint"
+    assert all("shadow_families" in row for row in s.report_["stability"])
+
+
+def test_independent_mode_reaches_the_real_report():
+    s = selector(k=1, min_shadow_families=1, shadow_mode="independent", shadow_seed=0).fit(
+        X_DATA, Y_DATA)
+
+    assert s.report_["shadow_mode"] == "independent"
+
+
+def test_selector_pickled_without_family_parameters_defaults_both():
+    fitted = selector(k=2).fit(X_DATA, Y_DATA)
+    expected = fitted.transform(X_DATA)
+    for name in ("min_shadow_families", "shadow_mode"):
+        del fitted.__dict__[name]  # what a 1.5 pickle holds
+    old = pickle.loads(pickle.dumps(fitted))
+
+    params = old.get_params()
+    assert params["min_shadow_families"] is None and params["shadow_mode"] == "joint"
+    refit = clone(old).fit(X_DATA, Y_DATA)
+    np.testing.assert_array_equal(refit.transform(X_DATA), expected)
+    old.fit(X_DATA, Y_DATA)

@@ -6,7 +6,7 @@
 
 The API is one class: `FeatureRanker(...)`, then `.fit(...)`, then `.rank_features(...)`, which returns a [`Report`](#working-with-reports). [`.rank_resampled(...)`](#resampled-ranking) repeats that over cross-validation splits, [`ConsensusSelector`](#feature-selection) turns the ranking into a scikit-learn pipeline step, [`summarize(report)`](#summarize) reads the result, and [`to_prompt` / `explain`](#llm-interpretation) hand it to an LLM with checked citations (deprecated since 1.1). `evidence=True` adds [mechanism evidence](#evidence) to the report.
 
-### `FeatureRanker(task, group="all", models=None, n_jobs=None, verbose=True, shadows=False, shadow_seed=None, evidence=False)`
+### `FeatureRanker(task, group="all", models=None, n_jobs=None, verbose=True, shadows=False, shadow_seed=None, evidence=False, shadow_mode="joint")`
 
 | Parameter | Default | Meaning |
 |---|---|---|
@@ -18,6 +18,7 @@ The API is one class: `FeatureRanker(...)`, then `.fit(...)`, then `.rank_featur
 | `shadows` | `False` | Train and rank with a shuffled copy of every feature, to show which groups beat noise. See [Shadow features](#shadow-features). |
 | `shadow_seed` | `None` | Non-negative integer seed for the shadow shuffles, or `None` for different shadows on every run. |
 | `evidence` | `False` | Keep a copy of the training data and add train scores, overfit gaps, correlated groups, and (with `featranker[shap]`) a SHAP summary to the report. See [Evidence](#evidence). |
+| `shadow_mode` | `"joint"` | `"joint"` shuffles all shadow columns with one shared row order; `"independent"` shuffles each shadow column on its own. Only used with `shadows=True`. See [Shadow mode](#shadow-mode). |
 
 ### `.fit(X, y, feature_names=None)`
 
@@ -399,7 +400,7 @@ Output shown with the `xgboost` and `catboost` extras installed. The two pure-no
 - It is descriptive, not a p-value. Families are not independent trials, and a share below 0.5 does not prove a group is useless. For a test across splits, see [the shadow hits test](#shadow-test).
 - Ranks still compare real groups only. Extra noise columns can still change how some models fit (for example, forests that sample a fraction of features per split), so ranks with shadows on can differ slightly from a run without them.
 - **Cost.** Models train on twice the columns and every group is permuted twice, so expect about double the time and memory.
-- `rank_resampled()` uses the same setting; split `i` uses `shadow_seed + i`, and each stability row gains the mean `above_shadow_share` over ranked splits, plus the [hits test](#shadow-test) keys.
+- `rank_resampled()` uses the same setting; split `i` uses `shadow_seed + i`, and each stability row gains the mean `above_shadow_share` over ranked splits, plus the [hits test](#shadow-test) keys and the [family evidence](#family-evidence) keys.
 
 > [!WARNING]
 > Shadows only work if every model sees every column. A custom pipeline that drops columns, such as a positional `ColumnTransformer` with the default `remainder="drop"`, never sees the shadows, so every group trivially beats them. Shadow columns are appended after the real ones, so positional selectors of real columns still work.
@@ -414,7 +415,7 @@ With shadows on, `rank_resampled()` also tests, for every group, whether it beat
 - `shadow_p_value`: the one-sided binomial probability of at least `shadow_hits` hits in `n_splits` trials with success probability 0.5.
 - `shadow_q_value`: the Benjamini-Hochberg adjusted p-value across all groups.
 
-A 0.5 null probability and false-discovery-rate control are not established for arbitrary estimators or overlapping splits; these binomial reference values should not be interpreted as calibrated significance. The report says so: it has a `shadow_test` block (method, hit rule, `null_probability`, correction, `n_trials`, `min_p_value`, `calibrated: false`, and a `note`). Studying calibration is planned for 1.6.
+A 0.5 null probability and false-discovery-rate control are not established for arbitrary estimators or overlapping splits; these binomial reference values should not be interpreted as calibrated significance. The report says so: it has a `shadow_test` block (method, hit rule, `null_probability`, correction, `n_trials`, `min_p_value`, `calibrated: false`, and a `note`). Studying calibration is planned as the next change.
 
 ```python
 import numpy as np
@@ -470,6 +471,106 @@ Read it with these limits in mind:
 - **Not for single-split reports.** `rank_features()` has one trial, so it gets no test.
 
 `ConsensusSelector(max_shadow_q=0.05)` keeps the groups with `shadow_q_value <= 0.05` (see [Feature selection](#feature-selection)). Because the values are uncalibrated, `max_shadow_q` is a heuristic filter, not a significance level.
+
+<a id="family-evidence"></a>
+
+### Family evidence
+
+`above_shadow_share` averages one vote per model family, so it measures agreement across families. A group that only some families can model, such as a pure interaction that additive models cannot see, can be found by those families and still average below 0.5. With shadows on, the report therefore also says which families found each group:
+
+- Each consensus row gains `family_above_shadow`: for each voting family, the fraction of its voting members whose importance beat that model's strongest shadow. `above_shadow_share` is the mean of these values; keys are sorted by family name.
+- In a resampled report, each stability row gains `family_above_shadow_share` (for each family that voted in at least one split, the sum of its per-split fractions divided by `n_splits`: a split where the family did not vote, failed, or was empty counts as 0, as for `shadow_hits`, so a family that passes the dummy baseline in only a few splits cannot reach a majority) and `shadow_families`, the number of families whose share is strictly above 0.5.
+
+The example plants an interaction (`x1` and `x2` matter only together, through a logistic link, plus one linear feature `x0` and two noise columns) and keeps groups with `ConsensusSelector`:
+
+```python
+import numpy as np
+from sklearn.model_selection import RepeatedKFold
+
+from featranker import ConsensusSelector
+
+# x0 is linear, x1 and x2 matter only together (an interaction), x3 and x4 are noise.
+rng = np.random.default_rng(0)
+X = rng.normal(size=(800, 5))
+score = 1.5 * X[:, 0] + 2.0 * X[:, 1] * X[:, 2]
+y = rng.binomial(1, 1 / (1 + np.exp(-score)))  # logistic link, sampled 0/1 labels
+
+options = dict(
+    group="fast", cv=RepeatedKFold(n_splits=5, n_repeats=2, random_state=0),
+    n_repeats=3, random_state=0, shadow_seed=0,
+)
+by_share = ConsensusSelector("clf", "roc_auc", min_shadow_share=0.5, **options).fit(X, y)
+by_family = ConsensusSelector("clf", "roc_auc", min_shadow_families=2, **options).fit(X, y)
+
+for row in by_family.report_["stability"]:
+    print(
+        f"{row['feature_group']}  above_shadow_share {row['above_shadow_share']:.2f}  "
+        f"shadow_families {row['shadow_families']}"
+    )
+row = next(r for r in by_family.report_["stability"] if r["feature_group"] == "x2")
+print({family: round(share, 2) for family, share in row["family_above_shadow_share"].items()})
+print("min_shadow_share=0.5   keeps", by_share.selected_groups_)
+print("min_shadow_families=2  keeps", by_family.selected_groups_)
+```
+
+```text
+x0  above_shadow_share 1.00  shadow_families 7
+x1  above_shadow_share 0.53  shadow_families 3
+x2  above_shadow_share 0.41  shadow_families 3
+x4  above_shadow_share 0.19  shadow_families 1
+x3  above_shadow_share 0.06  shadow_families 0
+{'bagging': 1.0, 'boosting': 1.0, 'discriminant': 0.0, 'linear_margin': 0.0, 'logistic': 0.0, 'naive_bayes': 0.3, 'single_tree': 0.6}
+min_shadow_share=0.5   keeps ['x0', 'x1']
+min_shadow_families=2  keeps ['x0', 'x1', 'x2']
+```
+
+Output from scikit-learn models only (`group="fast"`, seven classification families). The four additive families (logistic, linear margin, discriminant, naive Bayes) do not put `x2` above their shadows in most splits (shares 0.0 to 0.3), so its share stays below 0.5 and the share rule drops it (it keeps `x1` only because the share is 0.53), while bagging, boosting and the single tree, which can represent the interaction, put `x2` above its shadows in most splits, so three families pass.
+
+`ConsensusSelector(min_shadow_families=N)` keeps groups with `shadow_families >= N`. It answers "do at least `N` families find signal?" and leaves `min_shadow_share`, `max_shadow_q`, and their meanings unchanged; it turns shadows on and combines with the other rules (all filters apply, then `k`).
+
+- **When to use it.** When you suspect interactions or effects that only some model types capture, and a majority of families cannot be expected to find them.
+- **Start with `N=2`, as a heuristic.** `N=1` keeps a group any single family finds, so one family fitting noise (for example a single decision tree) can pass noise on its own; in the table above `x4`, a noise column, already has `shadow_families` of 1. Requiring two families means two kinds of model have to agree. A family that passes the dummy baseline in only a few splits is counted as 0 in the others, so it cannot reach a majority from those few splits. The false-selection rate of `N=2` (or any `N`) has not been measured yet; the planned `calibration-study` change will measure it. Until then treat `min_shadow_families` as a heuristic filter, like `max_shadow_q`.
+- **Which families count.** Every voting family counts equally, including families that cannot represent the effect you care about. FeatRanker does not choose "suitable" families for you; restrict them with `group` if you want to. With your own `models=`, each model is its own family, so `N` counts models. With the built-in `group="tree"`, regression and classification each have three families (bagging, boosting, single tree), so `N=2` is a majority there; `"fast"` has seven classification and five regression families.
+
+<a id="shadow-mode"></a>
+
+### Shadow mode
+
+By default (`shadow_mode="joint"`) the shadow block is the rows in one shuffled order, applied to every column, so two collinear real columns stay exactly as collinear in the shadows. `shadow_mode="independent"` shuffles each shadow column with its own row order instead: every shadow column is still a permutation of its real column, but relationships between columns are broken. The orders are drawn column by column from one generator seeded with `shadow_seed` (the evaluation shadows use their own seed, as before), so `shadow_seed` still makes runs reproducible, and `"joint"` produces exactly the shadows of earlier versions. The report records the mode as `shadow_mode` next to `shadows` and `shadow_seed`; reports without shadows have no `shadow_mode`.
+
+Which mode gives better answers has not been tested; the default is unchanged. The mode changes which shadow is strongest, so results can differ between modes. Both `FeatureRanker` and `ConsensusSelector` accept `shadow_mode`.
+
+```python
+import numpy as np
+from sklearn.model_selection import RepeatedKFold
+
+from featranker import FeatureRanker
+
+# x0 and x1 are near copies of each other; x2 is noise.
+rng = np.random.default_rng(0)
+x0 = rng.normal(size=400)
+X = np.column_stack([x0, x0 + 0.05 * rng.normal(size=400), rng.normal(size=400)])
+y = x0 + 0.5 * rng.normal(size=400)
+names = ["x0", "x1", "x2"]
+
+for mode in ("joint", "independent"):
+    ranker = FeatureRanker(
+        task="reg", group="fast", shadows=True, shadow_seed=0, shadow_mode=mode, verbose=False
+    )
+    report = ranker.rank_resampled(
+        X, y, feature_names=names, scoring="r2", n_repeats=3, random_state=0,
+        cv=RepeatedKFold(n_splits=5, n_repeats=2, random_state=0),
+    )
+    shares = {r["feature_group"]: round(r["above_shadow_share"], 2) for r in report["stability"]}
+    print(report["shadow_mode"], shares)
+```
+
+```text
+joint {'x0': 1.0, 'x1': 1.0, 'x2': 0.1}
+independent {'x0': 0.96, 'x1': 1.0, 'x2': 0.1}
+```
+
+Output from scikit-learn models only (`group="fast"`). The two modes agree on this data apart from a small shift in `x0`.
 
 <a id="evidence"></a>
 
@@ -633,7 +734,7 @@ selected: ['s5', 'bmi', 'bp', 'sex']
 
 Output shown with the `xgboost` and `catboost` extras installed. The score is honest because every outer fold chose its own four groups from its own training rows; the last line shows the groups chosen from all the data for the final model.
 
-### `ConsensusSelector(task, scoring, *, k=None, min_shadow_share=None, max_shadow_q=None, ...)`
+### `ConsensusSelector(task, scoring, *, k=None, min_shadow_share=None, max_shadow_q=None, min_shadow_families=None, ...)`
 
 | Parameter | Default | Meaning |
 |---|---|---|
@@ -641,12 +742,13 @@ Output shown with the `xgboost` and `catboost` extras installed. The score is ho
 | `k` | `None` | Keep the first `k` groups in the [stability](report.md#resampled-reports) order (or all groups if there are fewer). Python or NumPy integer. |
 | `min_shadow_share` | `None` | Keep groups whose stability `above_shadow_share` is at least this (0 to 1). Turns on [shadow features](#shadow-features). |
 | `max_shadow_q` | `None` | Keep groups whose stability `shadow_q_value` (the [shadow hits test](#shadow-test)) is at most this (greater than 0, at most 1); a heuristic filter, since the values are [uncalibrated](#shadow-test). Turns on shadow features. Use `cv` with 10 or more splits, such as `RepeatedKFold`; with 5 the test has little power. |
-| `group`, `models`, `n_jobs`, `shadow_seed` | as `FeatureRanker` | Passed to the ranker built in `fit()`. |
+| `min_shadow_families` | `None` | Keep groups whose stability `shadow_families` (see [family evidence](#family-evidence)) is at least this (a positive integer). Turns on shadow features. `2` is a heuristic starting point, safer than `1`, where one family fitting noise can pass alone; its false-selection rate is not yet measured (see the calibration study). |
+| `group`, `models`, `n_jobs`, `shadow_seed`, `shadow_mode` | as `FeatureRanker` | Passed to the ranker built in `fit()`. |
 | `feature_groups`, `cv`, `n_repeats`, `random_state` | as `rank_resampled()` | Passed to `rank_resampled()` on the data given to `fit()`. |
 | `feature_groups="auto"` | | Groups correlated columns with [`auto_groups()`](#auto-groups) on the data given to `fit()`, so inside a pipeline from the training fold only. The groups used are in `report_["feature_groups"]`. Any other string raises `ValueError` in `fit()`. |
 | `verbose` | `False` | Progress bars; off by default because pipelines fit many times. |
 
-Set at least one of `k`, `min_shadow_share`, and `max_shadow_q`; the shadow filters apply first, then the first `k` that pass. Invalid rules raise `ValueError` in `fit()`, before any ranking, following scikit-learn's convention that `__init__` only stores parameters (so `clone`, `set_params`, and `GridSearchCV` over `select__k` work).
+Set at least one of `k`, `min_shadow_share`, `max_shadow_q`, and `min_shadow_families`; the shadow filters apply first, then the first `k` that pass. Invalid rules raise `ValueError` in `fit()`, before any ranking, following scikit-learn's convention that `__init__` only stores parameters (so `clone`, `set_params`, and `GridSearchCV` over `select__k` work).
 
 ```python
 import numpy as np
@@ -677,7 +779,7 @@ print(selector.selected_groups_)
 A selected group keeps all of its columns, in their original order. Feature names come from DataFrame columns; for arrays they are `x0`, `x1`, … and `feature_groups` must use those names. After `fit()`: `selected_groups_`, `report_` (the resampled report from this fit), `n_features_in_`, `feature_names_in_` (DataFrames), and the standard `get_support()` and `get_feature_names_out()`.
 
 - `report_` reflects only the data that particular fit saw. For the ranking of your whole development set, call `rank_resampled()` directly.
-- If no group passes, `fit()` warns and the selector keeps no columns, as scikit-learn's own selectors do. Most downstream estimators (such as `Ridge`) then fail on zero columns, so that pipeline fit errors out. Loosen `min_shadow_share` or `max_shadow_q`, or use only the top-k rule by setting both to `None` and a positive `k`.
+- If no group passes, `fit()` warns and the selector keeps no columns, as scikit-learn's own selectors do. Most downstream estimators (such as `Ridge`) then fail on zero columns, so that pipeline fit errors out. Loosen `min_shadow_share`, `max_shadow_q`, or `min_shadow_families`, or use only the top-k rule by setting the shadow rules to `None` and a positive `k`.
 - For a group-aware inner `cv` such as `GroupKFold`, pass row groups to `fit(X, y, groups=...)`; in a `Pipeline`, pass `select__groups=...` (for example `cross_val_score(..., params={"select__groups": groups})`, which slices them to each training fold).
 - DataFrame column labels are compared as strings, in `fit()` and `transform()`. A failed `fit()` clears any earlier fitted state.
 - **Cost.** Each `fit()` is one `rank_resampled()` run: `cv` rankings, doubled with shadows. Inside `cross_val_score(cv=n)` that is `n × cv` rankings; fitting the final pipeline afterwards adds one more run. `GridSearchCV` multiplies the cost by the number of candidates, plus its final refit. Use `group="fast"` or `"tree"`, a small `cv`, and fewer `n_repeats` while searching.

@@ -51,7 +51,15 @@ class ConsensusSelector(SelectorMixin, BaseEstimator):
             values, not significance levels. Turns shadow features on;
             combines with the other rules like min_shadow_share. Needs about
             10 or more splits to have power.
-        group, models, n_jobs, shadow_seed: As in FeatureRanker.
+        min_shadow_families: Keep groups for which at least this many model
+            families (a positive int) are above their shadows in a majority
+            of splits (stability shadow_families; splits where a family did
+            not vote count as not above). 1 asks whether any one family
+            finds signal; 2 is a heuristic starting point, since one family
+            fitting noise can pass alone. Its false-selection rate is not
+            yet measured (see the calibration study). Turns shadow features
+            on; combines with the other rules.
+        group, models, n_jobs, shadow_seed, shadow_mode: As in FeatureRanker.
         feature_groups, cv, n_repeats, random_state: As in rank_resampled().
             feature_groups="auto" groups correlated columns with auto_groups()
             on the X given to fit(), so inside a Pipeline from the training
@@ -67,6 +75,7 @@ class ConsensusSelector(SelectorMixin, BaseEstimator):
         k: Optional[Union[int, "np.integer[Any]"]] = None,
         min_shadow_share: Optional[float] = None,
         max_shadow_q: Optional[float] = None,
+        min_shadow_families: Optional[int] = None,
         group: Literal["linear", "tree", "all", "fast"] = "all",
         models: Optional[Dict[str, Any]] = None,
         feature_groups: Union[Dict[str, List[str]], Literal["auto"], None] = None,
@@ -74,6 +83,7 @@ class ConsensusSelector(SelectorMixin, BaseEstimator):
         n_repeats: int = 10,
         random_state: Optional[int] = None,
         shadow_seed: Optional[int] = None,
+        shadow_mode: Literal["joint", "independent"] = "joint",
         n_jobs: Optional[int] = None,
         verbose: bool = False,
     ) -> None:
@@ -83,6 +93,7 @@ class ConsensusSelector(SelectorMixin, BaseEstimator):
         self.k = k
         self.min_shadow_share = min_shadow_share
         self.max_shadow_q = max_shadow_q
+        self.min_shadow_families = min_shadow_families
         self.group = group
         self.models = models
         self.feature_groups = feature_groups
@@ -90,17 +101,23 @@ class ConsensusSelector(SelectorMixin, BaseEstimator):
         self.n_repeats = n_repeats
         self.random_state = random_state
         self.shadow_seed = shadow_seed
+        self.shadow_mode = shadow_mode
         self.n_jobs = n_jobs
         self.verbose = verbose
 
     def __setstate__(self, state: Dict[str, Any]) -> None:
-        # Selectors pickled by 1.3 lack the 1.4 max_shadow_q parameter.
-        super().__setstate__({"max_shadow_q": None, **state})
+        # Selectors pickled by 1.3 lack the 1.4 max_shadow_q parameter, and
+        # those pickled before 1.6 lack min_shadow_families and shadow_mode.
+        defaults = {"max_shadow_q": None, "min_shadow_families": None, "shadow_mode": "joint"}
+        super().__setstate__({**defaults, **state})
 
     def _validate_rule(self) -> None:
         k, share, q = self.k, self.min_shadow_share, self.max_shadow_q
-        if k is None and share is None and q is None:
-            raise ValueError("[!] Set k, min_shadow_share, or max_shadow_q.")
+        families = self.min_shadow_families
+        if k is None and share is None and q is None and families is None:
+            raise ValueError(
+                "[!] Set k, min_shadow_share, max_shadow_q, or min_shadow_families."
+            )
         if k is not None and (
             not isinstance(k, numbers.Integral) or isinstance(k, bool) or k < 1
         ):
@@ -119,6 +136,12 @@ class ConsensusSelector(SelectorMixin, BaseEstimator):
             or not 0 < q <= 1
         ):
             raise ValueError("[!] max_shadow_q must be a number in (0, 1].")
+        if families is not None and (
+            not isinstance(families, numbers.Integral)
+            or isinstance(families, bool)
+            or families < 1
+        ):
+            raise ValueError("[!] min_shadow_families must be a positive integer.")
 
     def fit(self, X: Any, y: Any, groups: Any = None) -> "ConsensusSelector":
         """
@@ -156,8 +179,12 @@ class ConsensusSelector(SelectorMixin, BaseEstimator):
             models=self.models,
             n_jobs=self.n_jobs,
             verbose=self.verbose,
-            shadows=self.min_shadow_share is not None or self.max_shadow_q is not None,
+            shadows=any(
+                rule is not None
+                for rule in (self.min_shadow_share, self.max_shadow_q, self.min_shadow_families)
+            ),
             shadow_seed=self.shadow_seed,
+            shadow_mode=self.shadow_mode,
         )
         report = ranker.rank_resampled(
             X,
@@ -178,6 +205,8 @@ class ConsensusSelector(SelectorMixin, BaseEstimator):
             rows = [r for r in rows if r["above_shadow_share"] >= self.min_shadow_share]
         if self.max_shadow_q is not None:
             rows = [r for r in rows if r["shadow_q_value"] <= self.max_shadow_q]
+        if self.min_shadow_families is not None:
+            rows = [r for r in rows if r["shadow_families"] >= self.min_shadow_families]
         if self.k is not None:
             rows = rows[: int(self.k)]
         selected = [row["feature_group"] for row in rows]
