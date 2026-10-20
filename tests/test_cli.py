@@ -169,6 +169,26 @@ def test_modern_cli_requires_both_data_files(monkeypatch, tmp_path, capsys):
     assert "--eval-data" in capsys.readouterr().err
 
 
+def test_unknown_group_is_rejected_with_the_choices(monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(
+        sys, "argv", _modern_argv(tmp_path, "--task", "reg", "--scoring", "r2", "--group", "bogus")
+    )
+
+    with pytest.raises(SystemExit, match="2"):
+        cli_module.main()
+
+    error = capsys.readouterr().err
+    assert "invalid choice: 'bogus'" in error and "fast" in error
+
+
+def test_group_help_says_what_linear_contains(capsys):
+    with pytest.raises(SystemExit, match="0"):
+        cli_module._build_parser().parse_args(["--help"])
+
+    help_text = " ".join(capsys.readouterr().out.split())
+    assert "linear, discriminant, naive Bayes and kernel models" in help_text
+
+
 def test_removed_prep_flags_are_rejected(monkeypatch, tmp_path, capsys):
     monkeypatch.setattr(
         sys, "argv", _modern_argv(tmp_path, "--task", "reg", "--scoring", "r2", "--prep-file", "prep.py")

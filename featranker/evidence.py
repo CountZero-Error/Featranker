@@ -124,7 +124,9 @@ def _unwrap(model: Any, *arrays: np.ndarray) -> Tuple[Any, List[np.ndarray]]:
         return model, list(arrays)
     *earlier, (_, final) = model.steps
     for _, step in earlier:
-        if not isinstance(step, COLUMN_SCALERS):
+        # "passthrough" and None are scikit-learn's identity step.
+        identity = step is None or (isinstance(step, str) and step == "passthrough")
+        if not (identity or isinstance(step, COLUMN_SCALERS)):
             raise ValueError(f"pipeline step {type(step).__name__} is not a per-column scaler")
     if not earlier:
         return final, list(arrays)

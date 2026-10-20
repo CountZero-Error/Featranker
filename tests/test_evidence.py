@@ -5,11 +5,14 @@ import sys
 import warnings
 
 import numpy as np
+import pandas as pd
 import pytest
 from sklearn.linear_model import LinearRegression
+from sklearn.neighbors import KNeighborsRegressor
 from sklearn.tree import DecisionTreeRegressor
 
 from featranker import FeatureRanker
+from featranker.importance import _float_target, _validate_X, _validate_y
 from featranker.evidence import CORRELATION_THRESHOLD, correlation_evidence
 
 # Without the shap package every evidence run warns; that case has its own test.
@@ -97,6 +100,94 @@ def test_fit_keeps_training_data_only_with_evidence():
 
     assert r.train_X_.shape == (N_TRAIN, 2 * len(NAMES))  # as the models saw it
     assert np.array_equal(r.train_y_, Y_DATA[:N_TRAIN])
+
+
+def evidence_of_fit_then_mutation(make_train, mutate, models=None, **ranker_kwargs):
+    """Reports from a ranker whose training data is mutated after fit() and from a control."""
+    models = models or {"lin": LinearRegression(), "tree": DecisionTreeRegressor(random_state=0)}
+    reports = []
+    for should_mutate in (True, False):
+        X_train, y_train = make_train()
+        r = ranker(models, evidence=True, **ranker_kwargs)
+        r.fit(X_train, y_train, NAMES)
+        if should_mutate:
+            mutate(X_train, y_train)
+        reports.append(r.rank_features(
+            X_DATA[N_TRAIN:], Y_DATA[N_TRAIN:], scoring="r2", n_repeats=2, random_state=0
+        ))
+    return reports
+
+
+def zero_out(X_train, y_train):
+    X_train[:] = 0
+    y_train[:] = 0
+
+
+def test_mutating_numpy_training_arrays_after_fit_leaves_evidence_unchanged():
+    mutated, control = evidence_of_fit_then_mutation(
+        lambda: (X_DATA[:N_TRAIN].copy(), Y_DATA[:N_TRAIN].copy()), zero_out
+    )
+
+    assert mutated["models"]["tree"]["train_score"] == 1.0
+    assert mutated["models"] == control["models"]
+    assert mutated["evidence"] == control["evidence"]
+
+
+def test_mutating_a_float_dataframe_after_fit_leaves_evidence_unchanged():
+    mutated, control = evidence_of_fit_then_mutation(
+        lambda: (pd.DataFrame(X_DATA[:N_TRAIN].copy(), columns=NAMES), Y_DATA[:N_TRAIN].copy()),
+        zero_out,
+    )
+
+    assert mutated["models"]["tree"]["train_score"] == 1.0
+    assert mutated["models"] == control["models"]
+    assert mutated["evidence"] == control["evidence"]
+
+
+@pytest.mark.parametrize("shadows", [False, True])
+def test_model_that_stores_its_training_data_is_unaffected_by_caller_mutation(shadows):
+    mutated, control = evidence_of_fit_then_mutation(
+        lambda: (X_DATA[:N_TRAIN].copy(), Y_DATA[:N_TRAIN].copy()), zero_out,
+        models={"knn": KNeighborsRegressor()}, shadows=shadows, shadow_seed=0,
+    )
+
+    knn = mutated["models"]["knn"]
+    assert knn["train_score"] > 0.5  # a zeroed training set would score about 0
+    assert knn == control["models"]["knn"]  # evaluation_score, importances, train_score
+    assert mutated["evidence"] == control["evidence"]
+
+
+def test_validation_returns_arrays_that_share_no_memory_with_the_caller():
+    X = X_DATA.copy()
+    y = Y_DATA.copy()
+    frame = pd.DataFrame(X_DATA.copy(), columns=NAMES)
+
+    values, _ = _validate_X(X, feature_names=NAMES)
+    frame_values, _ = _validate_X(frame)
+    target = _validate_y(y, len(y))
+
+    assert not np.shares_memory(values, X)
+    assert not np.shares_memory(frame_values, frame.to_numpy())
+    assert not np.shares_memory(target, y)
+    assert not np.shares_memory(_float_target(target), y)
+
+
+def test_rank_features_works_on_copies_of_the_evaluation_data():
+    seen = []
+
+    class RecordingKNN(KNeighborsRegressor):
+        def predict(self, X):
+            seen.append(X)
+            return super().predict(X)
+
+    r = ranker({"knn": RecordingKNN()}, evidence=True)
+    r.fit(X_DATA[:N_TRAIN], Y_DATA[:N_TRAIN], NAMES)
+    X_eval, y_eval = X_DATA[N_TRAIN:].copy(), Y_DATA[N_TRAIN:].copy()
+    seen.clear()
+
+    r.rank_features(X_eval, y_eval, scoring="r2", n_repeats=1, random_state=0)
+
+    assert seen and not any(np.shares_memory(batch, X_eval) for batch in seen)
 
 
 # -- train score ------------------------------------------------------------

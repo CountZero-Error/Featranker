@@ -39,26 +39,38 @@ context: |
     1.4  shadow-test: binomial hits test over resampled splits, BH q-values,
          ConsensusSelector(max_shadow_q=)
     docs benchmark vs Boruta / sklearn / feature-engine (docs/benchmark.md)
+    1.5  trust-hardening: shadow_test labelled uncalibrated; evidence keeps
+         its own copies of the training data; old selector pickles load;
+         docs corrections (SHAP scale and direction, overfit gap, fast
+         voting, benchmark reproduction, time-series recipe); small review
+         items (fast tag, scaler test, CLI test, passthrough steps)
   Known limitations (found 2026-10-19/20 in reviews and the benchmark;
   not scheduled; maintainer decides):
     Method and statistics
     L1  interaction blind spot: above_shadow_share averages families, so
         effects only some families can model fail the 0.5 rule
         (classification c*d recall 0.44-0.64; group="tree" 0.92-1.00)
-    L2  shadow block uses one shared row order: collinear real pairs stay
-        collinear in the shadows and inflate shadow_max for linear models
-        (observed on one seed)
-    L3  shadow hits test is approximate (overlapping splits), its 0.5 null
-        is conservative, and at cv=5 only 5/5 reaches p=0.031; in the
-        benchmark max_shadow_q never beat min_shadow_share
+    L2  the shadow block preserves collinearity; large shadow importances
+        were observed for one correlated pair in one seed; whether shared
+        shuffling caused them remains untested
+    L3  shadow hits test: its 0.5 null and false-discovery control are not
+        established for arbitrary estimators or overlapping splits (label
+        added in 1.5: shadow_test.calibrated is false; calibration is 1.6);
+        at cv=5 only 5/5 reaches p=0.031; in the benchmark max_shadow_q never
+        beat min_shadow_share
     L4  correlated features still split permutation importance unless
         grouped; auto_groups threshold is fixed at 0.7 in the selector and
         CLI; small samples inflate |rho|
     L5  SHAP only for linear and tree models (no model-agnostic fallback);
-        mean |SHAP| not comparable across models; linear direction is
-        always +/-1; shap < 0.52 untested
+        mean |SHAP| is on the explainer's output scale, which may be a link
+        scale, and is not comparable across models; linear direction is the
+        coefficient sign when defined, else null (docs corrected in 1.5);
+        shap < 0.52 untested
     L6  group="all" showed no consistent gain over "fast" in the benchmark;
         a one-model family vote is less robust than a family median
+    L22 shadows and permutations shuffle rows even with TimeSeriesSplit or
+        GroupKFold, ignoring dependence between rows (documented in the
+        time-series recipe)
     Data coverage
     L7  missing values rejected, even for models that handle NaN natively
         (HistGradientBoosting, XGBoost, CatBoost)
@@ -66,6 +78,13 @@ context: |
         receive float arrays without column names
     L9  no sample weights
     L10 tabular data and scikit-learn-style estimators only
+    L19 feature groups name raw input columns; for a custom pipeline that
+        transforms columns (PCA, encoders) no mapping between raw and
+        transformed features is reported, and SHAP supports only
+        per-column scalers and identity ("passthrough"/None) steps
+    Selection
+    L20 ConsensusSelector selects when only some splits ranked (it fails
+        only if none did): no minimum of ranked splits and no warning
     Performance
     L11 slower than single-model selectors (benchmark means 3-19 s vs
         0.3-5 s); SVR in "fast" is quadratic in rows; models that lose to
@@ -76,13 +95,16 @@ context: |
         auto_groups threshold and method used
     L14 rankers with evidence=True pickle their training data (about 2x
         with shadows)
+    L21 run identity beyond L13: the report carries no fingerprint of the
+        input data or the cv splitter used, so two reports cannot be checked
+        as coming from the same data and splits
     API and deprecation
     L15 explain()/to_prompt() deprecated, removal in 2.0; the prompt rules
         do not describe the hits test (only the shadow_test block is shown)
     Engineering
-    L16 small open review items: fast tag is a truthiness check; the scaler
-        test covers one model; no CLI test for an unknown --group; odd
-        unsupported reason for "passthrough" pipeline steps
+    L16 (fixed in 1.5) small review items: fast tag truthiness check, scaler
+        test covering one model, missing CLI test for an unknown --group,
+        odd unsupported reason for "passthrough" pipeline steps
     L17 n_jobs tests and mypy with types-PyYAML are verified only in CI,
         not in the local sandbox
     Release

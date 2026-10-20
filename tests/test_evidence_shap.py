@@ -5,7 +5,7 @@ import pytest
 from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier, RandomForestRegressor
 from sklearn.linear_model import LogisticRegression, Ridge
 from sklearn.neighbors import KNeighborsClassifier, KNeighborsRegressor
-from sklearn.pipeline import make_pipeline
+from sklearn.pipeline import Pipeline, make_pipeline
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
 
@@ -182,6 +182,17 @@ def test_pipeline_with_a_non_scaler_step_is_unsupported():
     assert entry["model"] == "pca_ridge"
     assert "PCA" in entry["reason"] and "per-column scaler" in entry["reason"]
     assert report["failures"] == []
+
+
+@pytest.mark.parametrize("step", ["passthrough", None])
+def test_passthrough_pipeline_step_is_the_identity(step):
+    models = {"ridge": Pipeline([("skip", step), ("ridge", Ridge())])}
+
+    report = run("reg", models, SCORE)
+
+    assert report["models"]["ridge"]["shap"]["explainer"] == "linear"
+    assert report["models"]["ridge"]["shap"]["groups"]["a"]["direction"] > 0.9
+    assert report["evidence"]["shap"]["unsupported"] == []
 
 
 def test_one_step_pipeline_is_the_bare_estimator():

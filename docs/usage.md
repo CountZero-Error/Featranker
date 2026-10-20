@@ -17,7 +17,7 @@ The API is one class: `FeatureRanker(...)`, then `.fit(...)`, then `.rank_featur
 | `verbose` | `True` | Show progress bars during model setup, `fit()`, and `rank_features()`. `False` hides them; warnings are still shown. |
 | `shadows` | `False` | Train and rank with a shuffled copy of every feature, to show which groups beat noise. See [Shadow features](#shadow-features). |
 | `shadow_seed` | `None` | Non-negative integer seed for the shadow shuffles, or `None` for different shadows on every run. |
-| `evidence` | `False` | Keep the training data and add train scores, overfit gaps, correlated groups, and (with `featranker[shap]`) a SHAP summary to the report. See [Evidence](#evidence). |
+| `evidence` | `False` | Keep a copy of the training data and add train scores, overfit gaps, correlated groups, and (with `featranker[shap]`) a SHAP summary to the report. See [Evidence](#evidence). |
 
 ### `.fit(X, y, feature_names=None)`
 
@@ -110,7 +110,7 @@ A model that cannot produce what the scorer needs is listed in the report's `fai
 
 ## ▍ Speed
 
-`group="fast"` fits one built-in model per family: 7 for classification (22 in `"all"`) and 5 for regression (18 in `"all"`), all from scikit-learn. Every family still casts its vote, so the consensus is built from the same families with about a third of the models. Which models run is marked in the **Fast** column of [Models](models.md). It works the same in `rank_resampled()`, `ConsensusSelector(group="fast")`, and the CLI (`--group fast`).
+`group="fast"` fits one built-in model per family: 7 for classification (22 in `"all"`) and 5 for regression (18 in `"all"`), all from scikit-learn. Every candidate family has a representative, so the consensus is built from about a third of the models. A representative can fail or score below the dummy baseline, in which case its family does not vote, so the set of voting families can differ from `"all"`, where a family's other members may still vote. Check the families in `report["models"]` and the report's `failures`. Which models run is marked in the **Fast** column of [Models](models.md). It works the same in `rank_resampled()`, `ConsensusSelector(group="fast")`, and the CLI (`--group fast`).
 
 ```python
 from sklearn.datasets import load_diabetes
@@ -287,6 +287,62 @@ Each split uses a new ranker with this ranker's settings, so the ranker you call
 >
 > Fit learned preprocessing within each training split. Put transformations compatible with FeatRanker's finite numeric input contract inside custom model pipelines. For raw missing or categorical data requiring learned preprocessing, use a manual split workflow; do not fit preprocessing on all development rows before this call.
 
+### Time series and grouped data
+
+For ordered or clustered rows, pass the splitter that matches how the model will be used. `rank_resampled()` and `ConsensusSelector` accept any scikit-learn splitter (`TimeSeriesSplit` for rows in time order, `GroupKFold` with `groups=` for rows that belong together, such as several rows per patient), so a model is never evaluated on rows from before its training rows or from the same group.
+
+```python
+import numpy as np
+from sklearn.linear_model import Ridge
+from sklearn.model_selection import GroupKFold, TimeSeriesSplit, cross_val_score
+from sklearn.pipeline import Pipeline
+
+from featranker import ConsensusSelector, FeatureRanker
+
+rng = np.random.default_rng(0)
+n_rows = 300
+X = rng.normal(size=(n_rows, 4))
+y = 2.0 * X[:, 0] + X[:, 1] + 0.3 * rng.normal(size=n_rows)
+names = ["strong", "weak", "noise_1", "noise_2"]
+patients = np.repeat(np.arange(30), 10)  # 10 rows per patient
+
+ranker = FeatureRanker(task="reg", group="fast", verbose=False)
+
+# Rows are in time order: every split trains on the past and evaluates on the future.
+by_time = ranker.rank_resampled(
+    X, y, feature_names=names, scoring="r2", cv=TimeSeriesSplit(n_splits=4),
+    n_repeats=3, random_state=0,
+)
+print("time:", [row["feature_group"] for row in by_time["stability"]])
+
+# Rows from one patient never sit on both sides of a split.
+by_patient = ranker.rank_resampled(
+    X, y, feature_names=names, scoring="r2", cv=GroupKFold(n_splits=5), groups=patients,
+    n_repeats=3, random_state=0,
+)
+print("patient:", [row["feature_group"] for row in by_patient["stability"]])
+
+# The same splitters in a pipeline, so selection never sees the rows it is scored on.
+pipeline = Pipeline([
+    ("select", ConsensusSelector(
+        "reg", "r2", k=2, group="fast", cv=GroupKFold(n_splits=5), n_repeats=3, random_state=0)),
+    ("model", Ridge()),
+])
+scores = cross_val_score(
+    pipeline, X, y, groups=patients, cv=GroupKFold(n_splits=3),
+    params={"select__groups": patients},
+)
+print(f"pipeline R2 per outer fold: {np.round(scores, 2)}")
+```
+
+```text
+time: ['strong', 'weak', 'noise_1', 'noise_2']
+patient: ['strong', 'weak', 'noise_2', 'noise_1']
+pipeline R2 per outer fold: [0.98 0.98 0.98]
+```
+
+The splitter only controls how rows are divided. Shadow features shuffle rows within each training and evaluation set, and permutation importance shuffles rows within the evaluation set, which ignores any dependence between neighbouring rows (autocorrelation). Treat shadows and the hits test as less reliable on such data. This is a known limitation listed in the roadmap (`openspec/config.yaml`).
+
 <a id="shadow-features"></a>
 
 ## ▍ Shadow features
@@ -358,7 +414,7 @@ With shadows on, `rank_resampled()` also tests, for every group, whether it beat
 - `shadow_p_value`: the one-sided binomial probability of at least `shadow_hits` hits in `n_splits` trials with success probability 0.5.
 - `shadow_q_value`: the Benjamini-Hochberg adjusted p-value across all groups.
 
-The report also has a `shadow_test` block (method, hit rule, `null_probability`, correction, `n_trials`, and `min_p_value`).
+A 0.5 null probability and false-discovery-rate control are not established for arbitrary estimators or overlapping splits; these binomial reference values should not be interpreted as calibrated significance. The report says so: it has a `shadow_test` block (method, hit rule, `null_probability`, correction, `n_trials`, `min_p_value`, `calibrated: false`, and a `note`). Studying calibration is planned for 1.6.
 
 ```python
 import numpy as np
@@ -407,23 +463,23 @@ Output from scikit-learn models only (`group="fast"`), on 10 splits.
 
 Read it with these limits in mind:
 
-- **Conservative null.** Under no effect, a group beats the *maximum* of all shadow groups with probability at most 0.5 (about 1/2 with one real group, much lower with many), so testing against 0.5 errs on the side of not finding signal. This is Boruta's choice too.
-- **Dependent splits.** Cross-validation training sets overlap, so the splits are not independent trials and the p-values are approximate. Treat them as a guide, not exact error control.
+- **Uncalibrated null.** The test compares against 0.5, which is Boruta's choice, but nothing here shows that a group with no effect hits in half of the splits or fewer. An accepted custom estimator can break it: for example, a model whose importance for a pure-noise column is reliably above its shadow's gives small q-values on noise. Treat `shadow_p_value` and `shadow_q_value` as reference values for ordering groups, not as probabilities or error rates.
+- **Dependent splits.** Cross-validation training sets overlap, so the splits are not independent trials and the binomial tail is not exact even for well-behaved models.
 - **Low power with few splits.** The smallest p-value `n_splits` allows is `0.5 ** n_splits` (`shadow_test["min_p_value"]`): 0.031 for the default `cv=5`. At `cv=5` only a group that hits in all 5 splits reaches it (4 of 5 already gives p = 0.19), and Benjamini-Hochberg multiplies it by the number of groups over its rank, so it stays above 0.05 unless most groups hit 5 of 5. With 12 groups of which `s5` and `bmi` hit 5 of 5, both get q = 0.19. Use `RepeatedKFold` or another splitter with 10 or more splits when you want the test to say something; no warning is raised for fewer, except that a `ConsensusSelector` with `max_shadow_q` that selects nothing adds `n_splits` and the smallest possible p-value to its empty-selection warning.
 - **What a small q means.** The group beats shuffled noise across splits. It is not proof of a causal effect or of usefulness for a new target.
 - **Not for single-split reports.** `rank_features()` has one trial, so it gets no test.
 
-`ConsensusSelector(max_shadow_q=0.05)` keeps the groups with `shadow_q_value <= 0.05` (see [Feature selection](#feature-selection)).
+`ConsensusSelector(max_shadow_q=0.05)` keeps the groups with `shadow_q_value <= 0.05` (see [Feature selection](#feature-selection)). Because the values are uncalibrated, `max_shadow_q` is a heuristic filter, not a significance level.
 
 <a id="evidence"></a>
 
 ## ▍ Evidence
 
-A rank says which groups matter, not why. With `evidence=True`, `fit()` also keeps the training data and `rank_features()` adds evidence about the mechanism behind the ranking:
+A rank says which groups matter, not why. With `evidence=True`, `fit()` also keeps the training data (as its own copy, so changing your arrays afterwards does not change the evidence) and `rank_features()` adds evidence about the mechanism behind the ranking:
 
-- **Train score and overfit gap.** Each model gets `train_score` (the same scorer on the data it was fit on) and `overfit_gap = train_score - evaluation_score`. A large gap means the model memorized its training data, so its importances describe a model that may not generalize.
+- **Train score and overfit gap.** Each model gets `train_score` (the same scorer on the data it was fit on) and `overfit_gap = train_score - evaluation_score`. A large gap means the model scores much better on its training data than on the evaluation data. Memorization is one cause; a shift between the training and evaluation distributions, or a small evaluation sample, can produce the same gap, so check those before concluding that the model does not generalize.
 - **Correlated groups.** `evidence.correlation` lists pairs of feature groups whose strongest member-column Spearman correlation on the **training** data is at least 0.5, with its sign. Permutation importance can split credit between correlated groups; consider putting them in one `feature_groups` entry.
-- **SHAP summary** (needs `pip install 'featranker[shap]'`). For each linear model (`LinearExplainer`) and each tree model SHAP's tree explainer supports, including a `Pipeline` whose earlier steps are all `StandardScaler`, `MinMaxScaler`, `MaxAbsScaler`, or `RobustScaler` (any other pipeline step lists the model as unsupported), `models[name]["shap"]` gives every group's `mean_abs` (mean absolute SHAP value, summed over the group's columns) and `direction` (Spearman correlation between a single-column group's value and its SHAP value; positive means higher values push the prediction up). Other models appear in `evidence.shap.unsupported`; there is no model-agnostic fallback. Without `shap`, a `UserWarning` is raised and the rest of the evidence is still computed.
+- **SHAP summary** (needs `pip install 'featranker[shap]'`). For each linear model (`LinearExplainer`) and each tree model SHAP's tree explainer supports, including a `Pipeline` whose earlier steps are all `StandardScaler`, `MinMaxScaler`, `MaxAbsScaler`, or `RobustScaler`, or identity steps (`"passthrough"`, `None`) (any other pipeline step lists the model as unsupported), `models[name]["shap"]` gives every group's `mean_abs` (mean absolute SHAP value, summed over the group's columns) and `direction` (Spearman correlation between a single-column group's value and its SHAP value; positive means higher values push the explained output up). Other models appear in `evidence.shap.unsupported`; there is no model-agnostic fallback. Without `shap`, a `UserWarning` is raised and the rest of the evidence is still computed.
 
 ```python
 from sklearn.datasets import load_diabetes
@@ -489,9 +545,54 @@ forest  train 0.92  eval 0.29  overfit gap 0.63
 
 The unpruned tree fits its training data perfectly (`train 1.00`) and does worse than the dummy on the evaluation data, and the forest also lost most of its training advantage, so `summarize()` adds an `overfit` finding for both. `s1`/`s2` and `s3`/`s4` are correlated, so their permutation importances share credit (`correlated_groups`). For the ridge model, `s5` and `bmi` push predictions up and carry the largest `mean_abs`.
 
-- `mean_abs` and `direction` are computed on at most 1000 evaluation rows, evenly spaced, so they do not depend on `random_state`. For linear models the background is at most 1000 evenly spaced **training** rows (the training distribution, like the tree explainer's own reference), so a linear `mean_abs` is the mean absolute distance from the training mean times the coefficient. `mean_abs` is in the model's own output units (the prediction for regression; log-odds, margin, or probability for classifiers, depending on the model), so compare it between groups within a model, not between models. For multiclass models `mean_abs` is averaged over classes and `direction` is `null`; `direction` is also `null` for multi-column groups and constant features. For binary classification the explained output is the positive class, the second label in sorted order (`label_encoder.classes_[1]`). For linear models `direction` is always +1 or -1, the sign of the coefficient, even when `mean_abs` is near 0, so read it together with `mean_abs`.
+- `mean_abs` and `direction` are computed on at most 1000 evaluation rows, evenly spaced, so they do not depend on `random_state`. For linear models the background is at most 1000 evenly spaced **training** rows (the training distribution, like the tree explainer's own reference), so a linear `mean_abs` is the mean absolute distance from the training mean times the coefficient.
+- `mean_abs` is on the explainer's output scale, which is not always the scale of `predict()`. For linear models it is the linear predictor, so for a model with a link function (for example `PoissonRegressor`, whose predictions are the exponential of it) it is in link units, such as log units. For tree models it is the raw output: the prediction for regression; log-odds, margin, or probability for classifiers, depending on the model. Compare groups within one model, not between models.
+- For multiclass models `mean_abs` is averaged over classes and `direction` is `null`; `direction` is also `null` for multi-column groups and constant features. For binary classification the explained output is the positive class, the second label in sorted order (`label_encoder.classes_[1]`).
+- For linear models `direction` is the sign of the coefficient (+1 or -1) when the coefficient is not zero, even when `mean_abs` is near 0, so read it together with `mean_abs`. A zero coefficient (for example a `Lasso` that dropped the column) gives `null`.
+
+```python
+import numpy as np
+from sklearn.linear_model import Lasso, PoissonRegressor
+from sklearn.model_selection import train_test_split
+
+from featranker import FeatureRanker
+
+rng = np.random.default_rng(0)
+X = rng.normal(size=(400, 3))
+y = rng.poisson(np.exp(4.0 + 1.0 * X[:, 0] + 0.5 * X[:, 1]))
+X_train, X_eval, y_train, y_eval = train_test_split(X, y, test_size=0.3, random_state=0)
+
+ranker = FeatureRanker(
+    task="reg",
+    models={"poisson": PoissonRegressor(), "lasso": Lasso(alpha=1e3)},
+    evidence=True,
+    verbose=False,
+)
+ranker.fit(X_train, y_train, feature_names=["a", "b", "c"])
+report = ranker.rank_features(X_eval, y_eval, scoring="r2", random_state=0)
+
+prediction = ranker.trained_models["poisson"].predict(X_eval)
+print(f"Poisson predictions span {prediction.min():.1f} to {prediction.max():.1f}")
+for name in ("poisson", "lasso"):
+    for group, effect in report["models"][name]["shap"]["groups"].items():
+        direction = effect["direction"]
+        shown = "null" if direction is None else f"{direction:+.2f}"
+        print(f"{name:>7} {group}  mean|SHAP| {effect['mean_abs']:6.2f}  direction {shown}")
+```
+
+```text
+Poisson predictions span 4.9 to 1429.9
+poisson a  mean|SHAP|   0.69  direction +1.00
+poisson b  mean|SHAP|   0.44  direction +1.00
+poisson c  mean|SHAP|   0.00  direction -1.00
+  lasso a  mean|SHAP|   0.00  direction null
+  lasso b  mean|SHAP|   0.00  direction null
+  lasso c  mean|SHAP|   0.00  direction null
+```
+
+The Poisson `mean_abs` values (at most 0.69) are in log units; the predictions span 4.9 to 1429.9. The `Lasso` with a large penalty has all coefficients at zero, so its `mean_abs` is 0 and its `direction` is `null`.
 - Evidence costs one extra scoring pass per model, plus SHAP when installed (seconds per model for a large forest). It is off by default, and reports made without it are unchanged.
-- A ranker fitted with `evidence=True` keeps its training matrix, so pickling it stores that data too. With `shadows=True` the stored matrix includes the shadow block, about twice the size.
+- A ranker fitted with `evidence=True` keeps its own copy of the training matrix, so pickling it stores that data too. With `shadows=True` the stored matrix includes the shadow block, about twice the size.
 - `rank_resampled()` passes the setting to every split, so each `report["splits"][i]["report"]` carries its own evidence; nothing is aggregated across splits.
 - On the command line, add `--evidence`.
 
@@ -539,7 +640,7 @@ Output shown with the `xgboost` and `catboost` extras installed. The score is ho
 | `task`, `scoring` | required | As in `FeatureRanker` and `rank_features()`. |
 | `k` | `None` | Keep the first `k` groups in the [stability](report.md#resampled-reports) order (or all groups if there are fewer). Python or NumPy integer. |
 | `min_shadow_share` | `None` | Keep groups whose stability `above_shadow_share` is at least this (0 to 1). Turns on [shadow features](#shadow-features). |
-| `max_shadow_q` | `None` | Keep groups whose stability `shadow_q_value` (the [shadow hits test](#shadow-test)) is at most this (greater than 0, at most 1). Turns on shadow features. Use `cv` with 10 or more splits, such as `RepeatedKFold`; with 5 the test has little power. |
+| `max_shadow_q` | `None` | Keep groups whose stability `shadow_q_value` (the [shadow hits test](#shadow-test)) is at most this (greater than 0, at most 1); a heuristic filter, since the values are [uncalibrated](#shadow-test). Turns on shadow features. Use `cv` with 10 or more splits, such as `RepeatedKFold`; with 5 the test has little power. |
 | `group`, `models`, `n_jobs`, `shadow_seed` | as `FeatureRanker` | Passed to the ranker built in `fit()`. |
 | `feature_groups`, `cv`, `n_repeats`, `random_state` | as `rank_resampled()` | Passed to `rank_resampled()` on the data given to `fit()`. |
 | `feature_groups="auto"` | | Groups correlated columns with [`auto_groups()`](#auto-groups) on the data given to `fit()`, so inside a pipeline from the training fold only. The groups used are in `report_["feature_groups"]`. Any other string raises `ValueError` in `fit()`. |
@@ -798,6 +899,8 @@ Under `cross_val_score` each outer training fold computes its own groups, so eva
 
 - **Linear scaling.** Built-in linear models sit behind a `StandardScaler` fit on training data only. Tree models and your own models get the data as given.
 - **Classification labels.** For `task="clf"`, `fit()` encodes the labels to `0..n_classes-1` with a `LabelEncoder`, because some estimators (XGBoost) require it. Every estimator and scorer, including your own, sees the encoded labels. `ranker.label_encoder.classes_` maps each code back to the original label; code `i` is `classes_[i]`.
+
+`fit()`, `rank_features()` and `rank_resampled()` work on their own float copies of `X` and `y`, so changing your arrays afterwards changes nothing in the models, the evidence or later reports, even for estimators that store their training data (such as k-nearest neighbours). The cost is one extra copy of the data per call.
 
 So a custom scorer must refer to classes by code. For example, to score F1 for the original class `"case"`:
 

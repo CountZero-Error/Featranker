@@ -47,8 +47,10 @@ class ConsensusSelector(SelectorMixin, BaseEstimator):
             this (turns shadow features on). With k too, filter then take k.
         max_shadow_q: Keep groups whose shadow_q_value (Benjamini-Hochberg
             adjusted shadow hits test across splits) is at most this, in
-            (0, 1]. Turns shadow features on; combines with the other rules
-            like min_shadow_share. Needs about 10 or more splits to have power.
+            (0, 1]. A heuristic filter: the values are uncalibrated reference
+            values, not significance levels. Turns shadow features on;
+            combines with the other rules like min_shadow_share. Needs about
+            10 or more splits to have power.
         group, models, n_jobs, shadow_seed: As in FeatureRanker.
         feature_groups, cv, n_repeats, random_state: As in rank_resampled().
             feature_groups="auto" groups correlated columns with auto_groups()
@@ -90,6 +92,10 @@ class ConsensusSelector(SelectorMixin, BaseEstimator):
         self.shadow_seed = shadow_seed
         self.n_jobs = n_jobs
         self.verbose = verbose
+
+    def __setstate__(self, state: Dict[str, Any]) -> None:
+        # Selectors pickled by 1.3 lack the 1.4 max_shadow_q parameter.
+        super().__setstate__({"max_shadow_q": None, **state})
 
     def _validate_rule(self) -> None:
         k, share, q = self.k, self.min_shadow_share, self.max_shadow_q

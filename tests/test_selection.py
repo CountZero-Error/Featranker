@@ -1,3 +1,5 @@
+import pickle
+
 import numpy as np
 import pytest
 from sklearn.base import BaseEstimator, RegressorMixin, clone
@@ -434,3 +436,17 @@ def test_empty_share_selection_warning_is_unchanged(patched):
     assert str(caught[0].message) == (
         "No feature group was selected; transform() will return no columns."
     )
+
+
+def test_selector_pickled_without_max_shadow_q_loads_clones_and_refits():
+    fitted = selector(k=2).fit(X_DATA, Y_DATA)
+    expected = fitted.transform(X_DATA)
+    del fitted.__dict__["max_shadow_q"]  # what a 1.3 pickle holds
+    old = pickle.loads(pickle.dumps(fitted))
+
+    np.testing.assert_array_equal(old.transform(X_DATA), expected)
+    assert old.get_params()["max_shadow_q"] is None
+    refit = clone(old).fit(X_DATA, Y_DATA)
+    assert refit.max_shadow_q is None
+    np.testing.assert_array_equal(refit.transform(X_DATA), expected)
+    old.fit(X_DATA, Y_DATA)  # refitting the loaded object itself also works

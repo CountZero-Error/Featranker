@@ -6,6 +6,7 @@ import pytest
 import yaml
 from sklearn.linear_model import Ridge
 from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
 
 import featranker.importance as importance_module
 from featranker import ConsensusSelector, FeatureRanker
@@ -61,14 +62,33 @@ def test_fast_models_cover_each_family_once(task):
 
     fast_families = list(ranker.model_families_.values())
     assert sorted(fast_families) == sorted(all_families)
-    assert {e["name"] for e in entries if e.get("fast")} == FAST_MODELS[task]
+    assert {e["name"] for e in entries if e.get("fast") is True} == FAST_MODELS[task]
 
 
-def test_fast_linear_representatives_keep_the_scaler():
-    models = FeatureRanker("clf", group="fast", verbose=False).models["clf"]["linear"]
+@pytest.mark.parametrize("task", ["clf", "reg"])
+def test_fast_linear_representatives_keep_the_scaler(task):
+    models = FeatureRanker(task, group="fast", verbose=False).models[task]["linear"]
 
-    assert isinstance(models["ridge_classifier"], Pipeline)
-    assert models["ridge_classifier"].steps[0][0] == "standardscaler"
+    assert models
+    for name, model in models.items():
+        assert isinstance(model, Pipeline), name
+        assert isinstance(model.steps[0][1], StandardScaler), name
+
+
+def test_only_a_boolean_true_marks_a_model_fast(monkeypatch, tmp_path):
+    text = CONFIG.read_text(encoding="utf-8")
+    marker = "    - name: logistic_regression\n      family: logistic\n      fast: true\n"
+    assert marker in text
+    copy = tmp_path / "config.yaml"
+    copy.write_text(text.replace(marker, marker.replace("fast: true", 'fast: "false"')),
+                    encoding="utf-8")
+    monkeypatch.setattr(importance_module, "CONFIG_PATH", copy)
+
+    ranker = FeatureRanker("clf", group="fast", verbose=False)
+
+    assert set(ranker.models["clf"]["linear"]) == FAST_MODELS["clf"] & {
+        "ridge_classifier", "lda", "naive_bayes_gaussian"
+    }
 
 
 def test_fast_never_imports_optional_dependencies(monkeypatch):

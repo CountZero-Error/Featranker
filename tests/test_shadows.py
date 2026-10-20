@@ -300,13 +300,26 @@ def test_resampled_report_has_shadow_test_block_for_cv5():
         X_DATA, Y_DATA, feature_names=NAMES, scoring="r2", cv=5, n_repeats=1,
         random_state=0)
 
-    assert report["shadow_test"] == {
+    block = dict(report["shadow_test"])
+    assert "not calibrated" in block.pop("note")
+    assert block == {
         "method": "binomial", "hit": "above_shadow_share > 0.5",
         "null_probability": 0.5, "correction": "benjamini-hochberg",
-        "n_trials": 5, "min_p_value": 0.03125,
+        "n_trials": 5, "min_p_value": 0.03125, "calibrated": False,
     }
     assert all(TEST_KEYS <= set(row) for row in report["stability"])
     json.dumps(report, allow_nan=False)
+
+
+def test_shadow_test_note_says_what_is_not_established():
+    report = ranker(shadows=True).rank_resampled(
+        X_DATA, Y_DATA, feature_names=NAMES, scoring="r2", cv=3, n_repeats=1,
+        random_state=0)
+
+    note = report["shadow_test"]["note"]
+    assert report["shadow_test"]["calibrated"] is False
+    assert "not calibrated" in note and "false-discovery" in note
+    assert "arbitrary estimators" in note and "overlapping splits" in note
 
 
 def test_resampled_report_without_shadows_has_no_test_keys():

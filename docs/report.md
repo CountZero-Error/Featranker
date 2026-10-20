@@ -89,10 +89,10 @@ How to read `stability`, which is sorted by `median_rank`, then `top_k_share` (h
 | `n_splits_ranked` | How many splits produced a consensus. It is the same for every group. |
 | `above_shadow_share` | Only with shadows on: the mean of the group's per-split `above_shadow_share` over ranked splits. |
 | `shadow_hits` | Only with shadows on: the number of splits in which the group's consensus `above_shadow_share` was above 0.5. A split with no consensus row for the group is a non-hit. |
-| `shadow_p_value` | Only with shadows on: the one-sided binomial probability of at least `shadow_hits` hits in `n_splits` trials at probability 0.5. Approximate: splits overlap. See [the hits test](usage.md#shadow-test). |
-| `shadow_q_value` | Only with shadows on: `shadow_p_value` adjusted with Benjamini-Hochberg across all groups. |
+| `shadow_p_value` | Only with shadows on: the one-sided binomial probability of at least `shadow_hits` hits in `n_splits` trials at probability 0.5. An uncalibrated reference value: splits overlap and the 0.5 null is not established for arbitrary estimators. See [the hits test](usage.md#shadow-test). |
+| `shadow_q_value` | Only with shadows on: `shadow_p_value` adjusted with Benjamini-Hochberg across all groups. Also a reference value, not a calibrated false-discovery rate. |
 
-With shadows on, the report also has a top-level `shadow_test`: `method` (`"binomial"`), `hit` (`"above_shadow_share > 0.5"`), `null_probability` (0.5), `correction` (`"benjamini-hochberg"`), `n_trials` (equal to `n_splits`), and `min_p_value` (`0.5 ** n_splits`, the smallest p-value the test can give; with `cv=5` it is 0.03125, so use 10 or more splits).
+With shadows on, the report also has a top-level `shadow_test`: `method` (`"binomial"`), `hit` (`"above_shadow_share > 0.5"`), `null_probability` (0.5), `correction` (`"benjamini-hochberg"`), `n_trials` (equal to `n_splits`), `min_p_value` (`0.5 ** n_splits`, the smallest p-value the test can give; with `cv=5` it is 0.03125, so use 10 or more splits), `calibrated` (always `false`), and `note` (a sentence saying that the values are binomial reference values whose null and false-discovery-rate control are not established for arbitrary estimators or overlapping splits). Read the p and q values as reference values, not significance.
 
 Within each split, `rank_std` still measures disagreement between model families, not between splits; between-split variation is what `min_rank`, `max_rank`, and `top_k_share` show. With few splits (for example `cv=3`), these numbers are coarse. Every split also draws on the same data, so a stable ranking here is not a guarantee on new data.
 
@@ -138,7 +138,7 @@ With `evidence=True`, each model also has `train_score` and `overfit_gap` (`null
 }
 ```
 
-`mean_abs` is in the model's own output units, so compare it between groups of one model, not across models. `direction` is `null` for multi-column groups, constant features, and multiclass models; for binary classification the explained output is the positive class (the second label in sorted order). For linear models `direction` is always +1 or -1 (the coefficient's sign), even when `mean_abs` is near 0.
+`mean_abs` is on the explainer's output scale, which may be a link scale rather than the prediction scale (a linear model's linear predictor, for example log units for `PoissonRegressor`), so compare it between groups of one model, not across models. `direction` is `null` for multi-column groups, constant features, and multiclass models; for binary classification the explained output is the positive class (the second label in sorted order). For linear models `direction` is the coefficient's sign (+1 or -1) when the coefficient is not zero, even when `mean_abs` is near 0, and `null` when it is zero.
 
 ```python
 {

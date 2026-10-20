@@ -148,7 +148,8 @@ def _build_parser() -> argparse.ArgumentParser:
         choices=["linear", "tree", "all", "fast"],
         default="all",
         help=(
-            "Built-in model group: 'linear' (linear models only), "
+            "Built-in model group: 'linear' (linear, discriminant, naive Bayes "
+            "and kernel models), "
             "'tree' (tree/ensemble models only), 'all' (both), or "
             "'fast' (one representative per model family)."
         ),

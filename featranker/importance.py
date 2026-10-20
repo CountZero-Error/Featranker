@@ -39,6 +39,12 @@ OPTIONAL_MODEL_MODULES = {"xgboost", "lightgbm", "catboost"}
 
 BASELINE_NAME = "dummy_baseline"
 
+SHADOW_TEST_NOTE = (
+    "Binomial reference values, not calibrated significance: the 0.5 null and "
+    "false-discovery-rate control are not established for arbitrary estimators "
+    "or overlapping splits."
+)
+
 CONFIG_PATH = Path(__file__).with_name("importance_config.yaml")
 
 # scikit-learn < 1.8 ignores LogisticRegression(l1_ratio=...) unless `penalty`
@@ -95,7 +101,8 @@ def _validate_X(
     expected_names: Optional[List[str]] = None,
 ) -> tuple[np.ndarray, List[str]]:
     dataframe_names = list(X.columns) if hasattr(X, "columns") else None
-    values = np.asarray(X, dtype=float)
+    # Always a copy: models and kept evidence data must not alias the caller's array.
+    values = np.array(X, dtype=float)
     if values.ndim != 2:
         raise ValueError("[!] X must be a two-dimensional feature matrix.")
     if not np.isfinite(values).all():
@@ -136,7 +143,7 @@ def _validate_X(
 
 
 def _validate_y(y: Any, n_rows: int) -> np.ndarray:
-    values = np.asarray(y)
+    values = np.array(y)  # a copy, like _validate_X
     if values.ndim != 1:
         raise ValueError("[!] y must be one-dimensional.")
     if len(values) != n_rows:
@@ -984,6 +991,8 @@ class FeatureRanker:
                 "correction": "benjamini-hochberg",
                 "n_trials": len(splits),
                 "min_p_value": 0.5 ** len(splits),
+                "calibrated": False,
+                "note": SHADOW_TEST_NOTE,
             }
         return Report(result)
 
@@ -1048,7 +1057,9 @@ class FeatureRanker:
 
                 if self.group == "fast":
                     model_configs = [
-                        m for m in model_configs if isinstance(m, dict) and m.get("fast")
+                        m
+                        for m in model_configs
+                        if isinstance(m, dict) and m.get("fast") is True
                     ]
                 group_models: Dict[str, Any] = {}
                 for model in tqdm(
