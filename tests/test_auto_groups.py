@@ -92,7 +92,7 @@ def test_name_collision_with_a_column_raises():
 
 @pytest.mark.parametrize(
     "X",
-    [np.ones((1, 3)), np.ones(3), np.array([[1.0, np.nan], [2.0, 3.0]])],
+    [np.ones((1, 3)), np.ones(3), np.array([[1.0, np.inf], [2.0, 3.0]])],
 )
 def test_invalid_x_raises(X):
     with pytest.raises(ValueError, match=r"\[!\]"):

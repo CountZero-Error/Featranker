@@ -4,7 +4,7 @@
 
 Model entries come from [`importance_config.yaml`](../featranker/importance_config.yaml). Names in the **Key** column appear in reports and structured failures. Select a **Group** with `group="linear"` (the Linear rows: linear, discriminant, naive Bayes, and kernel models), `group="tree"`, or `group="all"` (the default). `group="fast"` runs only the models marked in the **Fast** column: one representative per candidate family, 7 for classification and 5 for regression. Normally the same families vote as in `"all"`, but a representative can fail or score below the dummy baseline and then its family does not vote, while in `"all"` another member of that family might (see [Speed](usage.md#speed)). The **Family** column groups close variants; each family casts one vote in the consensus (see [Report](report.md#reading-the-report)).
 
-Built-in linear models are standardized internally (a `StandardScaler` fit on training data only, inside a pipeline); tree models are not.
+Built-in linear models are standardized internally (a `StandardScaler` fit on training data only, inside a pipeline); tree models are not. With `missing="impute"`, every built-in model also starts with a median `SimpleImputer`, even models that handle NaN natively; see [Missing values](usage.md#missing-values).
 
 ## ▍ Classification: 22 models
 

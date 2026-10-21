@@ -6,7 +6,7 @@
 
 The API is one class: `FeatureRanker(...)`, then `.fit(...)`, then `.rank_features(...)`, which returns a [`Report`](#working-with-reports). [`.rank_resampled(...)`](#resampled-ranking) repeats that over cross-validation splits, [`ConsensusSelector`](#feature-selection) turns the ranking into a scikit-learn pipeline step, [`summarize(report)`](#summarize) reads the result, and [`to_prompt` / `explain`](#llm-interpretation) hand it to an LLM with checked citations (deprecated since 1.1). `evidence=True` adds [mechanism evidence](#evidence) to the report.
 
-### `FeatureRanker(task, group="all", models=None, n_jobs=None, verbose=True, shadows=False, shadow_seed=None, evidence=False, shadow_mode="joint")`
+### `FeatureRanker(task, group="all", models=None, n_jobs=None, verbose=True, shadows=False, shadow_seed=None, evidence=False, shadow_mode="joint", missing="error")`
 
 | Parameter | Default | Meaning |
 |---|---|---|
@@ -19,12 +19,13 @@ The API is one class: `FeatureRanker(...)`, then `.fit(...)`, then `.rank_featur
 | `shadow_seed` | `None` | Non-negative integer seed for the shadow shuffles, or `None` for different shadows on every run. |
 | `evidence` | `False` | Keep a copy of the training data and add train scores, overfit gaps, correlated groups, and (with `featranker[shap]`) a SHAP summary to the report. See [Evidence](#evidence). |
 | `shadow_mode` | `"joint"` | `"joint"` shuffles all shadow columns with one shared row order; `"independent"` shuffles each shadow column on its own. Only used with `shadows=True`. See [Shadow mode](#shadow-mode). |
+| `missing` | `"error"` | `"error"` rejects NaN in features. `"impute"` accepts NaN and gives every built-in model a median imputer fit on its training rows only; custom models receive NaN unchanged. See [Missing values](#missing-values). |
 
 ### `.fit(X, y, feature_names=None)`
 
 | Parameter | Default | Meaning |
 |---|---|---|
-| `X` | required | Training features: 2-D NumPy array or pandas DataFrame of finite numbers, with at least one row and one column. NaN and infinite values are rejected. |
+| `X` | required | Training features: 2-D NumPy array or pandas DataFrame of numbers, with at least one row and one column. Infinite values are rejected, and so is NaN unless `missing="impute"`. |
 | `y` | required | Training target, one value per row. Class labels may be numbers or strings; regression targets must be numeric. |
 | `feature_names` | `None` | Unique, non-empty column names. Required for NumPy input; taken from the columns for a DataFrame. |
 
@@ -164,7 +165,7 @@ ranker = FeatureRanker(
 ```
 
 > [!IMPORTANT]
-> Your estimators receive a float NumPy array, even when you pass a DataFrame. Inside a pipeline, select columns by position (for example `ColumnTransformer([("scale", StandardScaler(), [0, 1])])`), not by name. Categorical values and missing values must be encoded or removed before the data reaches FeatRanker.
+> Your estimators receive a float NumPy array, even when you pass a DataFrame. Inside a pipeline, select columns by position (for example `ColumnTransformer([("scale", StandardScaler(), [0, 1])])`), not by name. Categorical values must be encoded before the data reaches FeatRanker. With `missing="impute"` your estimators receive NaN unchanged; see [Missing values](#missing-values).
 
 <a id="parallel-models"></a>
 
@@ -175,6 +176,64 @@ ranker = FeatureRanker(
 - Reports match `n_jobs=None`, with models in the same order, when every estimator is deterministic or seeded, the scorer is deterministic, and `random_state` is a fixed integer. Every built-in model with randomness is seeded (`random_state=42`) since 0.4.1. An unseeded custom estimator, such as `RandomForestRegressor()` without `random_state`, can give different reports on every run, parallel or not. With `shadows=True`, reproducibility also requires a fixed non-negative integer `shadow_seed`; fixing `random_state` alone does not seed shadow construction.
 - Per-model failures are recorded exactly as in the sequential path.
 - With any parallel setting (`n_jobs` other than `None` or `1`, including `-1`), custom scorers and estimators are sent to worker processes, so everything they hold must be serializable. Lambdas and local functions are fine.
+
+<a id="missing-values"></a>
+
+## ▍ Missing values
+
+By default NaN in the features raises `ValueError`. With `missing="impute"` FeatRanker accepts NaN (infinite values are still rejected) and imputes inside each model, so no evaluation row shapes an imputation:
+
+- Every built-in model becomes a pipeline that starts with `SimpleImputer(strategy="median")`, followed by the usual scaler for linear models. The imputer is fit on the rows the model is fit on and nothing else, so under `rank_resampled()` and `ConsensusSelector` each training split learns its own medians. This applies to every built-in model, including those that handle NaN natively (such as `HistGradientBoosting`), so one rule holds across models and scikit-learn versions; native handling is not used. A column that is missing in every training row becomes a constant 0 in training and keeps its position; its importance is meaningless, and `train_counts` in the report shows it.
+- Your own `models=` receive the NaN values unchanged and must handle them, for example with `make_pipeline(SimpleImputer(...), ...)` or an estimator that supports NaN.
+- The dummy baseline ignores feature values and is unaffected.
+- Evidence works with NaN: correlated groups and `auto_groups()` use, for each pair that involves a column with NaN, the rows where both are present (a pair with fewer than 30 such rows counts as uncorrelated, so sparse columns that rarely overlap are not grouped by chance; pairs of complete columns are computed as without NaN), and SHAP treats the leading imputer as a per-column step. Pairwise correlation costs O(columns squared times rows) when NaN is present; complete data takes the faster path with identical numbers to earlier versions. `auto_groups()` needs no argument for this.
+- The report gains `missing` (see [Report](report.md#structure)) with the number of missing training values per feature, so a mostly-missing feature is visible.
+
+```python
+import numpy as np
+from sklearn.datasets import load_diabetes
+from sklearn.model_selection import train_test_split
+
+from featranker import FeatureRanker
+
+data = load_diabetes()
+X = data.data.copy()
+rng = np.random.default_rng(0)
+X[rng.random(len(X)) < 0.2, 2] = np.nan  # 20% of bmi missing
+X[rng.random(len(X)) < 0.1, 3] = np.nan  # 10% of bp missing
+X_train, X_eval, y_train, y_eval = train_test_split(
+    X, data.target, test_size=0.3, random_state=0
+)
+
+ranker = FeatureRanker(task="reg", group="fast", missing="impute", verbose=False)
+ranker.fit(X_train, y_train, feature_names=list(data.feature_names))
+report = ranker.rank_features(
+    X_eval, y_eval, scoring="neg_mean_absolute_error", random_state=42
+)
+
+print(report["missing"]["train_counts"])
+for row in report["consensus"][:3]:
+    print(f"{row['feature_group']:>5}  median rank {row['median_rank']:.1f}")
+
+# The imputer holds the training median of bmi, not the evaluation one.
+imputer = ranker.trained_models["ridge_regression"][0]
+print(round(imputer.statistics_[2], 4), round(np.nanmedian(X_train[:, 2]), 4),
+      round(np.nanmedian(X_eval[:, 2]), 4))
+```
+
+```text
+{'age': 0, 'sex': 0, 'bmi': 67, 'bp': 27, 's1': 0, 's2': 0, 's3': 0, 's4': 0, 's5': 0, 's6': 0}
+   s5  median rank 1.0
+  bmi  median rank 2.0
+   bp  median rank 3.5
+-0.0105 -0.0105 0.0013
+```
+
+The ranking is from the five `group="fast"` built-in models. The last line shows the fitted imputer's median for `bmi` equal to the training median (-0.0105), not the evaluation one (0.0013).
+
+`ConsensusSelector` and the command line take the same policy: `ConsensusSelector("reg", "r2", k=2, missing="impute")` accepts NaN in `fit()` and `transform()` (it only chooses columns, so put an imputer after it in a `Pipeline` for the final model), and `featranker ... --missing impute` reads empty CSV cells as missing.
+
+**Limitations.** Median imputation mixes missingness with values. A lab test ordered only for sick patients is missing for a reason, and imputation leaves a spike at the median, and tree and kernel models can learn it, so a feature's importance can mix its values with its missingness (in a probe where only missingness drove the target, tree importance was about 1.9 and SVR about 1.05, while ridge, which can hardly use a spike, gave 0.006). To separate values from missingness, use custom models with `SimpleImputer(add_indicator=True)` or native NaN handling, and read `train_counts` to see which features are mostly missing. Missing values in the target are not supported. Categorical and string columns are not supported.
 
 ## ▍ Command line
 
@@ -195,7 +254,7 @@ featranker \
   --output report.json
 ```
 
-Both CSV files need headers, the same feature columns in the same order, and the target column. Feature values must be numeric; targets may be numeric or strings. Add `--quiet` to hide progress bars and `--evidence` to add [evidence](#evidence) to the report. `--feature-groups` takes a YAML file, or the word `auto` to group correlated columns of the training CSV with [`auto_groups()`](#auto-groups) (a file literally named `auto` must be written `./auto`). Run `featranker --help` for every flag.
+Both CSV files need headers, the same feature columns in the same order, and the target column. Feature values must be numeric; targets may be numeric or strings. With `--missing impute`, empty feature cells are read as missing values and imputed per training split (see [Missing values](#missing-values)); by default they are rejected. Only empty cells and the text `nan` (any case) are read as missing; `NA`, `N/A`, and `null` are not, and raise the numeric-values error. Add `--quiet` to hide progress bars and `--evidence` to add [evidence](#evidence) to the report. `--feature-groups` takes a YAML file, or the word `auto` to group correlated columns of the training CSV with [`auto_groups()`](#auto-groups) (a file literally named `auto` must be written `./auto`). Run `featranker --help` for every flag.
 
 <details>
 <summary><b>Example input files</b></summary>
@@ -286,7 +345,7 @@ Each split uses a new ranker with this ranker's settings, so the ranker you call
 > [!IMPORTANT]
 > Pass development data only and keep your final test set out. The splits here are internal validation. Choosing features from these results and then scoring a model on the same data overstates its performance.
 >
-> Fit learned preprocessing within each training split. Put transformations compatible with FeatRanker's finite numeric input contract inside custom model pipelines. For raw missing or categorical data requiring learned preprocessing, use a manual split workflow; do not fit preprocessing on all development rows before this call.
+> Fit learned preprocessing within each training split. Put transformations compatible with FeatRanker's finite numeric input contract inside custom model pipelines. Missing values can be left in with `missing="impute"` (see [Missing values](#missing-values)). For categorical data requiring learned preprocessing, use a manual split workflow; do not fit preprocessing on all development rows before this call.
 
 ### Time series and grouped data
 
@@ -743,7 +802,7 @@ Output shown with the `xgboost` and `catboost` extras installed. The score is ho
 | `min_shadow_share` | `None` | Keep groups whose stability `above_shadow_share` is at least this (0 to 1). Turns on [shadow features](#shadow-features). |
 | `max_shadow_q` | `None` | Keep groups whose stability `shadow_q_value` (the [shadow hits test](#shadow-test)) is at most this (greater than 0, at most 1); a heuristic filter, since the values are [uncalibrated](#shadow-test). Turns on shadow features. Use `cv` with 10 or more splits, such as `RepeatedKFold`; with 5 the test has little power. |
 | `min_shadow_families` | `None` | Keep groups whose stability `shadow_families` (see [family evidence](#family-evidence)) is at least this (a positive integer). Turns on shadow features. `2` is a heuristic starting point, safer than `1`, where one family fitting noise can pass alone; its false-selection rate is not yet measured (see the calibration study). |
-| `group`, `models`, `n_jobs`, `shadow_seed`, `shadow_mode` | as `FeatureRanker` | Passed to the ranker built in `fit()`. |
+| `group`, `models`, `n_jobs`, `shadow_seed`, `shadow_mode`, `missing` | as `FeatureRanker` | Passed to the ranker built in `fit()`. |
 | `feature_groups`, `cv`, `n_repeats`, `random_state` | as `rank_resampled()` | Passed to `rank_resampled()` on the data given to `fit()`. |
 | `feature_groups="auto"` | | Groups correlated columns with [`auto_groups()`](#auto-groups) on the data given to `fit()`, so inside a pipeline from the training fold only. The groups used are in `report_["feature_groups"]`. Any other string raises `ValueError` in `fit()`. |
 | `verbose` | `False` | Progress bars; off by default because pipelines fit many times. |
@@ -1020,7 +1079,7 @@ Non-finite baseline, shuffled, or importance values fail that model's ranking. T
 
 | Error or warning | Cause | Fix |
 |---|---|---|
-| `X must contain only finite values; impute or drop missing ...` | NaN or infinite values in the features. | Impute or drop them before calling FeatRanker. |
+| `X must contain only finite values; impute or drop missing ...` | NaN or infinite values in the features. | Impute or drop them before calling FeatRanker, or pass `missing="impute"` for NaN (infinite values are always rejected). |
 | `feature_names are required for NumPy input.` | `X` is a NumPy array and no names were given. | Pass `feature_names=[...]`, or pass a DataFrame. |
 | `Evaluation feature names and order must match fit().` | `X_eval` columns differ from training. | Use the same columns in the same order. |
 | `y contains labels not seen during fit(): ...` | The evaluation set has a class the training set lacks. | Stratify the split so every class appears in training. |

@@ -59,7 +59,10 @@ class ConsensusSelector(SelectorMixin, BaseEstimator):
             fitting noise can pass alone. Its false-selection rate is not
             yet measured (see the calibration study). Turns shadow features
             on; combines with the other rules.
-        group, models, n_jobs, shadow_seed, shadow_mode: As in FeatureRanker.
+        group, models, n_jobs, shadow_seed, shadow_mode, missing: As in
+            FeatureRanker. With missing="impute", NaN is accepted in fit() and
+            transform() (the selector only picks columns), so put an imputer
+            after it in a Pipeline for the final model.
         feature_groups, cv, n_repeats, random_state: As in rank_resampled().
             feature_groups="auto" groups correlated columns with auto_groups()
             on the X given to fit(), so inside a Pipeline from the training
@@ -84,6 +87,7 @@ class ConsensusSelector(SelectorMixin, BaseEstimator):
         random_state: Optional[int] = None,
         shadow_seed: Optional[int] = None,
         shadow_mode: Literal["joint", "independent"] = "joint",
+        missing: Literal["error", "impute"] = "error",
         n_jobs: Optional[int] = None,
         verbose: bool = False,
     ) -> None:
@@ -102,13 +106,18 @@ class ConsensusSelector(SelectorMixin, BaseEstimator):
         self.random_state = random_state
         self.shadow_seed = shadow_seed
         self.shadow_mode = shadow_mode
+        self.missing = missing
         self.n_jobs = n_jobs
         self.verbose = verbose
 
     def __setstate__(self, state: Dict[str, Any]) -> None:
         # Selectors pickled by 1.3 lack the 1.4 max_shadow_q parameter, and
-        # those pickled before 1.6 lack min_shadow_families and shadow_mode.
-        defaults = {"max_shadow_q": None, "min_shadow_families": None, "shadow_mode": "joint"}
+        # those pickled before 1.6 lack min_shadow_families and shadow_mode, and
+        # those pickled before 1.7 lack missing.
+        defaults = {
+            "max_shadow_q": None, "min_shadow_families": None, "shadow_mode": "joint",
+            "missing": "error",
+        }
         super().__setstate__({**defaults, **state})
 
     def _validate_rule(self) -> None:
@@ -185,6 +194,7 @@ class ConsensusSelector(SelectorMixin, BaseEstimator):
             ),
             shadow_seed=self.shadow_seed,
             shadow_mode=self.shadow_mode,
+            missing=self.missing,
         )
         report = ranker.rank_resampled(
             X,
@@ -240,11 +250,12 @@ class ConsensusSelector(SelectorMixin, BaseEstimator):
         return super().transform(_string_columns(X))
 
     def _more_tags(self) -> Dict[str, Any]:  # scikit-learn < 1.6
-        return {"requires_y": True}
+        return {"requires_y": True, "allow_nan": self.missing == "impute"}
 
     def __sklearn_tags__(self) -> Any:  # scikit-learn >= 1.6
         tags = super().__sklearn_tags__()
         tags.target_tags.required = True
+        tags.input_tags.allow_nan = self.missing == "impute"
         return tags
 
     def _get_support_mask(self) -> Any:

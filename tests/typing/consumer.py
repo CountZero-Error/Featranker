@@ -22,3 +22,5 @@ family_selector = ConsensusSelector(
     "reg", "r2", min_shadow_families=2, shadow_mode="independent"
 )
 independent_ranker = FeatureRanker(task="reg", shadows=True, shadow_mode="independent")
+missing_ranker = FeatureRanker(task="reg", missing="impute")
+missing_selector = ConsensusSelector("reg", "r2", k=2, missing="impute")

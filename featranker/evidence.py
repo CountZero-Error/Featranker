@@ -11,6 +11,7 @@ import numpy as np
 from scipy.cluster.hierarchy import fcluster, linkage
 from scipy.spatial.distance import squareform
 from scipy.stats import rankdata
+from sklearn.impute import SimpleImputer
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import MaxAbsScaler, MinMaxScaler, RobustScaler, StandardScaler
 
@@ -23,15 +24,44 @@ CUT_TOLERANCE = 1e-12
 SHAP_ROWS = 1000
 # Longest error message kept in an "unsupported" reason.
 REASON_CHARS = 200
+# A column pair needs at least this many rows present in both to be correlated;
+# with fewer, independent columns look strongly correlated by chance.
+MIN_PAIR_ROWS = 30
 
 
 def _spearman_matrix(X: np.ndarray) -> np.ndarray:
-    """Column-by-column Spearman rho; NaN where a column is constant."""
+    """
+    Column-by-column Spearman rho; NaN where a column is constant.
+
+    With missing values, a pair involving a column with NaN uses the rows
+    where both are present, and is NaN with fewer than MIN_PAIR_ROWS such
+    rows; pairs of complete columns are computed as without NaN.
+    """
+    if np.isnan(X).any():
+        return _pairwise_spearman_matrix(X)
     # Not scipy's spearmanr: with a constant column it returns one NaN for all.
     centered = rankdata(X, axis=0) - (X.shape[0] + 1) / 2
     norm = np.sqrt((centered**2).sum(axis=0))
     with np.errstate(invalid="ignore", divide="ignore"):
         return np.clip(centered.T @ centered / np.outer(norm, norm), -1.0, 1.0)
+
+
+def _pairwise_spearman_matrix(X: np.ndarray) -> np.ndarray:
+    """Complete columns together; other pairs re-rank on their shared rows."""
+    present = ~np.isnan(X)
+    complete = present.all(axis=0)
+    rho = np.full((X.shape[1], X.shape[1]), np.nan)
+    if complete.any():
+        rho[np.ix_(complete, complete)] = _spearman_matrix(X[:, complete])
+    for first in range(X.shape[1]):
+        for second in range(first, X.shape[1]):
+            if complete[first] and complete[second]:
+                continue
+            rows = present[:, first] & present[:, second]
+            if rows.sum() >= MIN_PAIR_ROWS:
+                pair = X[rows][:, [first, second]]
+                rho[first, second] = rho[second, first] = _spearman_matrix(pair)[0, 1]
+    return rho
 
 
 def auto_groups(
@@ -43,7 +73,8 @@ def auto_groups(
     Complete linkage on 1 - |rho|, cut so that every pair inside a group has
     |rho| >= threshold. A constant column is uncorrelated with every other.
     Only groups of two or more columns are returned; a group is named by its
-    members joined with "+". Uses no target.
+    members joined with "+". Uses no target. NaN is allowed: each pair is
+    correlated on the rows where both values are present.
     """
     # Local import: importance imports this module.
     from .importance import _validate_X
@@ -58,7 +89,7 @@ def auto_groups(
         # Same default names as ConsensusSelector.
         width = np.shape(X)[1] if np.ndim(X) == 2 else 0
         feature_names = [f"x{index}" for index in range(width)]
-    values, names = _validate_X(X, feature_names=feature_names)
+    values, names = _validate_X(X, feature_names=feature_names, allow_nan=True)
     if values.shape[0] < 2:
         raise ValueError("[!] X must contain at least two rows.")
     if values.shape[1] < 2:
@@ -114,8 +145,15 @@ def evenly_spaced_rows(n_rows: int, cap: int = SHAP_ROWS) -> np.ndarray:
     return np.linspace(0, n_rows - 1, min(n_rows, cap)).astype(int)
 
 
-# Per-column affine steps: a scaled column's SHAP value is the original column's.
+# Per-column steps: a transformed column's SHAP value is the original column's.
 COLUMN_SCALERS = (StandardScaler, MinMaxScaler, MaxAbsScaler, RobustScaler)
+
+
+def _is_column_step(step: Any) -> bool:
+    # An imputer with add_indicator=True would append columns.
+    if isinstance(step, SimpleImputer):
+        return not step.add_indicator
+    return isinstance(step, COLUMN_SCALERS)
 
 
 def _unwrap(model: Any, *arrays: np.ndarray) -> Tuple[Any, List[np.ndarray]]:
@@ -126,11 +164,15 @@ def _unwrap(model: Any, *arrays: np.ndarray) -> Tuple[Any, List[np.ndarray]]:
     for _, step in earlier:
         # "passthrough" and None are scikit-learn's identity step.
         identity = step is None or (isinstance(step, str) and step == "passthrough")
-        if not (identity or isinstance(step, COLUMN_SCALERS)):
+        if not (identity or _is_column_step(step)):
             raise ValueError(f"pipeline step {type(step).__name__} is not a per-column scaler")
     if not earlier:
         return final, list(arrays)
-    return final, [model[:-1].transform(array) for array in arrays]
+    transformed = [model[:-1].transform(array) for array in arrays]
+    if any(new.shape[1] != old.shape[1] for new, old in zip(transformed, arrays)):
+        # e.g. SimpleImputer drops an all-missing column unless keep_empty_features.
+        raise ValueError("pipeline steps change the number of columns")
+    return final, transformed
 
 
 def _shap_values(

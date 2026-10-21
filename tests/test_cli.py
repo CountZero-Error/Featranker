@@ -85,8 +85,9 @@ def test_modern_cli_routes_train_and_eval_data(monkeypatch, tmp_path, capsys):
     calls = {}
 
     class RecordingRanker:
-        def __init__(self, task, group, n_jobs, verbose, evidence):
+        def __init__(self, task, group, n_jobs, verbose, evidence, missing):
             calls["constructor"] = (task, group, n_jobs)
+            calls["missing"] = missing
             calls["verbose"] = verbose
             calls["evidence"] = evidence
 
@@ -132,6 +133,7 @@ def test_modern_cli_routes_train_and_eval_data(monkeypatch, tmp_path, capsys):
     assert calls["constructor"] == ("reg", "tree", 2)
     assert calls["verbose"] is True
     assert calls["evidence"] is False
+    assert calls["missing"] == "error"
     assert np.array_equal(calls["fit"][0], [[1, 2], [4, 5], [7, 8]])
     assert np.array_equal(calls["fit"][1], [3, 6, 9])
     assert calls["fit"][2] == ["a", "b"]
@@ -375,7 +377,7 @@ def test_modern_cli_accepts_eval_class_subset(monkeypatch, tmp_path, capsys):
     monkeypatch.setattr(
         cli_module,
         "FeatureRanker",
-        lambda task, group, n_jobs, verbose, evidence: clf_ranker_with_models(
+        lambda task, group, n_jobs, verbose, evidence, missing: clf_ranker_with_models(
             monkeypatch, {"ok": RecordingClassifier()}
         ),
     )
@@ -502,7 +504,7 @@ def test_cli_rejects_unseen_longer_eval_label_with_full_name(
     monkeypatch.setattr(
         cli_module,
         "FeatureRanker",
-        lambda task, group, n_jobs, verbose, evidence: clf_ranker_with_models(
+        lambda task, group, n_jobs, verbose, evidence, missing: clf_ranker_with_models(
             monkeypatch, {"ok": RecordingClassifier()}
         ),
     )

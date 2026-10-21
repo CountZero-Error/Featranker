@@ -101,11 +101,15 @@ Within each split, `rank_std` still measures disagreement between model families
 
 `failures` holds every split's failures, each with a `split` index. A split that failed entirely appears with `"model": null` and `"stage": "split"`.
 
+<a id="structure"></a>
+
 ## ▍ Structure
 
 `evaluation_mode` is always `"held_out"`. It names the workflow (scoring on data passed to `rank_features()`); FeatRanker cannot check that this data is really separate from the training data.
 
 With `shadows=True`, the report also has top-level `shadows: true`, `shadow_seed`, and `shadow_mode` (`"joint"` or `"independent"`; resampled reports add the `shadow_test` block, and their stability rows gain `shadow_hits`, `shadow_p_value`, `shadow_q_value`, `family_above_shadow_share`, and `shadow_families`); each model gains `shadow_importance` and `shadow_max`; each importance entry gains `above_shadow`; and each consensus row gains `above_shadow_share` and `family_above_shadow`. Without shadows, none of these keys appear.
+
+With `missing="impute"`, the report has a top-level `missing` block: `policy` (`"impute"`), `strategy` (`"median"`), and `train_counts` (every feature name to the number of its missing training values). Resampled reports carry it in each split's report, counted on that split's training rows. With the default `missing="error"` there is no `missing` key. See [Missing values](usage.md#missing-values).
 
 With `evidence=True`, each model also has `train_score` and `overfit_gap` (`null` if the training score could not be computed, with a `failures` entry at stage `"evidence"`), the report has a top-level `evidence` block, and models SHAP can explain have `shap`. Without `evidence`, none of these keys appear. See [Evidence](usage.md#evidence).
 

@@ -19,9 +19,13 @@ from .importance import FeatureRanker, _float_target, _resolve_feature_groups
 
 
 def _load_csv(
-    path: Path, target: str
+    path: Path, target: str, allow_nan: bool = False
 ) -> tuple[np.ndarray, np.ndarray, List[str]]:
-    """Load a numeric feature matrix and target column from a CSV file."""
+    """
+    Load a numeric feature matrix and target column from a CSV file.
+
+    With allow_nan, an empty feature cell is NaN (infinite values still raise).
+    """
     # utf-8-sig drops the BOM that Excel "CSV UTF-8" exports prepend.
     with path.open("r", encoding="utf-8-sig", newline="") as csv_file:
         reader = csv.reader(csv_file)
@@ -57,15 +61,30 @@ def _load_csv(
                 f"expected {len(header)}."
             )
         try:
-            row_values = [float(row[index]) for index in feature_indices]
+            row_values = [
+                math.nan if allow_nan and not row[index].strip() else float(row[index])
+                for index in feature_indices
+            ]
         except ValueError as error:
+            blank = any(not row[index].strip() for index in feature_indices)
+            hint = "; use --missing impute to read empty cells as missing" if blank else ""
             raise ValueError(
-                f"[!] CSV feature values must be numeric (row {row_number})."
+                f"[!] CSV feature values must be numeric (row {row_number}){hint}."
             ) from error
-        if not all(math.isfinite(value) for value in row_values):
+        if allow_nan:
+            if any(math.isinf(value) for value in row_values):
+                raise ValueError(
+                    f"[!] CSV feature values must not be infinite (row {row_number})."
+                )
+        elif not all(math.isfinite(value) for value in row_values):
+            hint = (
+                ", or use --missing impute"
+                if any(math.isnan(value) for value in row_values)
+                else ""
+            )
             raise ValueError(
                 f"[!] CSV feature values must be finite (row {row_number}); "
-                "impute or drop missing values first."
+                f"impute or drop missing values first{hint}."
             )
         features.append(row_values)
         targets.append(row[target_index])
@@ -163,6 +182,16 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--missing",
+        choices=["error", "impute"],
+        default="error",
+        help=(
+            "Missing feature values (empty CSV cells): 'error' rejects them "
+            "(default); 'impute' gives every built-in model a median imputer "
+            "fit on training data only."
+        ),
+    )
+    parser.add_argument(
         "--quiet",
         action="store_true",
         help="Hide progress bars (warnings and errors are still shown).",
@@ -192,8 +221,9 @@ def _load_feature_groups(path: Optional[str]) -> Optional[Dict[str, List[str]]]:
 
 def _load_cli_inputs(args: argparse.Namespace) -> Dict[str, Any]:
     """Load the CSV files and validate options before any model is fit."""
-    X_train, y_train, feature_names = _load_csv(args.train_data, args.target)
-    X_eval, y_eval, eval_names = _load_csv(args.eval_data, args.target)
+    allow_nan = args.missing == "impute"
+    X_train, y_train, feature_names = _load_csv(args.train_data, args.target, allow_nan)
+    X_eval, y_eval, eval_names = _load_csv(args.eval_data, args.target, allow_nan)
     if eval_names != feature_names:
         raise ValueError(
             "[!] Evaluation feature names and order must match training data."
@@ -227,6 +257,7 @@ def _run_ranking(args: argparse.Namespace) -> Dict[str, Any]:
         n_jobs=args.n_jobs,
         verbose=not args.quiet,
         evidence=args.evidence,
+        missing=args.missing,
     )
     ranker.fit(*inputs["train"])
     return ranker.rank_features(

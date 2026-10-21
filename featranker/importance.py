@@ -18,6 +18,7 @@ from joblib import Parallel, delayed
 from scipy.stats import binom
 from sklearn.base import clone
 from sklearn.dummy import DummyClassifier, DummyRegressor
+from sklearn.impute import SimpleImputer
 from sklearn.metrics import get_scorer
 from sklearn.model_selection import KFold, StratifiedKFold
 from sklearn.pipeline import make_pipeline
@@ -99,13 +100,27 @@ def _validate_X(
     X: Any,
     feature_names: Optional[List[str]] = None,
     expected_names: Optional[List[str]] = None,
+    allow_nan: bool = False,
 ) -> tuple[np.ndarray, List[str]]:
     dataframe_names = list(X.columns) if hasattr(X, "columns") else None
     # Always a copy: models and kept evidence data must not alias the caller's array.
-    values = np.array(X, dtype=float)
+    if dataframe_names is not None and hasattr(X, "to_numpy"):
+        # to_numpy would turn dates into nanosecond counts, which are not features.
+        if any(getattr(dtype, "kind", "") in {"M", "m"} for dtype in X.dtypes):
+            raise ValueError(
+                "[!] X must be numeric; convert datetime and timedelta columns "
+                "to numbers first."
+            )
+        # to_numpy turns pandas NA (nullable dtypes) into NaN; np.array would raise.
+        values = X.to_numpy(dtype=float, na_value=np.nan, copy=True)
+    else:
+        values = np.array(X, dtype=float)
     if values.ndim != 2:
         raise ValueError("[!] X must be a two-dimensional feature matrix.")
-    if not np.isfinite(values).all():
+    if allow_nan:
+        if np.isinf(values).any():
+            raise ValueError("[!] X must not contain infinite values.")
+    elif not np.isfinite(values).all():
         raise ValueError(
             "[!] X must contain only finite values; impute or drop missing "
             "values before ranking."
@@ -683,6 +698,7 @@ class FeatureRanker:
         shadow_seed: Optional[int] = None,
         evidence: bool = False,
         shadow_mode: Literal["joint", "independent"] = "joint",
+        missing: Literal["error", "impute"] = "error",
     ) -> None:
         """
         Initialize configured models without loading or fitting data.
@@ -705,6 +721,11 @@ class FeatureRanker:
             shadow_mode: "joint" shuffles all columns with one shared row
                 order (collinear columns stay collinear in the shadows);
                 "independent" shuffles each shadow column on its own.
+            missing: "error" rejects NaN in features. "impute" accepts NaN and
+                gives every built-in model a median imputer as its first
+                pipeline step, learned on each training split only; custom
+                models receive NaN unchanged and must handle it. Infinite
+                values are always rejected.
         """
         if task not in {"clf", "reg"}:
             raise ValueError("[!] task must be 'clf' or 'reg'.")
@@ -727,6 +748,8 @@ class FeatureRanker:
             raise ValueError("[!] shadow_seed must be non-negative.")
         if not isinstance(shadow_mode, str) or shadow_mode not in {"joint", "independent"}:
             raise ValueError("[!] shadow_mode must be 'joint' or 'independent'.")
+        if not isinstance(missing, str) or missing not in {"error", "impute"}:
+            raise ValueError("[!] missing must be 'error' or 'impute'.")
         self.task = task
         self.group = group
         self.n_jobs = n_jobs
@@ -735,6 +758,7 @@ class FeatureRanker:
         self.shadow_seed = shadow_seed
         self.shadow_mode = shadow_mode
         self.evidence = evidence
+        self.missing = missing
         self.label_encoder = None
         self.initialization_failures_: List[Dict[str, str]] = []
         # Built-in model name -> registry family; anything else is its own family.
@@ -757,6 +781,8 @@ class FeatureRanker:
         self.__dict__.setdefault("evidence", False)
         # ... and those pickled by 1.5 lack the 1.6 shadow mode.
         self.__dict__.setdefault("shadow_mode", "joint")
+        # ... and those pickled by 1.6 lack the 1.7 missing-value policy.
+        self.__dict__.setdefault("missing", "error")
         if "model_families_" not in self.__dict__:
             self.model_families_ = (
                 _registry_families() if self.user_models is None else {}
@@ -770,7 +796,9 @@ class FeatureRanker:
     ) -> "FeatureRanker":
         """Fit configured models using training data only."""
         self.is_fitted_ = False
-        X_values, names = _validate_X(X, feature_names=feature_names)
+        X_values, names = _validate_X(
+            X, feature_names=feature_names, allow_nan=self.missing == "impute"
+        )
         y_values = _validate_y(y, len(X_values))
 
         # Encode every classification target to 0..n-1 (XGBoost requires it).
@@ -826,6 +854,11 @@ class FeatureRanker:
             self.train_y_ = y_values
         self.label_encoder = label_encoder
         self.feature_names_ = names
+        if self.missing == "impute":
+            self.train_missing_counts_ = {
+                name: int(np.isnan(X_values[:, index]).sum())
+                for index, name in enumerate(names)
+            }
         self.n_features_in_ = len(names)
         self.is_fitted_ = True
         return self
@@ -847,7 +880,9 @@ class FeatureRanker:
             raise ValueError("[!] n_repeats must be a positive integer.")
         scorer, scoring_name = _resolve_scorer(scoring)
 
-        X_values, _ = _validate_X(X_eval, expected_names=self.feature_names_)
+        X_values, _ = _validate_X(
+            X_eval, expected_names=self.feature_names_, allow_nan=self.missing == "impute"
+        )
         y_values = _validate_y(y_eval, len(X_values))
         if self.label_encoder is not None:
             y_values = _encode_labels(self.label_encoder, y_values)
@@ -917,6 +952,12 @@ class FeatureRanker:
             report["shadows"] = True
             report["shadow_seed"] = self.shadow_seed
             report["shadow_mode"] = self.shadow_mode
+        if self.missing == "impute":
+            report["missing"] = {
+                "policy": "impute",
+                "strategy": "median",
+                "train_counts": dict(self.train_missing_counts_),
+            }
         if self.evidence:
             n_real = len(self.feature_names_)
             shap_block, shap_models = shap_evidence(
@@ -954,7 +995,9 @@ class FeatureRanker:
         ranker's own fitted state is not changed. Pass development data only,
         never the final test set.
         """
-        X_values, names = _validate_X(X, feature_names=feature_names)
+        X_values, names = _validate_X(
+            X, feature_names=feature_names, allow_nan=self.missing == "impute"
+        )
         y_values = _validate_y(y, len(X_values))
         if not _is_positive_int(n_repeats):
             raise ValueError("[!] n_repeats must be a positive integer.")
@@ -982,6 +1025,7 @@ class FeatureRanker:
                     ),
                     evidence=self.evidence,
                     shadow_mode=self.shadow_mode,
+                    missing=self.missing,
                 )
                 ranker.fit(X_values[train], y_values[train], feature_names=names)
                 report = ranker.rank_features(
@@ -1135,12 +1179,21 @@ class FeatureRanker:
                                 f"Params must be a dict, got {type(params).__name__}"
                             )
                         estimator = model_class(**_model_params(class_name, params))
-                        # Linear models are scale-sensitive; the scaler is fit
-                        # on training data only, inside the pipeline.
+                        # Linear models are scale-sensitive; the scaler (and
+                        # the median imputer) is fit on training data only,
+                        # inside the pipeline.
+                        steps: List[Any] = []
+                        if self.missing == "impute":
+                            # keep_empty_features: a column missing in every
+                            # training row stays in place (as 0) instead of
+                            # shifting later columns.
+                            steps.append(
+                                SimpleImputer(strategy="median", keep_empty_features=True)
+                            )
+                        if group_name == "linear":
+                            steps.append(StandardScaler())
                         group_models[name] = (
-                            make_pipeline(StandardScaler(), estimator)
-                            if group_name == "linear"
-                            else estimator
+                            make_pipeline(*steps, estimator) if steps else estimator
                         )
                         self.model_families_[name] = str(model.get("family") or name)
                     except Exception as error:
