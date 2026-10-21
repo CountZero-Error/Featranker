@@ -174,6 +174,7 @@ Share of the 5 seeds in which each role was selected. Regression with standard n
 
 ## Limits
 
+- **Shadow rules on pure noise.** False selection of the shadow rules on pure noise, and their recall on planted signal with fresh seeds, are in the [calibration study](calibration.md); note that its regression null is largely filtered by the dummy baseline.
 - **Synthetic data.** The roles favour whichever model family fits them; the set (linear, threshold, interaction, correlated copy) was chosen to spread this around, but a different generator could reorder the results. Real data has no ground truth, which is the reason for using synthetic data and also its limit.
 - **One size.** 1000 rows, 10 features, 5 seeds. With 5 seeds, differences of a few hundredths are noise; read the standard deviations. Larger feature counts and sample sizes may change both accuracy and runtime.
 - **Defaults, not tuning.** Nobody was tuned. A user who tunes Boruta, thresholds, or FeatRanker's `min_shadow_share` will get different numbers.

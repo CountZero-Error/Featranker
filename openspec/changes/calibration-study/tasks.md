@@ -7,8 +7,8 @@
 ## 2. Run and write-up
 
 - [x] 2.1 Full run in the scratch virtual environment; save `benchmarks/results/<date>-calibration.json`
-- [ ] 2.2 `docs/calibration.md`: method, frozen hash, tables, decisions Q/F/S as computed by the script, deviations; link from docs/usage.md (shadow hits test and `min_shadow_families` sections) and docs/benchmark.md; update docs wording and, if decision Q allows, the `shadow_test.note` text (still stating `calibrated: false` for arbitrary estimators)
+- [x] 2.2 `docs/calibration.md`: method, frozen hash, tables, decisions Q/F/S as computed by the script, deviations; link from docs/usage.md (shadow hits test and `min_shadow_families` sections) and docs/benchmark.md; update docs wording and, if decision Q allows, the `shadow_test.note` text (still stating `calibrated: false` for arbitrary estimators)
 
 ## 3. Checks
 
-- [ ] 3.1 Package suite passes; `pytest benchmarks` passes; `openspec validate calibration-study --strict` passes
+- [x] 3.1 Package suite passes; `pytest benchmarks` passes; `openspec validate calibration-study --strict` passes
