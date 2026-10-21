@@ -111,6 +111,8 @@ With `shadows=True`, the report also has top-level `shadows: true`, `shadow_seed
 
 With `missing="impute"`, the report has a top-level `missing` block: `policy` (`"impute"`), `strategy` (`"median"`), and `train_counts` (every feature name to the number of its missing training values). Resampled reports carry it in each split's report, counted on that split's training rows. With the default `missing="error"` there is no `missing` key. See [Missing values](usage.md#missing-values).
 
+When the data has categorical columns (`categorical="auto"` or a list of names), the report has a top-level `categorical` block: `columns` (the categorical feature names), `train_levels` (name to the number of levels learned from the training rows, the missing-value level included), and `unseen_eval` (name to the number of evaluation values that got the shared "unseen" code). Resampled reports carry it in each split's report, learned on that split's training rows. Without categorical columns there is no `categorical` key. See [Categorical features](usage.md#categorical-features).
+
 With `evidence=True`, each model also has `train_score` and `overfit_gap` (`null` if the training score could not be computed, with a `failures` entry at stage `"evidence"`), the report has a top-level `evidence` block, and models SHAP can explain have `shap`. Without `evidence`, none of these keys appear. See [Evidence](usage.md#evidence).
 
 ```python

@@ -24,3 +24,6 @@ family_selector = ConsensusSelector(
 independent_ranker = FeatureRanker(task="reg", shadows=True, shadow_mode="independent")
 missing_ranker = FeatureRanker(task="reg", missing="impute")
 missing_selector = ConsensusSelector("reg", "r2", k=2, missing="impute")
+categorical_ranker = FeatureRanker(task="reg", categorical="auto")
+listed_ranker = FeatureRanker(task="reg", categorical=["city"])
+categorical_selector = ConsensusSelector("reg", "r2", k=2, categorical=["city"])

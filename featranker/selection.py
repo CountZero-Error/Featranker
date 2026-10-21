@@ -59,10 +59,12 @@ class ConsensusSelector(SelectorMixin, BaseEstimator):
             fitting noise can pass alone. Its false-selection rate is not
             yet measured (see the calibration study). Turns shadow features
             on; combines with the other rules.
-        group, models, n_jobs, shadow_seed, shadow_mode, missing: As in
-            FeatureRanker. With missing="impute", NaN is accepted in fit() and
-            transform() (the selector only picks columns), so put an imputer
-            after it in a Pipeline for the final model.
+        group, models, n_jobs, shadow_seed, shadow_mode, missing, categorical:
+            As in FeatureRanker. With missing="impute", NaN is accepted in
+            fit() and transform() (the selector only picks columns), so put an
+            imputer after it in a Pipeline for the final model. With
+            categorical, selected raw columns come back as given (use an
+            encoder after it in a Pipeline for the final model).
         feature_groups, cv, n_repeats, random_state: As in rank_resampled().
             feature_groups="auto" groups correlated columns with auto_groups()
             on the X given to fit(), so inside a Pipeline from the training
@@ -88,6 +90,7 @@ class ConsensusSelector(SelectorMixin, BaseEstimator):
         shadow_seed: Optional[int] = None,
         shadow_mode: Literal["joint", "independent"] = "joint",
         missing: Literal["error", "impute"] = "error",
+        categorical: Union[List[str], Literal["auto"], None] = None,
         n_jobs: Optional[int] = None,
         verbose: bool = False,
     ) -> None:
@@ -107,16 +110,17 @@ class ConsensusSelector(SelectorMixin, BaseEstimator):
         self.shadow_seed = shadow_seed
         self.shadow_mode = shadow_mode
         self.missing = missing
+        self.categorical = categorical
         self.n_jobs = n_jobs
         self.verbose = verbose
 
     def __setstate__(self, state: Dict[str, Any]) -> None:
         # Selectors pickled by 1.3 lack the 1.4 max_shadow_q parameter, and
         # those pickled before 1.6 lack min_shadow_families and shadow_mode, and
-        # those pickled before 1.7 lack missing.
+        # those pickled before 1.7 lack missing, and those before 1.9 lack categorical.
         defaults = {
             "max_shadow_q": None, "min_shadow_families": None, "shadow_mode": "joint",
-            "missing": "error",
+            "missing": "error", "categorical": None,
         }
         super().__setstate__({**defaults, **state})
 
@@ -177,7 +181,9 @@ class ConsensusSelector(SelectorMixin, BaseEstimator):
 
         feature_groups = self.feature_groups
         if isinstance(feature_groups, str) and feature_groups == "auto":
-            feature_groups = auto_groups(X, feature_names=names)
+            feature_groups = auto_groups(
+                X, feature_names=names, categorical=self.categorical
+            )
         elif feature_groups is not None and not isinstance(feature_groups, dict):
             error = ValueError if isinstance(feature_groups, str) else TypeError
             raise error("[!] feature_groups must be a dict, None, or 'auto'.")
@@ -195,6 +201,7 @@ class ConsensusSelector(SelectorMixin, BaseEstimator):
             shadow_seed=self.shadow_seed,
             shadow_mode=self.shadow_mode,
             missing=self.missing,
+            categorical=self.categorical,
         )
         report = ranker.rank_resampled(
             X,
@@ -250,13 +257,17 @@ class ConsensusSelector(SelectorMixin, BaseEstimator):
         return super().transform(_string_columns(X))
 
     def _more_tags(self) -> Dict[str, Any]:  # scikit-learn < 1.6
-        return {"requires_y": True, "allow_nan": self.missing == "impute"}
+        return {"requires_y": True, "allow_nan": self._allows_nan()}
 
     def __sklearn_tags__(self) -> Any:  # scikit-learn >= 1.6
         tags = super().__sklearn_tags__()
         tags.target_tags.required = True
-        tags.input_tags.allow_nan = self.missing == "impute"
+        tags.input_tags.allow_nan = self._allows_nan()
         return tags
+
+    def _allows_nan(self) -> bool:
+        # A missing categorical value is a level, so transform() must let it pass.
+        return self.missing == "impute" or self.categorical is not None
 
     def _get_support_mask(self) -> Any:
         check_is_fitted(self, "support_")

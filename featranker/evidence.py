@@ -5,12 +5,13 @@ Mechanism evidence for a report: correlated feature groups and a SHAP summary.
 import itertools
 import numbers
 import warnings
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 from scipy.cluster.hierarchy import fcluster, linkage
 from scipy.spatial.distance import squareform
 from scipy.stats import rankdata
+from sklearn.compose import ColumnTransformer
 from sklearn.impute import SimpleImputer
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import MaxAbsScaler, MinMaxScaler, RobustScaler, StandardScaler
@@ -65,7 +66,11 @@ def _pairwise_spearman_matrix(X: np.ndarray) -> np.ndarray:
 
 
 def auto_groups(
-    X: Any, *, threshold: float = 0.7, feature_names: Optional[List[str]] = None
+    X: Any,
+    *,
+    threshold: float = 0.7,
+    feature_names: Optional[List[str]] = None,
+    categorical: Any = None,
 ) -> Dict[str, List[str]]:
     """
     Propose feature_groups from X alone: columns clustered by Spearman correlation.
@@ -74,10 +79,12 @@ def auto_groups(
     |rho| >= threshold. A constant column is uncorrelated with every other.
     Only groups of two or more columns are returned; a group is named by its
     members joined with "+". Uses no target. NaN is allowed: each pair is
-    correlated on the rows where both values are present.
+    correlated on the rows where both values are present. Categorical columns
+    (categorical as in FeatureRanker: "auto" or a list of names) are never
+    grouped.
     """
     # Local import: importance imports this module.
-    from .importance import _validate_X
+    from .importance import _categorical_indices, _validate_X
 
     if (
         isinstance(threshold, bool)
@@ -89,9 +96,16 @@ def auto_groups(
         # Same default names as ConsensusSelector.
         width = np.shape(X)[1] if np.ndim(X) == 2 else 0
         feature_names = [f"x{index}" for index in range(width)]
-    values, names = _validate_X(X, feature_names=feature_names, allow_nan=True)
+    skipped = _categorical_indices(X, categorical, feature_names)
+    values, names = _validate_X(
+        X, feature_names=feature_names, allow_nan=True, categorical=skipped
+    )
     if values.shape[0] < 2:
         raise ValueError("[!] X must contain at least two rows.")
+    members = names
+    if skipped:
+        kept = [index for index in range(len(names)) if index not in skipped]
+        values, members = values[:, kept].astype(float), [names[index] for index in kept]
     if values.shape[1] < 2:
         return {}
 
@@ -106,7 +120,7 @@ def auto_groups(
         criterion="distance",
     )
     clusters: Dict[int, List[str]] = {}
-    for label, name in zip(labels, names):  # insertion order = first member's position
+    for label, name in zip(labels, members):  # insertion order = first member's position
         clusters.setdefault(int(label), []).append(name)
     groups: Dict[str, List[str]] = {}
     for members in clusters.values():
@@ -121,9 +135,12 @@ def auto_groups(
     return groups
 
 
-def correlation_evidence(X_train: np.ndarray, groups: Dict[str, List[int]]) -> Dict[str, Any]:
-    """Group pairs correlated on the training data (real columns only)."""
+def correlation_evidence(
+    X_train: np.ndarray, groups: Dict[str, List[int]], categorical: Sequence[int] = ()
+) -> Dict[str, Any]:
+    """Group pairs correlated on the training data (real columns only, codes left out)."""
     rho = _spearman_matrix(X_train)
+    rho[list(categorical), :] = rho[:, list(categorical)] = np.nan
     pairs: List[Dict[str, Any]] = []
     for first, second in itertools.combinations(sorted(groups), 2):
         block = rho[np.ix_(groups[first], groups[second])]
@@ -162,6 +179,8 @@ def _unwrap(model: Any, *arrays: np.ndarray) -> Tuple[Any, List[np.ndarray]]:
         return model, list(arrays)
     *earlier, (_, final) = model.steps
     for _, step in earlier:
+        if isinstance(step, ColumnTransformer):
+            raise ValueError("pipeline one-hot encodes categorical columns")
         # "passthrough" and None are scikit-learn's identity step.
         identity = step is None or (isinstance(step, str) and step == "passthrough")
         if not (identity or _is_column_step(step)):
@@ -197,7 +216,10 @@ def _shap_values(
 
 
 def _group_summary(
-    stacked: np.ndarray, X: np.ndarray, groups: Dict[str, List[int]]
+    stacked: np.ndarray,
+    X: np.ndarray,
+    groups: Dict[str, List[int]],
+    categorical: Sequence[int] = (),
 ) -> Dict[str, Dict[str, Optional[float]]]:
     # One class: regression or single output; two: the positive class;
     # more: mean_abs averaged over classes and no direction.
@@ -206,7 +228,8 @@ def _group_summary(
     for group, columns in groups.items():
         per_row = classes[:, :, columns].sum(axis=2)  # sum over member columns
         direction = None
-        if len(columns) == 1 and len(classes) == 1:
+        # Codes are labels, so a correlation with the SHAP values means nothing.
+        if len(columns) == 1 and len(classes) == 1 and columns[0] not in categorical:
             pair = np.column_stack([X[:, columns[0]], per_row[0]])
             rho = _spearman_matrix(pair)[0, 1]
             direction = None if np.isnan(rho) else float(rho)
@@ -222,6 +245,7 @@ def shap_evidence(
     X_eval: np.ndarray,
     X_train: np.ndarray,
     groups: Dict[str, List[int]],
+    categorical: Sequence[int] = (),
 ) -> Tuple[Dict[str, Any], Dict[str, Dict[str, Any]]]:
     """
     SHAP summary per model on evenly spaced evaluation rows.
@@ -229,7 +253,7 @@ def shap_evidence(
     Linear models use evenly spaced training rows as the background. Returns
     (the report's evidence.shap block, model name -> its shap entry). X_eval
     and X_train have every column the models were fit on; groups name real
-    columns only.
+    columns only; categorical lists the code columns, whose direction is None.
     """
     try:
         import shap
@@ -256,7 +280,7 @@ def shap_evidence(
             explainer, stacked = _shap_values(model, rows, background, shap)
             per_model[name] = {
                 "explainer": explainer,
-                "groups": _group_summary(stacked, rows, groups),
+                "groups": _group_summary(stacked, rows, groups, categorical),
             }
         except Exception as error:
             reason = f"{type(error).__name__}: {str(error)[:REASON_CHARS]}"

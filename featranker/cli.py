@@ -18,14 +18,8 @@ from .evidence import auto_groups
 from .importance import FeatureRanker, _float_target, _resolve_feature_groups
 
 
-def _load_csv(
-    path: Path, target: str, allow_nan: bool = False
-) -> tuple[np.ndarray, np.ndarray, List[str]]:
-    """
-    Load a numeric feature matrix and target column from a CSV file.
-
-    With allow_nan, an empty feature cell is NaN (infinite values still raise).
-    """
+def _read_csv(path: Path, target: str) -> tuple[List[str], List[tuple[int, List[str]]]]:
+    """The validated header and the non-blank (row number, cells) rows of a CSV file."""
     # utf-8-sig drops the BOM that Excel "CSV UTF-8" exports prepend.
     with path.open("r", encoding="utf-8-sig", newline="") as csv_file:
         reader = csv.reader(csv_file)
@@ -49,10 +43,50 @@ def _load_csv(
         raise ValueError("[!] CSV must contain at least one feature column.")
     if not rows:
         raise ValueError(f"[!] CSV '{path}' must contain at least one data row.")
+    return header, rows
 
+
+def _is_number(cell: str) -> bool:
+    try:
+        float(cell)
+    except ValueError:
+        return False
+    return True
+
+
+def _infer_categorical(path: Path, target: str) -> List[str]:
+    """Feature columns with a non-blank cell that is not a number."""
+    header, rows = _read_csv(path, target)
+    return [
+        name
+        for index, name in enumerate(header)
+        if name != target
+        and any(len(row) == len(header) and row[index].strip() and not _is_number(row[index])
+                for _, row in rows)
+    ]
+
+
+def _load_csv(
+    path: Path,
+    target: str,
+    allow_nan: bool = False,
+    categorical: Optional[List[str]] = None,
+) -> tuple[np.ndarray, np.ndarray, List[str]]:
+    """
+    Load a numeric feature matrix and target column from a CSV file.
+
+    With allow_nan, an empty feature cell is NaN (infinite values still raise).
+    Columns named in categorical stay text (an empty cell is None, a missing
+    level) and the matrix is then an object array.
+    """
+    header, rows = _read_csv(path, target)
+    text = set(categorical or [])
+    unknown = sorted(text - set(header))
+    if unknown:
+        raise ValueError(f"[!] categorical names unknown column '{unknown[0]}' in '{path}'.")
     target_index = header.index(target)
     feature_indices = [index for index in range(len(header)) if index != target_index]
-    features: List[List[float]] = []
+    features: List[List[Any]] = []
     targets: List[str] = []
     for row_number, row in rows:
         if len(row) != len(header):
@@ -61,8 +95,10 @@ def _load_csv(
                 f"expected {len(header)}."
             )
         try:
-            row_values = [
-                math.nan if allow_nan and not row[index].strip() else float(row[index])
+            row_values: List[Any] = [
+                (row[index].strip() or None) if header[index] in text
+                else math.nan if allow_nan and not row[index].strip()
+                else float(row[index])
                 for index in feature_indices
             ]
         except ValueError as error:
@@ -71,15 +107,19 @@ def _load_csv(
             raise ValueError(
                 f"[!] CSV feature values must be numeric (row {row_number}){hint}."
             ) from error
+        numeric_values = [
+            value for index, value in zip(feature_indices, row_values)
+            if header[index] not in text
+        ]
         if allow_nan:
-            if any(math.isinf(value) for value in row_values):
+            if any(math.isinf(value) for value in numeric_values):
                 raise ValueError(
                     f"[!] CSV feature values must not be infinite (row {row_number})."
                 )
-        elif not all(math.isfinite(value) for value in row_values):
+        elif not all(math.isfinite(value) for value in numeric_values):
             hint = (
                 ", or use --missing impute"
-                if any(math.isnan(value) for value in row_values)
+                if any(math.isnan(value) for value in numeric_values)
                 else ""
             )
             raise ValueError(
@@ -94,7 +134,7 @@ def _load_csv(
     # Raw strings: FeatureRanker types the target by task, so train and eval
     # labels stay comparable even when only one file looks numeric.
     return (
-        np.asarray(features, dtype=float),
+        np.asarray(features, dtype=object if text else float),
         np.asarray(targets),
         [header[index] for index in feature_indices],
     )
@@ -192,6 +232,15 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--categorical",
+        default=None,
+        help=(
+            "Text feature columns: 'auto' (columns with non-numeric cells in the "
+            "training CSV) or comma-separated column names. Levels are learned "
+            "from the training rows only; an empty cell is a missing level."
+        ),
+    )
+    parser.add_argument(
         "--quiet",
         action="store_true",
         help="Hide progress bars (warnings and errors are still shown).",
@@ -219,11 +268,28 @@ def _load_feature_groups(path: Optional[str]) -> Optional[Dict[str, List[str]]]:
     return feature_groups
 
 
+def _categorical_names(args: argparse.Namespace) -> List[str]:
+    """The --categorical column names; "auto" is read off the training CSV."""
+    if args.categorical is None:
+        return []
+    if args.categorical.strip() == "auto":
+        return _infer_categorical(args.train_data, args.target)
+    names = [name.strip() for name in args.categorical.split(",")]
+    if not all(names):
+        raise ValueError("[!] --categorical needs 'auto' or comma-separated column names.")
+    return names
+
+
 def _load_cli_inputs(args: argparse.Namespace) -> Dict[str, Any]:
     """Load the CSV files and validate options before any model is fit."""
     allow_nan = args.missing == "impute"
-    X_train, y_train, feature_names = _load_csv(args.train_data, args.target, allow_nan)
-    X_eval, y_eval, eval_names = _load_csv(args.eval_data, args.target, allow_nan)
+    categorical = _categorical_names(args)
+    X_train, y_train, feature_names = _load_csv(
+        args.train_data, args.target, allow_nan, categorical
+    )
+    X_eval, y_eval, eval_names = _load_csv(
+        args.eval_data, args.target, allow_nan, categorical
+    )
     if eval_names != feature_names:
         raise ValueError(
             "[!] Evaluation feature names and order must match training data."
@@ -232,7 +298,7 @@ def _load_cli_inputs(args: argparse.Namespace) -> Dict[str, Any]:
         y_train, y_eval = _float_target(y_train), _float_target(y_eval)
     if args.feature_groups == "auto":
         feature_groups: Optional[Dict[str, List[str]]] = auto_groups(
-            X_train, feature_names=feature_names
+            X_train, feature_names=feature_names, categorical=categorical or None
         )
     else:
         feature_groups = _load_feature_groups(args.feature_groups)
@@ -246,6 +312,7 @@ def _load_cli_inputs(args: argparse.Namespace) -> Dict[str, Any]:
         "train": (X_train, y_train, feature_names),
         "eval": (X_eval, y_eval),
         "feature_groups": feature_groups,
+        "categorical": categorical,
     }
 
 
@@ -258,6 +325,8 @@ def _run_ranking(args: argparse.Namespace) -> Dict[str, Any]:
         verbose=not args.quiet,
         evidence=args.evidence,
         missing=args.missing,
+        # Only when given, so a ranker without the option still works here.
+        **({"categorical": inputs["categorical"]} if inputs["categorical"] else {}),
     )
     ranker.fit(*inputs["train"])
     return ranker.rank_features(

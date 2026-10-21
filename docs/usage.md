@@ -6,7 +6,7 @@
 
 The API is one class: `FeatureRanker(...)`, then `.fit(...)`, then `.rank_features(...)`, which returns a [`Report`](#working-with-reports). [`.rank_resampled(...)`](#resampled-ranking) repeats that over cross-validation splits, [`ConsensusSelector`](#feature-selection) turns the ranking into a scikit-learn pipeline step, [`summarize(report)`](#summarize) reads the result, and [`to_prompt` / `explain`](#llm-interpretation) hand it to an LLM with checked citations (deprecated since 1.1). `evidence=True` adds [mechanism evidence](#evidence) to the report.
 
-### `FeatureRanker(task, group="all", models=None, n_jobs=None, verbose=True, shadows=False, shadow_seed=None, evidence=False, shadow_mode="joint", missing="error")`
+### `FeatureRanker(task, group="all", models=None, n_jobs=None, verbose=True, shadows=False, shadow_seed=None, evidence=False, shadow_mode="joint", missing="error", categorical=None)`
 
 | Parameter | Default | Meaning |
 |---|---|---|
@@ -20,12 +20,13 @@ The API is one class: `FeatureRanker(...)`, then `.fit(...)`, then `.rank_featur
 | `evidence` | `False` | Keep a copy of the training data and add train scores, overfit gaps, correlated groups, and (with `featranker[shap]`) a SHAP summary to the report. See [Evidence](#evidence). |
 | `shadow_mode` | `"joint"` | `"joint"` shuffles all shadow columns with one shared row order; `"independent"` shuffles each shadow column on its own. Only used with `shadows=True`. See [Shadow mode](#shadow-mode). |
 | `missing` | `"error"` | `"error"` rejects NaN in features. `"impute"` accepts NaN and gives every built-in model a median imputer fit on its training rows only; custom models receive NaN unchanged. See [Missing values](#missing-values). |
+| `categorical` | `None` | `None` accepts numeric features only. `"auto"` treats DataFrame columns of object, string, or category dtype as categorical; a list of feature names marks those columns. Levels are learned in each `fit()` from the training rows only and each column stays one feature. See [Categorical features](#categorical-features). |
 
 ### `.fit(X, y, feature_names=None)`
 
 | Parameter | Default | Meaning |
 |---|---|---|
-| `X` | required | Training features: 2-D NumPy array or pandas DataFrame of numbers, with at least one row and one column. Infinite values are rejected, and so is NaN unless `missing="impute"`. |
+| `X` | required | Training features: 2-D NumPy array or pandas DataFrame of numbers (plus the columns named by `categorical`), with at least one row and one column. Infinite values are rejected, and so is NaN unless `missing="impute"`. |
 | `y` | required | Training target, one value per row. Class labels may be numbers or strings; regression targets must be numeric. |
 | `feature_names` | `None` | Unique, non-empty column names. Required for NumPy input; taken from the columns for a DataFrame. |
 
@@ -165,7 +166,7 @@ ranker = FeatureRanker(
 ```
 
 > [!IMPORTANT]
-> Your estimators receive a float NumPy array, even when you pass a DataFrame. Inside a pipeline, select columns by position (for example `ColumnTransformer([("scale", StandardScaler(), [0, 1])])`), not by name. Categorical values must be encoded before the data reaches FeatRanker. With `missing="impute"` your estimators receive NaN unchanged; see [Missing values](#missing-values).
+> Your estimators receive a float NumPy array, even when you pass a DataFrame. Inside a pipeline, select columns by position (for example `ColumnTransformer([("scale", StandardScaler(), [0, 1])])`), not by name. Categorical values must be numbers by then: either encode them yourself, or pass `categorical=` and your estimators receive the integer codes (see [Categorical features](#categorical-features)). With `missing="impute"` your estimators receive NaN unchanged; see [Missing values](#missing-values).
 
 <a id="parallel-models"></a>
 
@@ -233,11 +234,68 @@ The ranking is from the five `group="fast"` built-in models. The last line shows
 
 `ConsensusSelector` and the command line take the same policy: `ConsensusSelector("reg", "r2", k=2, missing="impute")` accepts NaN in `fit()` and `transform()` (it only chooses columns, so put an imputer after it in a `Pipeline` for the final model), and `featranker ... --missing impute` reads empty CSV cells as missing.
 
-**Limitations.** Median imputation mixes missingness with values. A lab test ordered only for sick patients is missing for a reason, and imputation leaves a spike at the median, and tree and kernel models can learn it, so a feature's importance can mix its values with its missingness (in a probe where only missingness drove the target, tree importance was about 1.9 and SVR about 1.05, while ridge, which can hardly use a spike, gave 0.006). To separate values from missingness, use custom models with `SimpleImputer(add_indicator=True)` or native NaN handling, and read `train_counts` to see which features are mostly missing. Missing values in the target are not supported. Categorical and string columns are not supported.
+**Limitations.** Median imputation mixes missingness with values. A lab test ordered only for sick patients is missing for a reason, and imputation leaves a spike at the median, and tree and kernel models can learn it, so a feature's importance can mix its values with its missingness (in a probe where only missingness drove the target, tree importance was about 1.9 and SVR about 1.05, while ridge, which can hardly use a spike, gave 0.006). To separate values from missingness, use custom models with `SimpleImputer(add_indicator=True)` or native NaN handling, and read `train_counts` to see which features are mostly missing. Missing values in the target are not supported. For string columns see [Categorical features](#categorical-features).
+
+<a id="categorical-features"></a>
+
+## ▍ Categorical features
+
+By default every feature must be numeric. With `categorical`, FeatRanker accepts text and category columns as they are, learns how to encode them inside each `fit()`, and still ranks each raw column as **one** feature:
+
+- `categorical="auto"` treats DataFrame columns of object, string, or category dtype as categorical (bool and numeric dtypes stay numeric). NumPy arrays have no per-column dtypes, so `"auto"` finds nothing there. `categorical=["city", ...]` marks those columns, whatever their dtype, and works for NumPy object arrays too (give `feature_names`). A name that is not a feature raises `ValueError` in `fit()`.
+- **Levels come from the training rows only.** Each categorical column's levels are the sorted string forms of its training values, coded `0..k-1`; a missing value (`None` or NaN) is its own level, last. Values that were not in training, including a missing value when training had none, share one extra "unseen" code `k` at evaluation time. Under `rank_resampled()` and `ConsensusSelector` every split learns its own levels. The fitted ranker exposes `categorical_features_` (the names) and `categorical_levels_` (name to levels, `None` for the missing level).
+- **One feature per raw column.** The ranker works on a matrix where each categorical column holds its codes, so shuffling the codes is shuffling the raw values: `city` is one feature group in `feature_groups`, in the consensus, and in the shadows, however many levels it has.
+- **Built-in linear models** one-hot encode the categorical columns (a code never seen in training is ignored, giving an all-zero row) and scale the numeric ones; under `missing="impute"` the numeric columns are imputed first, and a missing categorical value is simply a level. **Built-in tree models** use the codes as numbers, which gives the levels an arbitrary order; for high-cardinality columns or a different encoding, pass your own `models=`. **Your own models** receive the code matrix (floats) and can read `ranker.categorical_features_` to know which columns hold codes.
+- The report gains `categorical` (see [Report](report.md#structure)): the columns, their number of training levels, and how many evaluation values were unseen.
+- Evidence: categorical columns are left out of the Spearman correlations (`evidence.correlation`, and `auto_groups(X, categorical=...)`, which never groups them). The SHAP summary explains tree models on the codes (the `direction` of a categorical group is `null`, since codes have no order); linear models with a one-hot step are listed in `evidence.shap.unsupported`.
+
+```python
+import numpy as np
+import pandas as pd
+
+from featranker import FeatureRanker
+
+rng = np.random.default_rng(0)
+n = 400
+city = rng.choice(["Oslo", "Rome", "Lima", "Kyiv", "Cairo"], n)
+premium = {"Oslo": 30.0, "Rome": -20.0, "Lima": 25.0, "Kyiv": -25.0, "Cairo": 0.0}
+size = rng.uniform(30, 120, n)
+age = rng.uniform(0, 60, n)
+price = size * 2 + np.array([premium[c] for c in city]) + rng.normal(0, 8, n)
+df = pd.DataFrame({"city": city, "size": size, "age": age})
+train, evaluation = df.iloc[:280], df.iloc[280:]
+# Cairo never appears in training; its rows are mapped to Rome here.
+train = train.assign(city=train["city"].replace("Cairo", "Rome"))
+
+ranker = FeatureRanker(task="reg", group="fast", categorical="auto", verbose=False)
+ranker.fit(train, price[:280])
+report = ranker.rank_features(
+    evaluation, price[280:], scoring="neg_mean_absolute_error", random_state=42
+)
+
+print(ranker.categorical_features_, ranker.categorical_levels_)
+print(report["categorical"])
+print(list(report["feature_groups"]))
+for row in report["consensus"]:
+    print(f"{row['feature_group']:>5}  median rank {row['median_rank']:.1f}")
+```
+
+```text
+['city'] {'city': ['Kyiv', 'Lima', 'Oslo', 'Rome']}
+{'columns': ['city'], 'train_levels': {'city': 4}, 'unseen_eval': {'city': 28}}
+['city', 'size', 'age']
+ size  median rank 1.0
+ city  median rank 2.0
+  age  median rank 3.0
+```
+
+`city` is one feature although it has four training levels; the 28 evaluation rows from Cairo got the shared unseen code instead of shaping the encoding. `ConsensusSelector(..., categorical="auto")` takes the same option and returns the selected raw columns from `transform()` (put an encoder after it in a `Pipeline` for the final model), and `featranker ... --categorical auto` (or `--categorical city,segment`) reads those CSV columns as text; an empty cell in such a column is the missing level.
+
+**Limitations.** Levels are compared by their string forms, so `1` and `"1"` are the same level, and so are `1` and `1.0` (a column that pandas upcast to float because of a missing value still matches its integer training levels); clean such columns first. Target encoding and other supervised encoders are not offered, because they leak the target; build one into a custom model pipeline if you need it. Date and time columns are still rejected ("X must be numeric"), also when listed as categorical; convert them to numbers or to labels first. Passing column names to custom models is not part of this feature.
 
 ## ▍ Command line
 
-The CLI takes separate numeric training and evaluation CSV files.
+The CLI takes separate training and evaluation CSV files; the features are numeric unless named by `--categorical`.
 
 ```bash
 featranker \
@@ -254,7 +312,7 @@ featranker \
   --output report.json
 ```
 
-Both CSV files need headers, the same feature columns in the same order, and the target column. Feature values must be numeric; targets may be numeric or strings. With `--missing impute`, empty feature cells are read as missing values and imputed per training split (see [Missing values](#missing-values)); by default they are rejected. Only empty cells and the text `nan` (any case) are read as missing; `NA`, `N/A`, and `null` are not, and raise the numeric-values error. Add `--quiet` to hide progress bars and `--evidence` to add [evidence](#evidence) to the report. `--feature-groups` takes a YAML file, or the word `auto` to group correlated columns of the training CSV with [`auto_groups()`](#auto-groups) (a file literally named `auto` must be written `./auto`). Run `featranker --help` for every flag.
+Both CSV files need headers, the same feature columns in the same order, and the target column. Feature values must be numeric; targets may be numeric or strings. With `--missing impute`, empty feature cells are read as missing values and imputed per training split (see [Missing values](#missing-values)); by default they are rejected. Only empty cells and the text `nan` (any case) are read as missing; `NA`, `N/A`, and `null` are not, and raise the numeric-values error. Add `--quiet` to hide progress bars and `--evidence` to add [evidence](#evidence) to the report. `--feature-groups` takes a YAML file, or the word `auto` to group correlated columns of the training CSV with [`auto_groups()`](#auto-groups) (a file literally named `auto` must be written `./auto`). `--categorical auto` reads the training-CSV columns that have a non-numeric cell as text (so a stray `NA` makes its whole column categorical; a column literally named `auto` cannot be listed, since `auto` always means detection), and `--categorical city,segment` reads the named columns as text (see [Categorical features](#categorical-features)); levels are learned from the training CSV only, and an empty cell in such a column is a missing level. Run `featranker --help` for every flag.
 
 <details>
 <summary><b>Example input files</b></summary>
@@ -345,7 +403,7 @@ Each split uses a new ranker with this ranker's settings, so the ranker you call
 > [!IMPORTANT]
 > Pass development data only and keep your final test set out. The splits here are internal validation. Choosing features from these results and then scoring a model on the same data overstates its performance.
 >
-> Fit learned preprocessing within each training split. Put transformations compatible with FeatRanker's finite numeric input contract inside custom model pipelines. Missing values can be left in with `missing="impute"` (see [Missing values](#missing-values)). For categorical data requiring learned preprocessing, use a manual split workflow; do not fit preprocessing on all development rows before this call.
+> Fit learned preprocessing within each training split. Put transformations compatible with FeatRanker's finite numeric input contract inside custom model pipelines. Missing values can be left in with `missing="impute"` (see [Missing values](#missing-values)). Raw categorical columns can be left in with `categorical=` (see [Categorical features](#categorical-features)): each split learns its own levels. For other preprocessing that needs learning, use a manual split workflow; do not fit it on all development rows before this call.
 
 ### Time series and grouped data
 
@@ -638,8 +696,8 @@ Output from scikit-learn models only (`group="fast"`). The two modes agree on th
 A rank says which groups matter, not why. With `evidence=True`, `fit()` also keeps the training data (as its own copy, so changing your arrays afterwards does not change the evidence) and `rank_features()` adds evidence about the mechanism behind the ranking:
 
 - **Train score and overfit gap.** Each model gets `train_score` (the same scorer on the data it was fit on) and `overfit_gap = train_score - evaluation_score`. A large gap means the model scores much better on its training data than on the evaluation data. Memorization is one cause; a shift between the training and evaluation distributions, or a small evaluation sample, can produce the same gap, so check those before concluding that the model does not generalize.
-- **Correlated groups.** `evidence.correlation` lists pairs of feature groups whose strongest member-column Spearman correlation on the **training** data is at least 0.5, with its sign. Permutation importance can split credit between correlated groups; consider putting them in one `feature_groups` entry.
-- **SHAP summary** (needs `pip install 'featranker[shap]'`). For each linear model (`LinearExplainer`) and each tree model SHAP's tree explainer supports, including a `Pipeline` whose earlier steps are all `StandardScaler`, `MinMaxScaler`, `MaxAbsScaler`, or `RobustScaler`, or identity steps (`"passthrough"`, `None`) (any other pipeline step lists the model as unsupported), `models[name]["shap"]` gives every group's `mean_abs` (mean absolute SHAP value, summed over the group's columns) and `direction` (Spearman correlation between a single-column group's value and its SHAP value; positive means higher values push the explained output up). Other models appear in `evidence.shap.unsupported`; there is no model-agnostic fallback. Without `shap`, a `UserWarning` is raised and the rest of the evidence is still computed.
+- **Correlated groups.** `evidence.correlation` lists pairs of feature groups whose strongest member-column Spearman correlation on the **training** data is at least 0.5, with its sign. Permutation importance can split credit between correlated groups; consider putting them in one `feature_groups` entry. Categorical columns are left out.
+- **SHAP summary** (needs `pip install 'featranker[shap]'`). For each linear model (`LinearExplainer`) and each tree model SHAP's tree explainer supports, including a `Pipeline` whose earlier steps are all `StandardScaler`, `MinMaxScaler`, `MaxAbsScaler`, or `RobustScaler`, or identity steps (`"passthrough"`, `None`) (any other pipeline step lists the model as unsupported), `models[name]["shap"]` gives every group's `mean_abs` (mean absolute SHAP value, summed over the group's columns) and `direction` (Spearman correlation between a single-column group's value and its SHAP value; positive means higher values push the explained output up). Other models appear in `evidence.shap.unsupported`, including linear models with a one-hot step for [categorical features](#categorical-features); there is no model-agnostic fallback. Without `shap`, a `UserWarning` is raised and the rest of the evidence is still computed.
 
 ```python
 from sklearn.datasets import load_diabetes
@@ -802,7 +860,7 @@ Output shown with the `xgboost` and `catboost` extras installed. The score is ho
 | `min_shadow_share` | `None` | Keep groups whose stability `above_shadow_share` is at least this (0 to 1). Turns on [shadow features](#shadow-features). |
 | `max_shadow_q` | `None` | Keep groups whose stability `shadow_q_value` (the [shadow hits test](#shadow-test)) is at most this (greater than 0, at most 1); a heuristic filter, since the values are [uncalibrated](#shadow-test). Turns on shadow features. Use `cv` with 10 or more splits, such as `RepeatedKFold`; with 5 the test has little power. |
 | `min_shadow_families` | `None` | Keep groups whose stability `shadow_families` (see [family evidence](#family-evidence)) is at least this (a positive integer). Turns on shadow features. `1` and `2` both selected at most 1% of noise groups on null data; `1` kept more noise than `2` in the signal study (see the [calibration study](calibration.md) for how to choose); a heuristic. |
-| `group`, `models`, `n_jobs`, `shadow_seed`, `shadow_mode`, `missing` | as `FeatureRanker` | Passed to the ranker built in `fit()`. |
+| `group`, `models`, `n_jobs`, `shadow_seed`, `shadow_mode`, `missing`, `categorical` | as `FeatureRanker` | Passed to the ranker built in `fit()`. |
 | `feature_groups`, `cv`, `n_repeats`, `random_state` | as `rank_resampled()` | Passed to `rank_resampled()` on the data given to `fit()`. |
 | `feature_groups="auto"` | | Groups correlated columns with [`auto_groups()`](#auto-groups) on the data given to `fit()`, so inside a pipeline from the training fold only. The groups used are in `report_["feature_groups"]`. Any other string raises `ValueError` in `fit()`. |
 | `verbose` | `False` | Progress bars; off by default because pipelines fit many times. |
@@ -994,7 +1052,7 @@ Features left out of `feature_groups` become singleton groups. Empty groups, unk
 
 ### Grouping correlated features: `auto_groups()`
 
-Permutation importance splits credit between near-copies: shuffling one of two correlated columns barely hurts a model that can use the other, so both look unimportant. `auto_groups(X, *, threshold=0.7, feature_names=None)` proposes the groups from `X` alone (it never sees a target) and returns a dict you can pass as `feature_groups`.
+Permutation importance splits credit between near-copies: shuffling one of two correlated columns barely hurts a model that can use the other, so both look unimportant. `auto_groups(X, *, threshold=0.7, feature_names=None, categorical=None)` proposes the groups from `X` alone (it never sees a target) and returns a dict you can pass as `feature_groups`.
 
 ```python
 from sklearn.datasets import load_diabetes
@@ -1017,7 +1075,7 @@ print(auto_groups(X, threshold=0.9))
 - Columns are clustered by Spearman correlation with complete linkage, so every pair of columns inside a group has absolute correlation of at least `threshold` (`0 < threshold <= 1`), up to a floating-point tolerance of `1e-12`, which lets exact copies group at `threshold=1`. Lowering it makes bigger groups. A constant column is never grouped, whatever the threshold.
 - Use enough rows: with few rows the sample correlation is inflated (with two rows every non-constant pair has absolute correlation 1), so near-unrelated columns can be grouped.
 - Only groups of two or more columns are returned. A group is named by its members joined with `+`, in column order; a name that equals an existing column or another generated group's name raises `ValueError`.
-- `X` is validated like `FeatureRanker.fit()` input. Column names come from a DataFrame, else `feature_names`, else `x0`, `x1`, ….
+- `X` is validated like `FeatureRanker.fit()` input. Column names come from a DataFrame, else `feature_names`, else `x0`, `x1`, …. With `categorical` (as in `FeatureRanker`: `"auto"` or a list of names) those columns are accepted as text and never grouped; `ConsensusSelector` and the CLI pass it on.
 - Call it on your training or development data and pass the result to `rank_features()` or `rank_resampled()`; there is no `"auto"` option there, so the grouping stays visible in your code. The [correlation evidence](#evidence) lists group pairs from 0.5, which shows what sits near the cut.
 - The correlation matrix and clustering are O(p²) in the number of columns, which is fine for hundreds of columns.
 

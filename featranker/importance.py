@@ -2,6 +2,7 @@
 Feature importance ranking via permutation importance across multiple ML models.
 """
 
+import datetime
 import importlib
 import importlib.metadata
 import json
@@ -9,7 +10,7 @@ import math
 import platform
 import warnings
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Literal, Optional
+from typing import Any, Callable, Dict, List, Literal, Optional, Union
 
 import numpy as np
 import sklearn
@@ -17,17 +18,24 @@ import yaml
 from joblib import Parallel, delayed
 from scipy.stats import binom
 from sklearn.base import clone
+from sklearn.compose import ColumnTransformer
 from sklearn.dummy import DummyClassifier, DummyRegressor
 from sklearn.impute import SimpleImputer
 from sklearn.metrics import get_scorer
 from sklearn.model_selection import KFold, StratifiedKFold
 from sklearn.pipeline import make_pipeline
-from sklearn.preprocessing import LabelEncoder, StandardScaler
+from sklearn.preprocessing import LabelEncoder, OneHotEncoder, StandardScaler
 from sklearn.utils.fixes import parse_version
 from tqdm import tqdm
 
 from .evidence import correlation_evidence, shap_evidence
 from .report import Report
+
+try:
+    import pandas as _pd
+    PANDAS_MISSING: tuple = (type(_pd.NA), type(_pd.NaT))
+except ImportError:  # pandas is optional
+    PANDAS_MISSING = ()
 
 task_map = {
     "classification": "clf",
@@ -96,31 +104,96 @@ def _validate_models(models: Any) -> Dict[str, Any]:
     return dict(models)
 
 
+def _validate_categorical(categorical: Any) -> Any:
+    """None, "auto", or a list of feature names (a tuple is copied to a list)."""
+    if categorical is None or (isinstance(categorical, str) and categorical == "auto"):
+        return categorical
+    if isinstance(categorical, (list, tuple)) and all(
+        isinstance(name, str) and name for name in categorical
+    ):
+        return list(categorical)
+    raise ValueError("[!] categorical must be None, 'auto', or a list of feature names.")
+
+
+def _categorical_indices(
+    X: Any, categorical: Any, feature_names: Optional[List[str]] = None
+) -> List[int]:
+    """Column positions of the categorical features of X, in column order."""
+    categorical = _validate_categorical(categorical)
+    if categorical is None:
+        return []
+    if categorical == "auto":
+        # Object, string and category dtypes all report kind "O".
+        return [
+            index
+            for index, dtype in enumerate(getattr(X, "dtypes", []))
+            if getattr(dtype, "kind", "") == "O"
+        ]
+    names = [str(name) for name in X.columns] if hasattr(X, "columns") else feature_names
+    if names is None:
+        raise ValueError("[!] feature_names are required for NumPy input.")
+    positions = {name: index for index, name in enumerate(names)}
+    unknown = [name for name in categorical if name not in positions]
+    if unknown:
+        raise ValueError(f"[!] categorical contains unknown feature '{unknown[0]}'.")
+    return sorted(positions[name] for name in set(categorical))
+
+
+DATE_TYPES = (datetime.date, datetime.timedelta, np.datetime64, np.timedelta64)
+NOT_NUMERIC = (
+    "[!] X must be numeric; convert datetime and timedelta columns to numbers first."
+)
+
+
+def _has_dates(column: Any) -> bool:
+    kinds = set(map(type, column)) - set(PANDAS_MISSING)  # NaT is missing, not a date
+    return any(issubclass(kind, DATE_TYPES) for kind in kinds)
+
+
 def _validate_X(
     X: Any,
     feature_names: Optional[List[str]] = None,
     expected_names: Optional[List[str]] = None,
     allow_nan: bool = False,
+    categorical: Optional[List[int]] = None,
 ) -> tuple[np.ndarray, List[str]]:
+    """
+    Validated copy of X and its feature names.
+
+    With categorical column positions, the result is an object array: those
+    columns keep their raw values and the others are checked as numbers.
+    """
+    categorical = categorical or []
+    target_dtype = object if categorical else float
     dataframe_names = list(X.columns) if hasattr(X, "columns") else None
     # Always a copy: models and kept evidence data must not alias the caller's array.
     if dataframe_names is not None and hasattr(X, "to_numpy"):
         # to_numpy would turn dates into nanosecond counts, which are not features.
         if any(getattr(dtype, "kind", "") in {"M", "m"} for dtype in X.dtypes):
-            raise ValueError(
-                "[!] X must be numeric; convert datetime and timedelta columns "
-                "to numbers first."
-            )
+            raise ValueError(NOT_NUMERIC)
+        # Object and category columns of dates would become nanoseconds too.
+        if any(
+            getattr(dtype, "kind", "") == "O" and _has_dates(X.iloc[:, position])
+            for position, dtype in enumerate(X.dtypes)
+        ):
+            raise ValueError(NOT_NUMERIC)
         # to_numpy turns pandas NA (nullable dtypes) into NaN; np.array would raise.
-        values = X.to_numpy(dtype=float, na_value=np.nan, copy=True)
+        values = X.to_numpy(dtype=target_dtype, na_value=np.nan, copy=True)
     else:
-        values = np.array(X, dtype=float)
+        if isinstance(X, np.ndarray) and X.dtype.kind in {"M", "m"}:
+            raise ValueError(NOT_NUMERIC)
+        values = np.array(X, dtype=target_dtype)
     if values.ndim != 2:
         raise ValueError("[!] X must be a two-dimensional feature matrix.")
+    numeric = values
+    if categorical:
+        if any(_has_dates(values[:, column]) for column in categorical):
+            raise ValueError(NOT_NUMERIC)
+        numeric = values[:, np.setdiff1d(np.arange(values.shape[1]), categorical)].astype(float)
     if allow_nan:
-        if np.isinf(values).any():
+        if np.isinf(numeric).any():
             raise ValueError("[!] X must not contain infinite values.")
-    elif not np.isfinite(values).all():
+    elif not np.isfinite(numeric).all():
         raise ValueError(
             "[!] X must contain only finite values; impute or drop missing "
             "values before ranking."
@@ -155,6 +228,79 @@ def _validate_X(
     if expected_names is not None and names != list(expected_names):
         raise ValueError("[!] Evaluation feature names and order must match fit().")
     return values, names
+
+
+def _is_missing(column: np.ndarray) -> np.ndarray:
+    """Which values of an object column are missing (None, NaN, pd.NA or pd.NaT)."""
+    return np.array(
+        [value is None
+         or isinstance(value, PANDAS_MISSING)
+         or (isinstance(value, (float, np.floating)) and value != value)
+         for value in column],
+        dtype=bool,
+    )
+
+
+def _level_key(value: Any) -> str:
+    """String form of a level; integral numbers drop the float suffix (1.0 -> "1")."""
+    integral = isinstance(value, (int, float, np.integer, np.floating)) and not isinstance(
+        value, (bool, np.bool_)
+    )
+    return str(int(value)) if integral and float(value).is_integer() else str(value)
+
+
+def _learn_levels(
+    values: np.ndarray, indices: List[int], names: List[str]
+) -> Dict[str, List[Optional[str]]]:
+    """Per categorical column: sorted string forms, then None if any value is missing."""
+    levels: Dict[str, List[Optional[str]]] = {}
+    for index in indices:
+        missing = _is_missing(values[:, index])
+        found = sorted({_level_key(value) for value in values[~missing, index]})
+        levels[names[index]] = [*found, None] if missing.any() else [*found]
+    return levels
+
+
+def _encode_categorical(
+    values: np.ndarray,
+    indices: List[int],
+    names: List[str],
+    levels: Dict[str, List[Optional[str]]],
+) -> tuple[np.ndarray, Dict[str, int]]:
+    """
+    Float matrix with each categorical column replaced by level codes.
+
+    A value not among the learned levels gets the code len(levels); the second
+    result counts those values per column.
+    """
+    coded = np.empty(values.shape, dtype=float)
+    numeric = np.setdiff1d(np.arange(values.shape[1]), indices)
+    coded[:, numeric] = values[:, numeric].astype(float)
+    unseen: Dict[str, int] = {}
+    for index in indices:
+        known = levels[names[index]]
+        codes = {level: code for code, level in enumerate(known)}
+        column = values[:, index]
+        coded[:, index] = [
+            codes.get(None if missing else _level_key(value), len(known))
+            for value, missing in zip(column, _is_missing(column))
+        ]
+        unseen[names[index]] = int((coded[:, index] == len(known)).sum())
+    return coded, unseen
+
+
+def _with_one_hot(pipeline: Any, columns: List[int]) -> Any:
+    """A built-in linear pipeline whose numeric steps skip `columns`, which are one-hot coded."""
+    *numeric_steps, (_, estimator) = pipeline.steps
+    return make_pipeline(
+        ColumnTransformer(
+            [("cat", OneHotEncoder(handle_unknown="ignore"), columns)],
+            remainder=make_pipeline(*(step for _, step in numeric_steps)),
+            # Dense output: several linear models reject sparse input.
+            sparse_threshold=0,
+        ),
+        estimator,
+    )
 
 
 def _validate_y(y: Any, n_rows: int) -> np.ndarray:
@@ -700,6 +846,7 @@ class FeatureRanker:
         evidence: bool = False,
         shadow_mode: Literal["joint", "independent"] = "joint",
         missing: Literal["error", "impute"] = "error",
+        categorical: Union[List[str], Literal["auto"], None] = None,
     ) -> None:
         """
         Initialize configured models without loading or fitting data.
@@ -727,6 +874,13 @@ class FeatureRanker:
                 pipeline step, learned on each training split only; custom
                 models receive NaN unchanged and must handle it. Infinite
                 values are always rejected.
+            categorical: None (default) accepts numeric features only. "auto"
+                treats DataFrame columns of object, string, or category dtype
+                as categorical; a list of feature names marks those columns
+                (any dtype, NumPy included). Each categorical column is coded
+                inside fit() from the training rows only, ranked as one
+                feature, and one-hot encoded by built-in linear models; trees
+                and custom models receive the integer codes.
         """
         if task not in {"clf", "reg"}:
             raise ValueError("[!] task must be 'clf' or 'reg'.")
@@ -760,6 +914,9 @@ class FeatureRanker:
         self.shadow_mode = shadow_mode
         self.evidence = evidence
         self.missing = missing
+        self.categorical = _validate_categorical(categorical)
+        self.categorical_features_: List[str] = []
+        self.categorical_levels_: Dict[str, List[Optional[str]]] = {}
         self.label_encoder = None
         self.initialization_failures_: List[Dict[str, str]] = []
         # Built-in model name -> registry family; anything else is its own family.
@@ -784,6 +941,10 @@ class FeatureRanker:
         self.__dict__.setdefault("shadow_mode", "joint")
         # ... and those pickled by 1.6 lack the 1.7 missing-value policy.
         self.__dict__.setdefault("missing", "error")
+        # ... and those pickled by 1.8 lack the 1.9 categorical option.
+        self.__dict__.setdefault("categorical", None)
+        self.__dict__.setdefault("categorical_features_", [])
+        self.__dict__.setdefault("categorical_levels_", {})
         if "model_families_" not in self.__dict__:
             self.model_families_ = (
                 _registry_families() if self.user_models is None else {}
@@ -797,10 +958,23 @@ class FeatureRanker:
     ) -> "FeatureRanker":
         """Fit configured models using training data only."""
         self.is_fitted_ = False
+        categorical = _categorical_indices(X, self.categorical, feature_names)
         X_values, names = _validate_X(
-            X, feature_names=feature_names, allow_nan=self.missing == "impute"
+            X,
+            feature_names=feature_names,
+            allow_nan=self.missing == "impute",
+            categorical=categorical,
         )
         y_values = _validate_y(y, len(X_values))
+        levels: Dict[str, List[Optional[str]]] = {}
+        categorical_missing: Dict[str, int] = {}
+        if categorical:
+            categorical_missing = {
+                names[index]: int(_is_missing(X_values[:, index]).sum())
+                for index in categorical
+            }
+            levels = _learn_levels(X_values, categorical, names)
+            X_values, _ = _encode_categorical(X_values, categorical, names, levels)
 
         # Encode every classification target to 0..n-1 (XGBoost requires it).
         label_encoder = None
@@ -817,8 +991,17 @@ class FeatureRanker:
             groups = (
                 ["linear", "tree"] if self.group in {"all", "fast"} else [self.group]
             )
+            # Shadow columns of categorical columns are categorical too.
+            one_hot = categorical + [
+                index + len(names) for index in categorical if self.shadows
+            ]
             for group in groups:
-                candidates.update(self.models.get(self.task, {}).get(group, {}))
+                built = self.models.get(self.task, {}).get(group, {})
+                if one_hot and group == "linear":
+                    built = {
+                        name: _with_one_hot(model, one_hot) for name, model in built.items()
+                    }
+                candidates.update(built)
 
         self.trained_models = {}
         self.fit_failures_ = []
@@ -855,9 +1038,11 @@ class FeatureRanker:
             self.train_y_ = y_values
         self.label_encoder = label_encoder
         self.feature_names_ = names
+        self.categorical_features_ = [names[index] for index in categorical]
+        self.categorical_levels_ = levels
         if self.missing == "impute":
             self.train_missing_counts_ = {
-                name: int(np.isnan(X_values[:, index]).sum())
+                name: categorical_missing.get(name, int(np.isnan(X_values[:, index]).sum()))
                 for index, name in enumerate(names)
             }
         self.n_features_in_ = len(names)
@@ -881,9 +1066,22 @@ class FeatureRanker:
             raise ValueError("[!] n_repeats must be a positive integer.")
         scorer, scoring_name = _resolve_scorer(scoring)
 
+        categorical = [
+            index
+            for index, name in enumerate(self.feature_names_)
+            if name in self.categorical_features_
+        ]
         X_values, _ = _validate_X(
-            X_eval, expected_names=self.feature_names_, allow_nan=self.missing == "impute"
+            X_eval,
+            expected_names=self.feature_names_,
+            allow_nan=self.missing == "impute",
+            categorical=categorical,
         )
+        unseen: Dict[str, int] = {}
+        if categorical:
+            X_values, unseen = _encode_categorical(
+                X_values, categorical, self.feature_names_, self.categorical_levels_
+            )
         y_values = _validate_y(y_eval, len(X_values))
         if self.label_encoder is not None:
             y_values = _encode_labels(self.label_encoder, y_values)
@@ -959,6 +1157,14 @@ class FeatureRanker:
                 "strategy": "median",
                 "train_counts": dict(self.train_missing_counts_),
             }
+        if categorical:
+            report["categorical"] = {
+                "columns": list(self.categorical_features_),
+                "train_levels": {
+                    name: len(levels) for name, levels in self.categorical_levels_.items()
+                },
+                "unseen_eval": unseen,
+            }
         if self.evidence:
             n_real = len(self.feature_names_)
             shap_block, shap_models = shap_evidence(
@@ -966,11 +1172,14 @@ class FeatureRanker:
                 X_models,
                 self.train_X_,
                 groups,
+                categorical,
             )
             for name, entry in shap_models.items():
                 model_reports[name]["shap"] = entry
             report["evidence"] = {
-                "correlation": correlation_evidence(self.train_X_[:, :n_real], groups),
+                "correlation": correlation_evidence(
+                    self.train_X_[:, :n_real], groups, categorical
+                ),
                 "shap": shap_block,
             }
         return Report(report)
@@ -996,8 +1205,13 @@ class FeatureRanker:
         ranker's own fitted state is not changed. Pass development data only,
         never the final test set.
         """
+        categorical = _categorical_indices(X, self.categorical, feature_names)
+        # Raw values: each split learns its own levels in fit().
         X_values, names = _validate_X(
-            X, feature_names=feature_names, allow_nan=self.missing == "impute"
+            X,
+            feature_names=feature_names,
+            allow_nan=self.missing == "impute",
+            categorical=categorical,
         )
         y_values = _validate_y(y, len(X_values))
         if not _is_positive_int(n_repeats):
@@ -1027,6 +1241,8 @@ class FeatureRanker:
                     evidence=self.evidence,
                     shadow_mode=self.shadow_mode,
                     missing=self.missing,
+                    # Names, so "auto" survives the loss of the DataFrame dtypes.
+                    categorical=[names[column] for column in categorical] or None,
                 )
                 ranker.fit(X_values[train], y_values[train], feature_names=names)
                 report = ranker.rank_features(

@@ -160,6 +160,8 @@ With `shadows=True`, each stability row also shows which model families beat the
 
 Built-in linear models are wrapped in a `StandardScaler` pipeline fit on training data only; tree models and your own models are used as given. With `missing="impute"`, NaN is accepted and every built-in model starts with a median imputer fit on its training split only, so evaluation rows never shape the imputation ([details](https://github.com/CountZero-Error/Featranker/blob/main/docs/usage.md#missing-values)).
 
+With `categorical="auto"` (or a list of column names), raw text and category columns are accepted: levels are learned from each fit's training rows only, built-in linear models one-hot encode them and trees use the codes, and every column is still ranked as one feature ([details](https://github.com/CountZero-Error/Featranker/blob/main/docs/usage.md#categorical-features)).
+
 > [!IMPORTANT]
 > Ranking belongs inside the training portion of validation. In nested validation, fit and rank on inner folds only, and keep the outer test fold untouched until final evaluation. Never use outer-fold or final-test rankings to choose features. [`ConsensusSelector`](https://github.com/CountZero-Error/Featranker/blob/main/docs/usage.md#feature-selection) does this for you as a scikit-learn `Pipeline` step.
 
@@ -167,7 +169,7 @@ Built-in linear models are wrapped in a `StandardScaler` pipeline fit on trainin
 
 | Page | Contents |
 |---|---|
-| [**Usage**](https://github.com/CountZero-Error/Featranker/blob/main/docs/usage.md) | API and defaults, working with reports (`summary`, `to_frame`, `plot`), choosing a scorer, your own models, missing values, parallel runs, the CLI, resampled ranking, shadow features, the shadow hits test, per-family evidence and `min_shadow_families`, mechanism evidence, pipeline feature selection, `summarize`, LLM interpretation (deprecated), labels, troubleshooting |
+| [**Usage**](https://github.com/CountZero-Error/Featranker/blob/main/docs/usage.md) | API and defaults, working with reports (`summary`, `to_frame`, `plot`), choosing a scorer, your own models, missing values, categorical features, parallel runs, the CLI, resampled ranking, shadow features, the shadow hits test, per-family evidence and `min_shadow_families`, mechanism evidence, pipeline feature selection, `summarize`, LLM interpretation (deprecated), labels, troubleshooting |
 | [**Report**](https://github.com/CountZero-Error/Featranker/blob/main/docs/report.md) | How to read the results, resampled (stability) reports, full report structure, ranking and failure rules |
 | [**Models**](https://github.com/CountZero-Error/Featranker/blob/main/docs/models.md) | All 40 built-in models, optional extras, known issues |
 | [**API**](https://github.com/CountZero-Error/Featranker/blob/main/docs/api.md) | Public API, stability policy, typing, releases |
@@ -177,7 +179,7 @@ Upgrading from 0.3? The preparation-file workflow was removed in 0.4.0; see the 
 
 ## ▍ Scope
 
-`FeatureRanker` does not encode features or tune models; by default it rejects missing values, and `missing="impute"` applies a per-split median imputation inside the built-in models. Its optional SHAP summaries (`evidence=True`) describe how models use features and are not used in the ranking. `ConsensusSelector` performs feature selection inside validation. `rank_resampled()` splits data only to measure ranking stability; it does not evaluate a final model. The one target change it makes is encoding classification labels to `0..n_classes-1` internally (see [Usage](https://github.com/CountZero-Error/Featranker/blob/main/docs/usage.md#labels)). Results depend on the evaluation sample, scorer, estimators, correlated predictors, and permutation design.
+`FeatureRanker` does not tune models; it encodes only the columns you mark as `categorical` (inside each fit, with level codes and, for built-in linear models, one-hot) and nothing else; by default it rejects missing values, and `missing="impute"` applies a per-split median imputation inside the built-in models. Its optional SHAP summaries (`evidence=True`) describe how models use features and are not used in the ranking. `ConsensusSelector` performs feature selection inside validation. `rank_resampled()` splits data only to measure ranking stability; it does not evaluate a final model. The one target change it makes is encoding classification labels to `0..n_classes-1` internally (see [Usage](https://github.com/CountZero-Error/Featranker/blob/main/docs/usage.md#labels)). Results depend on the evaluation sample, scorer, estimators, correlated predictors, and permutation design.
 
 ## ▍ Development
 
