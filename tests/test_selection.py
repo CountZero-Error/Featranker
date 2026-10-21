@@ -171,6 +171,24 @@ def test_shadow_rule_keeps_groups_at_or_above_threshold(patched):
     assert s.selected_groups_ == ["x1", "x2"]
 
 
+def test_shadow_rule_rejects_a_group_whose_only_consensus_split_gave_one(patched):
+    from featranker.importance import _build_stability
+
+    def split(index, shares):
+        rows = [{"feature_group": g, "median_rank": 1.0, "mean_rank": 1.0,
+                 "above_shadow_share": s} for g, s in shares.items() if s is not None]
+        return {"split": index, "n_train": 4, "n_eval": 2,
+                "report": {"feature_groups": {g: [g] for g in shares}, "consensus": rows}}
+
+    # x0 voted in 1 of 10 splits (share 1.0); x1 voted in all 10 (share 0.6).
+    splits = [split(i, {"x0": 1.0 if i == 0 else None, "x1": 0.6}) for i in range(10)]
+    patched(_build_stability(splits, 10, 1))
+
+    s = selector(k=None, min_shadow_share=0.5).fit(X_DATA, Y_DATA)
+
+    assert s.selected_groups_ == ["x1"]
+
+
 def test_shadow_filter_then_k(patched):
     patched(_rows(["x0", "x1", "x2"], [0.4, 0.9, 0.8]))
 

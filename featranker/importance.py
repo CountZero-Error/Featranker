@@ -505,7 +505,8 @@ def _build_stability(
             }
         )
         if name in shadow_shares:
-            rows[-1]["above_shadow_share"] = float(np.mean(shadow_shares[name]))
+            # Failed, empty and row-less splits count as 0, like shadow_hits.
+            rows[-1]["above_shadow_share"] = float(np.sum(shadow_shares[name]) / n_splits)
             # One trial per split; a split without a consensus row is a non-hit.
             hits = sum(share > 0.5 for share in shadow_shares[name])
             rows[-1]["shadow_hits"] = hits

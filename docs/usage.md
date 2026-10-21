@@ -459,7 +459,7 @@ Output shown with the `xgboost` and `catboost` extras installed. The two pure-no
 - It is descriptive, not a p-value. Families are not independent trials, and a share below 0.5 does not prove a group is useless. For a test across splits, see [the shadow hits test](#shadow-test).
 - Ranks still compare real groups only. Extra noise columns can still change how some models fit (for example, forests that sample a fraction of features per split), so ranks with shadows on can differ slightly from a run without them.
 - **Cost.** Models train on twice the columns and every group is permuted twice, so expect about double the time and memory.
-- `rank_resampled()` uses the same setting; split `i` uses `shadow_seed + i`, and each stability row gains the mean `above_shadow_share` over ranked splits, plus the [hits test](#shadow-test) keys and the [family evidence](#family-evidence) keys.
+- `rank_resampled()` uses the same setting; split `i` uses `shadow_seed + i`, and each stability row gains `above_shadow_share` (the sum of the per-split values divided by `n_splits`: a split that failed, had an empty consensus, or lacks the group counts as 0, so a group with a consensus row in only one split of ten has a share of at most 0.1; `ConsensusSelector(min_shadow_share=...)` filters on this value), plus the [hits test](#shadow-test) keys and the [family evidence](#family-evidence) keys.
 
 > [!WARNING]
 > Shadows only work if every model sees every column. A custom pipeline that drops columns, such as a positional `ColumnTransformer` with the default `remainder="drop"`, never sees the shadows, so every group trivially beats them. Shadow columns are appended after the real ones, so positional selectors of real columns still work.

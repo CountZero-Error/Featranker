@@ -6,6 +6,9 @@ A reproducible comparison of FeatRanker's selector against common feature select
 
 The code is in [`benchmarks/`](https://github.com/CountZero-Error/Featranker/tree/main/benchmarks) (not part of the package, not run by CI); the preregistered results are in `benchmarks/results/20261019.json`, and every number outside the last section comes from that file, except where marked. The section [Added after seeing the results](#added-after-seeing-the-results-2026-10-20) uses a separate file, `benchmarks/results/20261020-posthoc.json`, and is not part of the headline comparison.
 
+> [!NOTE]
+> 2026-10-21: the `min_shadow_share` rows here were computed when the resampled stability `above_shadow_share` averaged only over the splits that had a consensus. FeatRanker 1.8 divides by `n_splits` instead (see [the report reference](report.md)), which makes that rule stricter where many splits have no consensus; the `max_shadow_q` and family rows are unaffected. This benchmark was not re-run, so the effect on its numbers was not measured.
+
 ## Short version
 
 - **False selections.** The four FeatRanker configurations selected **no noise feature in any of their 80 runs**. Boruta selected 7 noise features over its 20 runs, the permutation rule 5. Only `SelectByShuffling` also selected none, and it did so by missing most of the signal.

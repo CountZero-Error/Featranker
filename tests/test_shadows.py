@@ -189,10 +189,39 @@ def _split(index, share):
             "report": {"feature_groups": {"g": ["g"]}, "consensus": consensus}}
 
 
-def test_stability_share_is_mean_over_ranked_splits():
+def test_stability_share_counts_a_split_without_consensus_as_zero():
     rows = _build_stability([_split(0, 1.0), _split(1, 0.5), _split(2, None)], 3, 1)
 
-    assert rows[0]["above_shadow_share"] == 0.75
+    assert rows[0]["above_shadow_share"] == 0.5
+
+
+def test_stability_share_of_one_lucky_split_in_ten_is_a_tenth():
+    splits = [_split(0, 1.0)] + [_split(i, None) for i in range(1, 10)]
+
+    assert _build_stability(splits, 10, 1)[0]["above_shadow_share"] == pytest.approx(0.1)
+
+
+def test_stability_share_counts_failed_splits_as_zero():
+    # Only 2 of 4 splits produced a report; the failed ones are absent from the list.
+    rows = _build_stability([_split(0, 1.0), _split(2, 0.5)], 4, 1)
+
+    assert rows[0]["above_shadow_share"] == 0.375
+
+
+def test_stability_share_counts_a_group_missing_from_a_consensus_as_zero():
+    splits = [_shares_split(0, {"a": 1.0, "b": 0.5}), _shares_split(1, {"a": 1.0, "b": None})]
+
+    rows = {r["feature_group"]: r for r in _build_stability(splits, 2, 1)}
+
+    assert rows["a"]["above_shadow_share"] == 1.0
+    assert rows["b"]["above_shadow_share"] == 0.25
+
+
+def test_stability_share_equals_the_plain_mean_when_every_split_votes():
+    shares = [0.0, 1 / 3, 0.5, 0.7, 1.0, 0.1, 0.9]
+    splits = [_split(i, s) for i, s in enumerate(shares)]
+
+    assert _build_stability(splits, 7, 1)[0]["above_shadow_share"] == float(np.mean(shares))
 
 
 def test_stability_has_no_share_without_shadows():
