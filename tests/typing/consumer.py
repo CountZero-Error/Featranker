@@ -39,3 +39,8 @@ weighted_resampled: Report = ranker.rank_resampled(
     np.ones((4, 1)), np.ones(4), scoring="r2", cv=2, sample_weight=[1, 1, 1, 1]
 )
 selector.fit(np.ones((4, 1)), np.ones(4), sample_weight=weights)
+auto_selector = ConsensusSelector(
+    "reg", "r2", k=2, feature_groups="auto", auto_groups_threshold=0.5
+)
+resampled.summary()
+run_record = resampled["run"]

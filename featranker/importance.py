@@ -3,12 +3,14 @@ Feature importance ranking via permutation importance across multiple ML models.
 """
 
 import datetime
+import hashlib
 import importlib
 import importlib.metadata
 import inspect
 import json
 import math
 import platform
+import re
 import warnings
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterator, List, Literal, Optional, Union
@@ -483,6 +485,54 @@ def _resolve_feature_groups(
             )
         resolved[name] = [index]
     return resolved
+
+
+HASH_CHUNK_ROWS = 65536
+
+
+def _hash_column(digest: Any, column: np.ndarray) -> None:
+    """Feed one column: numbers as float64 bytes, anything else as chunked reprs."""
+    digest.update(f"{column.dtype.kind in 'biuf'}{len(column)}".encode())
+    if column.dtype.kind in "biuf":
+        numbers = column.astype(np.float64)
+        # one bit pattern for every NaN
+        digest.update(np.where(np.isnan(numbers), np.nan, numbers).tobytes())
+        return
+    for start in range(0, len(column), HASH_CHUNK_ROWS):
+        digest.update(repr(column[start : start + HASH_CHUNK_ROWS].tolist()).encode())
+
+
+def _fingerprint(names: List[str], X_values: np.ndarray, y_values: np.ndarray) -> str:
+    """SHA-256 hex digest of the feature names, feature values, and target values."""
+    digest = hashlib.sha256(json.dumps(names).encode())
+    for column in (*X_values.T, y_values):
+        _hash_column(digest, column)
+    return digest.hexdigest()
+
+
+def _weights_fingerprint(weights: Optional[np.ndarray]) -> Optional[str]:
+    """SHA-256 hex digest of the sample weights, or None without weights."""
+    if weights is None:
+        return None
+    return hashlib.sha256(np.ascontiguousarray(weights, dtype=np.float64).tobytes()).hexdigest()
+
+
+def _splits_fingerprint(splits: List[tuple]) -> str:
+    """SHA-256 hex digest of every split's train then evaluation indices, in order."""
+    digest = hashlib.sha256()
+    for indices in (part for pair in splits for part in pair):
+        digest.update(np.int64(len(indices)).tobytes())
+        digest.update(indices.astype(np.int64).tobytes())
+    return digest.hexdigest()
+
+
+def _cv_record(cv: Any) -> Union[int, str]:
+    """The integer given, or the splitter's repr."""
+    if isinstance(cv, (int, np.integer)) and not isinstance(cv, bool):
+        return int(cv)
+    if not callable(getattr(cv, "split", None)):
+        return "iterable of splits"
+    return re.sub(r" at 0x[0-9a-fA-F]+", "", repr(cv))  # addresses differ per run
 
 
 def _assign_ranks(importance: Dict[str, float]) -> Dict[str, int]:
@@ -1096,6 +1146,9 @@ class FeatureRanker:
         # ... and those pickled by 1.10 lack the 1.11 sample weights.
         self.__dict__.setdefault("train_weighted_", False)
         self.__dict__.setdefault("train_weight_", None)
+        # ... and those pickled by 1.11 lack the 1.12 training-data fingerprint.
+        self.__dict__.setdefault("train_data_sha256_", None)
+        self.__dict__.setdefault("train_weights_sha256_", None)
         if "model_families_" not in self.__dict__:
             self.model_families_ = (
                 _registry_families() if self.user_models is None else {}
@@ -1139,6 +1192,7 @@ class FeatureRanker:
                 )
         y_values = _validate_y(y, len(X_values))
         weights = _validate_weights(sample_weight, len(X_values))
+        train_data_sha256 = _fingerprint(names, X_values, y_values)
         levels: Dict[str, List[Optional[str]]] = {}
         categorical_missing: Dict[str, int] = {}
         if categorical:
@@ -1217,6 +1271,8 @@ class FeatureRanker:
             self.train_y_ = y_values
             self.train_weight_ = weights
         self.train_weighted_ = weights is not None
+        self.train_data_sha256_ = train_data_sha256
+        self.train_weights_sha256_ = _weights_fingerprint(weights)
         self.label_encoder = label_encoder
         self.feature_names_ = names
         self.categorical_features_ = [names[index] for index in categorical]
@@ -1265,12 +1321,25 @@ class FeatureRanker:
             categorical=categorical,
         )
         unseen: Dict[str, int] = {}
+        raw_values = X_values  # fingerprinted as given, before levels are coded
         if categorical:
             X_values, unseen = _encode_categorical(
                 X_values, categorical, self.feature_names_, self.categorical_levels_
             )
         y_values = _validate_y(y_eval, len(X_values))
         weights = _validate_weights(sample_weight, len(X_values))
+        run = {
+            "task": self.task,
+            "group": self.group,
+            "data_sha256": _fingerprint(self.feature_names_, raw_values, y_values),
+            "train_data_sha256": self.train_data_sha256_,
+        }
+        for key, value in (
+            ("train_weights_sha256", self.train_weights_sha256_),
+            ("weights_sha256", _weights_fingerprint(weights)),
+        ):
+            if value is not None:
+                run[key] = value
         if self.label_encoder is not None:
             y_values = _encode_labels(self.label_encoder, y_values)
         else:
@@ -1349,6 +1418,7 @@ class FeatureRanker:
             "feature_groups": named_groups,
             "baseline_score": baseline_score,
             "provenance": _provenance(),
+            "run": run,
             "models": model_reports,
             "consensus": _build_consensus(model_reports),
             "failures": self.initialization_failures_
@@ -1502,6 +1572,15 @@ class FeatureRanker:
                 f"[!] No split ranked successfully. Failures: {json.dumps(failures)}"
             )
         first = split_reports[0]["report"]
+        run: Dict[str, Any] = {
+            "task": self.task,
+            "group": self.group,
+            "data_sha256": _fingerprint(names, X_values, y_values),
+            "cv": _cv_record(cv),
+            "splits_sha256": _splits_fingerprint(splits),
+        }
+        if weights is not None:
+            run["weights_sha256"] = _weights_fingerprint(weights)
         result = {
             "evaluation_mode": "resampled",
             "scoring": first["scoring"],
@@ -1509,6 +1588,7 @@ class FeatureRanker:
             "random_state": random_state,
             "feature_groups": first["feature_groups"],
             "provenance": _provenance(),
+            "run": run,
             "top_k": top_k,
             "n_splits": len(splits),
             "splits": split_reports,

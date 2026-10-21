@@ -17,7 +17,7 @@ class Report(dict):
     """
 
     def summary(self) -> List[Dict[str, Any]]:
-        """The summarize() findings (single-split reports only)."""
+        """The summarize() findings."""
         return summarize(self)
 
     def _rows(self) -> Tuple[str, List[Dict[str, Any]]]:

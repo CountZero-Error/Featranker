@@ -22,6 +22,15 @@ Findings SHALL have the same shape as single-split findings, and the report SHAL
 - **WHEN** every split ranked with a gate and a consensus, without shadows
 - **THEN** `summarize` returns no warnings
 
+## MODIFIED Requirements
+
+### Requirement: Invalid input
+`summarize` SHALL raise `TypeError` when given a non-dict. It SHALL raise `ValueError` naming the missing key when a required report key is absent. The required keys are `baseline_score`, `models`, `consensus`, and `failures`; for a report with `evaluation_mode == "resampled"` they are `splits`, `stability`, and `failures`.
+
+#### Scenario: Missing key
+- **WHEN** `summarize({"models": {}})` is called
+- **THEN** a `ValueError` mentioning `baseline_score` is raised
+
 ## REMOVED Requirements
 
 ### Requirement: Resampled reports are rejected with guidance

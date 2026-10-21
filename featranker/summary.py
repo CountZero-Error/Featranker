@@ -12,7 +12,11 @@ MIN_SHADOW_SHARE = 0.5
 # dummy on the evaluation data are listed as overfit.
 MIN_OVERFIT_SHARE = 0.5
 
+# A resampled report with a smallest shadow p-value above this cannot reach q <= 0.05.
+SPLIT_Q_LEVEL = 0.05
+
 REQUIRED_KEYS = ("baseline_score", "models", "consensus", "failures")
+RESAMPLED_KEYS = ("splits", "stability", "failures")
 FAILURE_STAGES = ("initialization", "fit", "ranking", "evidence", "shadows")
 
 
@@ -174,21 +178,111 @@ RULES = (
 )
 
 
+def _split_failures(report: Dict[str, Any]) -> List[Dict[str, Any]]:
+    failed = [
+        {"split": f["split"], "error_type": f.get("error_type")}
+        for f in report["failures"]
+        if f.get("stage") == "split"
+    ]
+    if not failed:
+        return []
+    return [_finding(
+        "split_failures", "warning",
+        f"{len(failed)} split(s) failed outright: "
+        + ", ".join(f"{f['split']} ({f['error_type']})" for f in failed)
+        + ". Their shares count them as misses.",
+        {"splits": failed},
+    )]
+
+
+def _resampled_failures(report: Dict[str, Any]) -> List[Dict[str, Any]]:
+    findings = []
+    for stage in FAILURE_STAGES:
+        models: Dict[str, List[int]] = {}
+        for f in report["failures"]:
+            if f.get("stage") == stage:
+                models.setdefault(f["model"], []).append(f["split"])
+        if not models:
+            continue
+        severity = "info" if stage in ("initialization", "evidence") else "warning"
+        listed = "; ".join(f"{name} in split(s) {', '.join(map(str, at))}"
+                           for name, at in models.items())
+        findings.append(_finding(
+            "failures", severity,
+            f"{len(models)} model(s) failed at {stage}: {listed}.",
+            {"stage": stage, "models": models},
+        ))
+    return findings
+
+
+def _split_numbers(report: Dict[str, Any], is_listed: Any) -> List[int]:
+    return [entry["split"] for entry in report["splits"] if is_listed(entry["report"])]
+
+
+def _resampled_gate_off(report: Dict[str, Any]) -> List[Dict[str, Any]]:
+    splits = _split_numbers(report, lambda r: r["baseline_score"] is None)
+    if not splits:
+        return []
+    return [_finding(
+        "gate_off", "warning",
+        f"The dummy baseline could not be scored in split(s) {', '.join(map(str, splits))}, "
+        "so every ranked model voted there whether or not it beat the dummy.",
+        {"splits": splits},
+    )]
+
+
+def _resampled_empty_consensus(report: Dict[str, Any]) -> List[Dict[str, Any]]:
+    splits = _split_numbers(report, lambda r: not r["consensus"])
+    if not splits:
+        return []
+    return [_finding(
+        "empty_consensus", "warning",
+        f"No model beat the dummy baseline in split(s) {', '.join(map(str, splits))}, "
+        "so those splits have no consensus ranking.",
+        {"splits": splits},
+    )]
+
+
+def _resampled_below_shadow(report: Dict[str, Any]) -> List[Dict[str, Any]]:
+    return _below_shadow({"consensus": report["stability"]})
+
+
+def _insufficient_splits(report: Dict[str, Any]) -> List[Dict[str, Any]]:
+    test = report.get("shadow_test")
+    if test is None or test["min_p_value"] <= SPLIT_Q_LEVEL:
+        return []
+    n_splits = test["n_trials"]
+    return [_finding(
+        "insufficient_splits", "info",
+        f"With {n_splits} splits the smallest possible shadow p-value is "
+        f"{test['min_p_value']:.3f}, so no group can reach a q-value of {SPLIT_Q_LEVEL}; "
+        "use more splits, e.g. RepeatedKFold.",
+        {"n_splits": n_splits, "min_p_value": test["min_p_value"]},
+    )]
+
+
+RESAMPLED_RULES = (
+    _split_failures, _resampled_failures, _resampled_gate_off,
+    _resampled_empty_consensus, _resampled_below_shadow, _insufficient_splits,
+)
+
+
 def summarize(report: Any) -> List[Dict[str, Any]]:
     """
-    Return structured findings for a report from FeatureRanker.rank_features().
+    Return structured findings for a report from FeatureRanker.rank_features()
+    or rank_resampled().
 
     Each finding is a dict with code, severity ("info" or "warning"), message,
     and JSON-safe evidence. The report is not modified.
     """
     if not isinstance(report, dict):
         raise TypeError("[!] summarize() expects a report dict.")
-    if report.get("evaluation_mode") == "resampled":
-        raise ValueError(
-            "[!] summarize() reads single-split reports; for a resampled report, "
-            "summarize each report['splits'][i]['report'] instead."
-        )
-    for key in REQUIRED_KEYS:
+    resampled = report.get("evaluation_mode") == "resampled"
+    for key in RESAMPLED_KEYS if resampled else REQUIRED_KEYS:
         if key not in report:
             raise ValueError(f"[!] Report is missing required key '{key}'.")
-    return [finding for rule in RULES for finding in rule(report)]
+    return [
+        finding
+        for rule in (RESAMPLED_RULES if resampled else RULES)
+        for finding in rule(report)
+    ]

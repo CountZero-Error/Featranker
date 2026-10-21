@@ -65,6 +65,9 @@ def fake_resampled(stability, groups=None):
             "evaluation_mode": "resampled",
             "feature_groups": groups or {n: [n] for n in names},
             "stability": stability,
+            "run": {},
+            "n_splits": 2,
+            "splits": [{"report": {"consensus": [{}]}}] * 2,
         }
 
     return rank_resampled

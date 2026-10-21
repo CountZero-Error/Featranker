@@ -304,7 +304,7 @@ def test_report_shape_and_strict_json():
 
     assert set(report) == {
         "evaluation_mode", "scoring", "n_repeats", "random_state", "feature_groups",
-        "provenance", "top_k", "n_splits", "splits", "stability", "failures",
+        "provenance", "run", "top_k", "n_splits", "splits", "stability", "failures",
     }
     assert report["evaluation_mode"] == "resampled"
     assert report["top_k"] == 1

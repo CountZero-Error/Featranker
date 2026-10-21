@@ -117,7 +117,7 @@ def _sanitized(report: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _findings(report: Dict[str, Any]) -> List[Dict[str, Any]]:
-    # summarize() reads single-split reports; resampled ones rely on stability.
+    # Resampled prompts rely on the stability table, not on summarize() findings.
     if report.get("evaluation_mode") == "resampled":
         return []
     return summarize(report)

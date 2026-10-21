@@ -45,8 +45,7 @@ def test_reports_are_dict_compatible(single, resampled):
 
 def test_summary(single, resampled):
     assert single.summary() == summarize(single)
-    with pytest.raises(ValueError, match="splits"):
-        resampled.summary()
+    assert resampled.summary() == summarize(resampled)
 
 
 def test_to_frame(single, resampled):

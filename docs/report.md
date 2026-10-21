@@ -57,6 +57,13 @@ Each model family casts one vote. Voting models are grouped by `family` (for exa
     "random_state": 0,
     "feature_groups": {"bmi": ["bmi"], "...": ["..."]},
     "provenance": {"featranker": "0.6.0", "...": "..."},
+    "run": {
+        "task": "reg",
+        "group": "all",
+        "data_sha256": "9f2c...",
+        "cv": 5,                      # or the splitter's repr
+        "splits_sha256": "41ab...",
+    },
     "top_k": 3,
     "n_splits": 5,
     "splits": [
@@ -77,7 +84,7 @@ Each model family casts one vote. Voting models are grouped by `family` (for exa
 }
 ```
 
-Each `splits[i]["report"]` is an ordinary report for that split; read it with the guide above or [`summarize()`](usage.md#summarize).
+Each `splits[i]["report"]` is an ordinary report for that split; read it with the guide above or [`summarize()`](usage.md#summarize). `summarize(report)` on the resampled report itself lists the [split-level findings](usage.md#summarize-resampled): failed splits, splits without a gate or a consensus, groups below their shadows, and too few splits for the shadow test.
 
 How to read `stability`, which is sorted by `median_rank`, then `top_k_share` (higher first), then name:
 
@@ -106,6 +113,8 @@ Within each split, `rank_std` still measures disagreement between model families
 ## ▍ Structure
 
 `evaluation_mode` is always `"held_out"`. It names the workflow (scoring on data passed to `rank_features()`); FeatRanker cannot check that this data is really separate from the training data.
+
+Every report has a `run` block (after `provenance`): `task`, `group`, `data_sha256`, and, for `rank_features()`, `train_data_sha256` (`null` for a ranker pickled before 1.12); for `rank_resampled()`, `cv` and `splits_sha256` instead, with each split's report carrying its own `run`. When `feature_groups="auto"` chose the groups (`ConsensusSelector`, `--feature-groups auto`), `run["auto_groups"]` is `{"threshold": ..., "method": "spearman-complete-linkage"}`; otherwise the key is absent. See [Comparing runs](usage.md#comparing-runs).
 
 With `shadows=True`, the report also has top-level `shadows: true`, `shadow_seed`, and `shadow_mode` (`"joint"` or `"independent"`; resampled reports add the `shadow_test` block, and their stability rows gain `shadow_hits`, `shadow_p_value`, `shadow_q_value`, `family_above_shadow_share`, and `shadow_families`); each model gains `shadow_importance` and `shadow_max`; each importance entry gains `above_shadow`; and each consensus row gains `above_shadow_share` and `family_above_shadow`. Without shadows, none of these keys appear.
 
@@ -169,6 +178,12 @@ With `evidence=True`, each model also has `train_score` and `overfit_gap` (`null
         "numpy": "2.2.0",
         "scikit-learn": "1.7.1",
     },
+    "run": {
+        "task": "reg",
+        "group": "tree",
+        "data_sha256": "9f2c...",         # evaluation data
+        "train_data_sha256": "c07e...",   # data passed to fit()
+    },
     "models": {
         "random_forest_regressor": {
             "family": "bagging",
@@ -224,6 +239,7 @@ With `evidence=True`, each model also has `train_score` and `overfit_gap` (`null
 ## ▍ Provenance and reproducibility
 
 - `provenance` records the installed `featranker` version (`None` if the package is not installed), plus the Python, NumPy, and scikit-learn versions.
+- `run` records the preset and fingerprints of the data and splits, so two reports can be checked for the same inputs; see [Comparing runs](usage.md#comparing-runs).
 - Each model's `params` is its fitted estimator's `get_params(deep=True)`, limited to strings, integers, booleans, `None`, and finite floats. Nested estimator objects are left out, while pipeline entries such as `ridge__alpha` remain.
 - Reports are valid strict JSON.
 - `random_state` controls permutation reproducibility. Estimator randomness stays estimator-specific.

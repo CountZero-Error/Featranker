@@ -54,7 +54,7 @@ Returns the report dict described in [Report](report.md). Raises if every model 
 
 `rank_features()` and `rank_resampled()` return a `Report`. It is a plain `dict` (indexing, `json.dumps`, pickling, and comparison with dicts all work as before) with three helpers:
 
-- `report.summary()`: the [`summarize()`](#summarize) findings (single-split reports).
+- `report.summary()`: the [`summarize()`](#summarize) findings (single-split and resampled reports).
 - `report.to_frame()`: the consensus table, or the stability table for a resampled report, as a pandas DataFrame (needs pandas).
 - `report.plot(ax=None)`: returns a matplotlib `Axes` (needs `pip install 'featranker[plot]'`). For a single-split report it shows each voting family's rank per group with the median marked; for a resampled report, each group's range of places across splits with the median marked. The most important group is at the top.
 
@@ -436,7 +436,7 @@ featranker \
   --output report.json
 ```
 
-Both CSV files need headers, the same feature columns in the same order, and the target column. Feature values must be numeric; targets may be numeric or strings. With `--missing impute`, empty feature cells are read as missing values and imputed per training split (see [Missing values](#missing-values)); by default they are rejected. Only empty cells and the text `nan` (any case) are read as missing; `NA`, `N/A`, and `null` are not, and raise the numeric-values error. Add `--quiet` to hide progress bars and `--evidence` to add [evidence](#evidence) to the report. `--feature-groups` takes a YAML file, or the word `auto` to group correlated columns of the training CSV with [`auto_groups()`](#auto-groups) (a file literally named `auto` must be written `./auto`). `--categorical auto` reads the training-CSV columns that have a non-numeric cell as text (so a stray `NA` makes its whole column categorical; a column literally named `auto` cannot be listed, since `auto` always means detection), and `--categorical city,segment` reads the named columns as text (see [Categorical features](#categorical-features)); levels are learned from the training CSV only, and an empty cell in such a column is a missing level. `--sample-weight w` reads column `w` of both files as [sample weights](#sample-weights) and leaves it out of the features. Run `featranker --help` for every flag.
+Both CSV files need headers, the same feature columns in the same order, and the target column. Feature values must be numeric; targets may be numeric or strings. With `--missing impute`, empty feature cells are read as missing values and imputed per training split (see [Missing values](#missing-values)); by default they are rejected. Only empty cells and the text `nan` (any case) are read as missing; `NA`, `N/A`, and `null` are not, and raise the numeric-values error. Add `--quiet` to hide progress bars and `--evidence` to add [evidence](#evidence) to the report. `--feature-groups` takes a YAML file, or the word `auto` to group correlated columns of the training CSV with [`auto_groups()`](#auto-groups) (a file literally named `auto` must be written `./auto`); `--auto-groups-threshold 0.5` changes its default 0.7 cut. `--categorical auto` reads the training-CSV columns that have a non-numeric cell as text (so a stray `NA` makes its whole column categorical; a column literally named `auto` cannot be listed, since `auto` always means detection), and `--categorical city,segment` reads the named columns as text (see [Categorical features](#categorical-features)); levels are learned from the training CSV only, and an empty cell in such a column is a missing level. `--sample-weight w` reads column `w` of both files as [sample weights](#sample-weights) and leaves it out of the features. Run `featranker --help` for every flag.
 
 <details>
 <summary><b>Example input files</b></summary>
@@ -988,6 +988,7 @@ Output shown with the `xgboost` and `catboost` extras installed. The score is ho
 | `group`, `models`, `n_jobs`, `shadow_seed`, `shadow_mode`, `missing`, `categorical`, `model_input` | as `FeatureRanker` | Passed to the ranker built in `fit()`. |
 | `feature_groups`, `cv`, `n_repeats`, `random_state` | as `rank_resampled()` | Passed to `rank_resampled()` on the data given to `fit()`. |
 | `feature_groups="auto"` | | Groups correlated columns with [`auto_groups()`](#auto-groups) on the data given to `fit()`, so inside a pipeline from the training fold only. The groups used are in `report_["feature_groups"]`. Any other string raises `ValueError` in `fit()`. |
+| `auto_groups_threshold` | `0.7` | The |rho| cut of `feature_groups="auto"`, as `auto_groups(threshold=...)` (`0 < threshold <= 1`, else `ValueError` in `fit()`). Recorded in `report_["run"]["auto_groups"]`; ignored for other `feature_groups`. |
 | `verbose` | `False` | Progress bars; off by default because pipelines fit many times. |
 
 Set at least one of `k`, `min_shadow_share`, `max_shadow_q`, and `min_shadow_families`; the shadow filters apply first, then the first `k` that pass. Invalid rules raise `ValueError` in `fit()`, before any ranking, following scikit-learn's convention that `__init__` only stores parameters (so `clone`, `set_params`, and `GridSearchCV` over `select__k` work).
@@ -1021,6 +1022,7 @@ print(selector.selected_groups_)
 A selected group keeps all of its columns, in their original order. Feature names come from DataFrame columns; for arrays they are `x0`, `x1`, … and `feature_groups` must use those names. After `fit()`: `selected_groups_`, `report_` (the resampled report from this fit), `n_features_in_`, `feature_names_in_` (DataFrames), and the standard `get_support()` and `get_feature_names_out()`.
 
 - `report_` reflects only the data that particular fit saw. For the ranking of your whole development set, call `rank_resampled()` directly.
+- If any split failed or produced no consensus, `fit()` warns how many of the splits did not vote. Those splits already count as misses in the shares, so the selection still happens; look at `report_["failures"]` and `report_["splits"]` to see why.
 - If no group passes, `fit()` warns and the selector keeps no columns, as scikit-learn's own selectors do. Most downstream estimators (such as `Ridge`) then fail on zero columns, so that pipeline fit errors out. Loosen `min_shadow_share`, `max_shadow_q`, or `min_shadow_families`, or use only the top-k rule by setting the shadow rules to `None` and a positive `k`.
 - For a group-aware inner `cv` such as `GroupKFold`, pass row groups to `fit(X, y, groups=...)`; in a `Pipeline`, pass `select__groups=...` (for example `cross_val_score(..., params={"select__groups": groups})`, which slices them to each training fold).
 - DataFrame column labels are compared as strings, in `fit()` and `transform()`. A failed `fit()` clears any earlier fitted state.
@@ -1030,7 +1032,7 @@ A selected group keeps all of its columns, in their original order. Feature name
 
 ## ▍ Summarize a report
 
-`summarize(report)` applies the [reading guide](report.md#reading-the-report) for you. It returns a list of findings and does not change the report. It works on the dict from `rank_features()` or on a report loaded from the CLI's JSON. For a resampled report, summarize each `report["splits"][i]["report"]`; passing the resampled report itself raises `ValueError`.
+`summarize(report)` applies the [reading guide](report.md#reading-the-report) for you. It returns a list of findings and does not change the report. It works on the dict from `rank_features()`, on a report loaded from the CLI's JSON, and on a [resampled report](#resampled-ranking). A resampled report has its own findings (below); to read one split, summarize `report["splits"][i]["report"]`.
 
 ```python
 from featranker import summarize
@@ -1054,6 +1056,95 @@ Each finding is a dict with `code`, `severity` (`"info"` or `"warning"`), `messa
 | `correlated_groups` | info | With [evidence](#evidence) on: feature groups correlated on the training data (absolute Spearman rho of at least 0.5), whose permutation importance may be split between them. |
 
 An empty list means nothing stood out, not that the ranking is proven. The checks cover one evaluation set.
+
+<a id="summarize-resampled"></a>
+
+### Summarizing a resampled report
+
+For `rank_resampled()` reports, `summarize()` returns these findings, in this order, each only when its condition holds:
+
+| Code | Severity | When |
+|---|---|---|
+| `split_failures` | warning | Splits that failed outright (`failures` with stage `"split"`), with their indices and error types. They count as misses in every share. |
+| `failures` | as for a single split | Model failures aggregated over splits, one finding per stage, each model listed with the splits it failed in. |
+| `gate_off` | warning | Splits whose `baseline_score` is `None`. |
+| `empty_consensus` | warning | Splits whose consensus is empty. |
+| `below_shadow` | info | With shadows on, groups whose stability `above_shadow_share` is below 0.5. |
+| `insufficient_splits` | info | With shadows on, the [shadow hits test](#shadow-test) cannot reach a q-value of 0.05 with this many splits (`shadow_test.min_p_value > 0.05`, which is the case below 5 splits). |
+
+```python
+from sklearn.datasets import load_diabetes
+
+from featranker import FeatureRanker, summarize
+
+data = load_diabetes()
+ranker = FeatureRanker(task="reg", group="fast", shadows=True, shadow_seed=0, verbose=False)
+report = ranker.rank_resampled(
+    data.data, data.target, feature_names=list(data.feature_names),
+    scoring="r2", cv=3, n_repeats=3, random_state=0,
+)
+for finding in summarize(report):
+    print(finding["severity"], finding["code"], "-", finding["message"])
+```
+
+```text
+info below_shadow - s3, sex, s6, age, s4 have a family-weighted above-shadow share below 0.5. Each family contributes its fraction of voting members beating that model's strongest shadow group. This is descriptive, not a significance test.
+info insufficient_splits - With 3 splits the smallest possible shadow p-value is 0.125, so no group can reach a q-value of 0.05; use more splits, e.g. RepeatedKFold.
+```
+
+Output shown with the `xgboost` and `catboost` extras installed. The per-split findings (`few_families`, `tied_groups`, and the rest) are not repeated here; summarize a split's own report for those.
+
+<a id="comparing-runs"></a>
+
+## ▍ Comparing runs
+
+Every report has a `run` block that says what it was computed from, so two reports can be told apart without keeping the data:
+
+- `task`, `group`: the preset.
+- `data_sha256`: a fingerprint of the evaluation data for `rank_features()`, and of all the data passed to `rank_resampled()`.
+- `train_data_sha256`: a fingerprint of the data passed to `fit()` (`rank_features()` reports only; `null` for a ranker pickled before 1.12).
+- `weights_sha256` (and `train_weights_sha256` for `rank_features()`): a fingerprint of the sample weights, present only when weights were given.
+- `rank_resampled()` only: `cv` (the integer given, the splitter's `repr` without memory addresses, such as `KFold(n_splits=5, random_state=0, shuffle=True)`, or `"iterable of splits"`) and `splits_sha256`, a fingerprint of every split's train and evaluation row indices. Each split's own report has its `run` as well.
+- `auto_groups`: `{"threshold": 0.7, "method": "spearman-complete-linkage"}`, only when [`feature_groups="auto"`](#auto-groups) chose the groups (`ConsensusSelector`, `--feature-groups auto`).
+
+A fingerprint is the SHA-256 digest of the feature names, the feature values, and the target values. Equal inputs under the same library versions give equal fingerprints; changing any value, a name, or the row order changes it. Fingerprints may differ across NumPy or pandas versions, notably for text and other object columns (the versions are in `provenance`); a categorical cell `None` in NumPy input and a NaN from pandas hash differently. They do not cover model settings.
+
+```python
+from sklearn.datasets import load_diabetes
+from sklearn.model_selection import train_test_split
+
+from featranker import FeatureRanker
+
+data = load_diabetes()
+X_train, X_eval, y_train, y_eval = train_test_split(
+    data.data, data.target, test_size=0.3, random_state=0
+)
+names = list(data.feature_names)
+
+
+def rank(X_eval, y_eval):
+    ranker = FeatureRanker(task="reg", group="fast", verbose=False)
+    ranker.fit(X_train, y_train, feature_names=names)
+    return ranker.rank_features(X_eval, y_eval, scoring="r2", n_repeats=3, random_state=0)
+
+
+first = rank(X_eval, y_eval)
+print("same inputs:", first["run"] == rank(X_eval, y_eval)["run"])
+
+changed = y_eval.copy()
+changed[0] += 1.0
+other = rank(X_eval, changed)
+print("evaluation data differs:", first["run"]["data_sha256"] != other["run"]["data_sha256"])
+print("training data differs:", first["run"]["train_data_sha256"] != other["run"]["train_data_sha256"])
+```
+
+```text
+same inputs: True
+evaluation data differs: True
+training data differs: False
+```
+
+To compare two resampled reports, check `run["data_sha256"]`, `run["cv"]`, and `run["splits_sha256"]` first: with all three equal, the stability tables came from the same rows in the same splits.
 
 <a id="llm-interpretation"></a>
 
@@ -1204,7 +1295,7 @@ print(auto_groups(X, threshold=0.9))
 - Call it on your training or development data and pass the result to `rank_features()` or `rank_resampled()`; there is no `"auto"` option there, so the grouping stays visible in your code. The [correlation evidence](#evidence) lists group pairs from 0.5, which shows what sits near the cut.
 - The correlation matrix and clustering are O(p²) in the number of columns, which is fine for hundreds of columns.
 
-Where you cannot compute the groups yourself, use `"auto"`: `ConsensusSelector(feature_groups="auto")` in a pipeline, or `--feature-groups auto` on the command line. Both use the default threshold.
+Where you cannot compute the groups yourself, use `"auto"`: `ConsensusSelector(feature_groups="auto")` in a pipeline, or `--feature-groups auto` on the command line. Both use the default threshold of 0.7; set `ConsensusSelector(auto_groups_threshold=...)` or `--auto-groups-threshold` to change it. The report records the threshold in `run["auto_groups"]`, and only when the grouping was automatic.
 
 ```python
 from sklearn.datasets import load_diabetes

@@ -220,9 +220,162 @@ def test_missing_key_is_named():
         summarize({"models": {}})
 
 
-def test_resampled_report_is_rejected_with_guidance():
-    with pytest.raises(ValueError, match="splits"):
-        summarize({"evaluation_mode": "resampled", "splits": [], "stability": []})
+def test_resampled_report_missing_key_is_named():
+    with pytest.raises(ValueError, match="stability"):
+        summarize({"evaluation_mode": "resampled", "splits": [], "failures": []})
+
+
+# -- resampled reports ----------------------------------------------------------
+
+def _split(index, baseline=0.1, consensus=None):
+    consensus = [_row("a", 1.0)] if consensus is None else consensus
+    return {"split": index, "n_train": 8, "n_eval": 2,
+            "report": {"baseline_score": baseline, "consensus": consensus}}
+
+
+def resampled_report(n_splits=5):
+    return {
+        "evaluation_mode": "resampled",
+        "n_splits": n_splits,
+        "splits": [_split(i) for i in range(n_splits)],
+        "stability": [{"feature_group": "a", "median_rank": 1.0}],
+        "failures": [],
+    }
+
+
+def split_failure(index):
+    return {"split": index, "model": None, "stage": "split",
+            "error_type": "RuntimeError", "message": "boom"}
+
+
+def test_insufficient_splits_without_n_splits_key():
+    report = resampled_report(3)
+    del report["n_splits"]
+    report["shadow_test"] = {"n_trials": 3, "min_p_value": 0.125}
+
+    findings = summarize(report)
+
+    assert codes(findings) == ["insufficient_splits"]
+    assert findings[0]["evidence"]["n_splits"] == 3
+
+
+def test_clean_resampled_report_has_no_warnings():
+    assert summarize(resampled_report()) == []
+
+
+def test_resampled_summary_is_pure_and_strict_json():
+    report = resampled_report()
+    report["failures"] = [split_failure(1), {**_failure("m1", "fit"), "split": 0}]
+    snapshot = copy.deepcopy(report)
+
+    first, second = summarize(report), summarize(report)
+
+    assert first == second and report == snapshot
+    json.dumps(first, allow_nan=False)
+
+
+def test_split_failures_list_the_split_and_error_type():
+    report = resampled_report()
+    del report["splits"][2]
+    report["failures"] = [split_failure(2)]
+
+    findings = summarize(report)
+
+    assert codes(findings) == ["split_failures"]
+    assert findings[0]["severity"] == "warning"
+    assert findings[0]["evidence"] == {"splits": [{"split": 2, "error_type": "RuntimeError"}]}
+    assert "2" in findings[0]["message"]
+
+
+def test_resampled_failures_aggregate_models_over_splits_per_stage():
+    report = resampled_report()
+    report["failures"] = [
+        {**_failure("m1", "fit"), "split": 0},
+        {**_failure("m1", "fit"), "split": 3},
+        {**_failure("m2", "fit"), "split": 3},
+        {**_failure("m1", "initialization"), "split": 0},
+        {**_failure("m1", "initialization"), "split": 1},
+    ]
+
+    findings = summarize(report)
+
+    assert codes(findings) == ["failures", "failures"]
+    assert [f["severity"] for f in findings] == ["info", "warning"]
+    assert findings[0]["evidence"] == {"stage": "initialization", "models": {"m1": [0, 1]}}
+    assert findings[1]["evidence"] == {"stage": "fit", "models": {"m1": [0, 3], "m2": [3]}}
+
+
+def test_gate_off_and_empty_consensus_name_the_splits():
+    report = resampled_report()
+    report["splits"][1] = _split(1, baseline=None)
+    report["splits"][3] = _split(3, consensus=[])
+
+    findings = summarize(report)
+
+    assert codes(findings) == ["gate_off", "empty_consensus"]
+    assert [f["severity"] for f in findings] == ["warning", "warning"]
+    assert findings[0]["evidence"] == {"splits": [1]}
+    assert findings[1]["evidence"] == {"splits": [3]}
+
+
+def test_resampled_below_shadow_reads_the_stability_table():
+    report = resampled_report()
+    report["stability"] = [
+        {"feature_group": "a", "above_shadow_share": 0.9},
+        {"feature_group": "b", "above_shadow_share": 0.2},
+        {"feature_group": "c"},
+    ]
+
+    findings = summarize(report)
+
+    assert codes(findings) == ["below_shadow"]
+    assert findings[0]["severity"] == "info"
+    assert findings[0]["evidence"] == {"groups": {"b": 0.2}}
+
+
+def test_insufficient_splits_when_shadow_test_cannot_reach_005():
+    report = resampled_report(3)
+    report["shadow_test"] = {"n_trials": 3, "min_p_value": 0.5 ** 3}
+
+    findings = summarize(report)
+
+    assert codes(findings) == ["insufficient_splits"]
+    assert findings[0]["severity"] == "info"
+    assert findings[0]["evidence"] == {"n_splits": 3, "min_p_value": 0.125}
+    report["shadow_test"] = {"n_trials": 5, "min_p_value": 0.5 ** 5}
+    assert summarize(report) == []
+
+
+def test_resampled_findings_come_in_spec_order():
+    report = resampled_report(3)
+    report["splits"][0] = _split(0, baseline=None)
+    report["splits"][1] = _split(1, consensus=[])
+    del report["splits"][2]
+    report["failures"] = [split_failure(2), {**_failure("m1", "fit"), "split": 0}]
+    report["stability"] = [{"feature_group": "b", "above_shadow_share": 0.0}]
+    report["shadow_test"] = {"n_trials": 3, "min_p_value": 0.125}
+
+    assert codes(summarize(report)) == [
+        "split_failures", "failures", "gate_off", "empty_consensus",
+        "below_shadow", "insufficient_splits",
+    ]
+
+
+def test_report_summary_works_on_resampled_reports():
+    import numpy as np
+    from sklearn.linear_model import Ridge
+
+    from featranker import FeatureRanker
+
+    rng = np.random.default_rng(0)
+    X = rng.normal(size=(60, 2))
+    report = FeatureRanker("reg", models={"r": Ridge()}, verbose=False, shadows=True,
+                           shadow_seed=0).rank_resampled(
+        X, X[:, 0], feature_names=["a", "b"], scoring="r2", cv=3, n_repeats=2, random_state=0
+    )
+
+    assert report.summary() == summarize(report)
+    assert "insufficient_splits" in codes(report.summary())
 
 
 def test_below_shadow_lists_groups_under_half():

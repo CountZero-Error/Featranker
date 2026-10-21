@@ -65,6 +65,11 @@ def _pairwise_spearman_matrix(X: np.ndarray) -> np.ndarray:
     return rho
 
 
+def auto_groups_record(threshold: float) -> Dict[str, Any]:
+    """The run["auto_groups"] entry for groups proposed by auto_groups()."""
+    return {"threshold": float(threshold), "method": "spearman-complete-linkage"}
+
+
 def auto_groups(
     X: Any,
     *,

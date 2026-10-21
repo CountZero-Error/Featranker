@@ -12,7 +12,7 @@ from sklearn.base import BaseEstimator
 from sklearn.feature_selection import SelectorMixin
 from sklearn.utils.validation import check_is_fitted
 
-from .evidence import auto_groups
+from .evidence import auto_groups, auto_groups_record
 from .importance import FeatureRanker
 
 
@@ -68,7 +68,10 @@ class ConsensusSelector(SelectorMixin, BaseEstimator):
         feature_groups, cv, n_repeats, random_state: As in rank_resampled().
             feature_groups="auto" groups correlated columns with auto_groups()
             on the X given to fit(), so inside a Pipeline from the training
-            fold only; the groups used are in report_["feature_groups"].
+            fold only; the groups used are in report_["feature_groups"] and
+            the threshold in report_["run"]["auto_groups"].
+        auto_groups_threshold: The |rho| threshold of feature_groups="auto"
+            (see auto_groups()); ignored for other feature_groups.
         verbose: Show progress bars (off by default; pipelines fit often).
     """
 
@@ -84,6 +87,7 @@ class ConsensusSelector(SelectorMixin, BaseEstimator):
         group: Literal["linear", "tree", "all", "fast"] = "all",
         models: Optional[Dict[str, Any]] = None,
         feature_groups: Union[Dict[str, List[str]], Literal["auto"], None] = None,
+        auto_groups_threshold: float = 0.7,
         cv: Any = 5,
         n_repeats: int = 10,
         random_state: Optional[int] = None,
@@ -105,6 +109,7 @@ class ConsensusSelector(SelectorMixin, BaseEstimator):
         self.group = group
         self.models = models
         self.feature_groups = feature_groups
+        self.auto_groups_threshold = auto_groups_threshold
         self.cv = cv
         self.n_repeats = n_repeats
         self.random_state = random_state
@@ -119,10 +124,11 @@ class ConsensusSelector(SelectorMixin, BaseEstimator):
     def __setstate__(self, state: Dict[str, Any]) -> None:
         # Selectors pickled by 1.3 lack the 1.4 max_shadow_q parameter, and
         # those pickled before 1.6 lack min_shadow_families and shadow_mode, and
-        # those pickled before 1.7 lack missing, those before 1.9 lack categorical, and those before 1.10 lack model_input.
+        # those pickled before 1.7 lack missing, those before 1.9 lack categorical, those before 1.10 lack model_input, and those before 1.12 lack auto_groups_threshold.
         defaults = {
             "max_shadow_q": None, "min_shadow_families": None, "shadow_mode": "joint",
             "missing": "error", "categorical": None, "model_input": "array",
+            "auto_groups_threshold": 0.7,
         }
         super().__setstate__({**defaults, **state})
 
@@ -186,9 +192,13 @@ class ConsensusSelector(SelectorMixin, BaseEstimator):
             feature_names = names
 
         feature_groups = self.feature_groups
-        if isinstance(feature_groups, str) and feature_groups == "auto":
+        is_auto = isinstance(feature_groups, str) and feature_groups == "auto"
+        if is_auto:
             feature_groups = auto_groups(
-                X, feature_names=names, categorical=self.categorical
+                X,
+                threshold=self.auto_groups_threshold,
+                feature_names=names,
+                categorical=self.categorical,
             )
         elif feature_groups is not None and not isinstance(feature_groups, dict):
             error = ValueError if isinstance(feature_groups, str) else TypeError
@@ -224,6 +234,17 @@ class ConsensusSelector(SelectorMixin, BaseEstimator):
             top_k=int(self.k) if self.k is not None else 5,
             sample_weight=sample_weight,
         )
+
+        if is_auto:
+            report["run"]["auto_groups"] = auto_groups_record(self.auto_groups_threshold)
+        silent = report["n_splits"] - sum(1 for s in report["splits"] if s["report"]["consensus"])
+        if silent:
+            warnings.warn(
+                f"{silent} of {report['n_splits']} splits did not vote (failed or "
+                "produced no consensus); their shares count them as misses.",
+                UserWarning,
+                stacklevel=2,
+            )
 
         rows = report["stability"]
         if self.min_shadow_share is not None:
