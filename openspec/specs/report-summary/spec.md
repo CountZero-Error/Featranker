@@ -25,7 +25,7 @@ Turn the report reading guide into a deterministic, offline function that lists 
 |---|---|---|---|
 | `gate_off` | warning | `baseline_score` is `None` | the dummy failure, if present |
 | `empty_consensus` | warning | `consensus` is empty | number of ranked models |
-| `failures` | warning for any `fit` or `ranking` failure, otherwise info | one finding per failure stage present | model names for that stage |
+| `failures` | warning for any `fit`, `ranking`, or `shadows` failure, otherwise info | one finding per failure stage present | model names for that stage |
 | `few_families` | warning | consensus is non-empty and `n_families` < 3 | `n_families`, `n_models` |
 | `tied_groups` | info | two or more consensus groups share the same `median_rank` | the groups and their shared `median_rank`; one finding per tie set |
 | `within_noise` | info | a consensus group's importance `mean <= std` in more than half of its voting models | the groups and their counts |
@@ -37,6 +37,10 @@ Turn the report reading guide into a deterministic, offline function that lists 
 #### Scenario: Optional dependency missing only
 - **WHEN** the only failures have stage `initialization`
 - **THEN** the `failures` finding has severity `"info"`
+
+#### Scenario: Shadow-incompatible model
+- **WHEN** `failures` contains a failure with stage `"shadows"`
+- **THEN** the `failures` finding for that stage has severity `"warning"`
 
 #### Scenario: Ties
 - **WHEN** consensus groups `a` and `b` both have `median_rank == 2.0`
