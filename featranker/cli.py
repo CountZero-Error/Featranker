@@ -15,7 +15,12 @@ import yaml
 from sklearn.metrics import get_scorer
 
 from .evidence import auto_groups, auto_groups_record
-from .importance import FeatureRanker, _float_target, _resolve_feature_groups
+from .importance import (
+    FeatureRanker,
+    _float_target,
+    _resolve_feature_groups,
+    _resolve_max_samples,
+)
 
 
 def _read_csv(path: Path, target: str) -> tuple[List[str], List[tuple[int, List[str]]]]:
@@ -157,6 +162,14 @@ def _load_weights(path: Path, target: str, column: str) -> np.ndarray:
         raise ValueError(f"[!] CSV weight values must be numeric in '{path}'.") from error
 
 
+def _max_samples(text: str) -> Any:
+    """'50' is 50 rows; '0.5' is half the rows."""
+    try:
+        return float(text) if "." in text else int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"invalid max-samples value: {text!r}") from None
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
@@ -221,6 +234,15 @@ def _build_parser() -> argparse.ArgumentParser:
         type=int,
         default=None,
         help="Optional random seed for reproducible permutations.",
+    )
+    parser.add_argument(
+        "--max-samples",
+        type=_max_samples,
+        default=None,
+        help=(
+            "Score on a random subsample of the evaluation rows: an int (rows) "
+            "or a float with a decimal point in (0, 1] (share of rows)."
+        ),
     )
     parser.add_argument(
         "--n-jobs",
@@ -363,6 +385,8 @@ def _load_cli_inputs(args: argparse.Namespace) -> Dict[str, Any]:
     get_scorer(args.scoring)
     if args.n_repeats < 1:
         raise ValueError("[!] n_repeats must be a positive integer.")
+    if args.max_samples is not None:
+        _resolve_max_samples(args.max_samples, len(y_eval))
     _resolve_feature_groups(feature_names, feature_groups)
     return {
         "train": (X_train, y_train, feature_names),
@@ -371,6 +395,7 @@ def _load_cli_inputs(args: argparse.Namespace) -> Dict[str, Any]:
         "categorical": categorical,
         "train_weight": train_weight,
         "eval_weight": eval_weight,
+        "max_samples": args.max_samples,
     }
 
 
@@ -387,9 +412,13 @@ def _run_ranking(args: argparse.Namespace) -> Dict[str, Any]:
         **({"categorical": inputs["categorical"]} if inputs["categorical"] else {}),
     )
     ranker.fit(*inputs["train"], **inputs["train_weight"])
+    # Only when given, so a ranker without the option still works here.
+    max_samples: Dict[str, Any] = (
+        {} if inputs["max_samples"] is None else {"max_samples": inputs["max_samples"]}
+    )
     report = ranker.rank_features(
         *inputs["eval"],
-        **inputs["eval_weight"],
+        **{**inputs["eval_weight"], **max_samples},
         scoring=args.scoring,
         feature_groups=inputs["feature_groups"],
         n_repeats=args.n_repeats,

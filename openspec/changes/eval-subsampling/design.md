@@ -5,7 +5,7 @@
 ## Decisions
 
 ### D1. Draw once, after validation
-After `X_values`/`y_values` are validated and encoded, draw `np.random.default_rng(random_state).choice(n, size, replace=False)`, sorted to keep row order, and slice both arrays. Everything downstream is unchanged. The permutation RNG is seeded as before, so with `max_samples=None` nothing changes.
+After `X_values`/`y_values` are validated and encoded, draw `np.random.default_rng([random_state, 2]).choice(n, size, replace=False)` (seed `None` stays `None`; the `2` keeps it apart from the permutation RNG), sorted to keep row order. The baseline, dummy and permuted scores use only those rows. The shadow columns and the SHAP evidence are still built from every row, and `run.data_sha256` covers every row passed. `overfit_gap` is the train score minus the subsampled baseline. The permutation RNG is seeded as before, so with `max_samples=None` nothing changes.
 
 ### D2. Validation
 `_resolve_max_samples(value, n)`: reject bools; ints ≥ 1; floats in (0, 1]; return the row count.

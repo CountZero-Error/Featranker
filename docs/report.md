@@ -126,6 +126,8 @@ With `model_input="dataframe"` the report (and each resampled split report) has 
 
 When any [sample weights](usage.md#sample-weights) are used, the report (and each resampled split report) has `"sample_weight": {"train": bool, "eval": bool}`, saying whether training and evaluation weights were given; without weights the key is absent. A model that cannot take weights has a `failures` entry with stage `"fit"` and `error_type` `"SampleWeightNotSupported"`. Correlation evidence and the SHAP summary stay unweighted.
 
+With [`max_samples`](usage.md#fewer-evaluation-rows-max_samples), the report has top-level `max_samples` (as given) and, for `rank_features()` (and each resampled split report), `n_eval_rows`, the number of evaluation rows actually scored; without it neither key appears. `run["data_sha256"]` still covers all the evaluation rows passed.
+
 With `evidence=True`, each model also has `train_score` and `overfit_gap` (`null` if the training score could not be computed, with a `failures` entry at stage `"evidence"`), the report has a top-level `evidence` block, and models SHAP can explain have `shap`. Without `evidence`, none of these keys appear. See [Evidence](usage.md#evidence).
 
 ```python

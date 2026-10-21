@@ -34,7 +34,7 @@ The API is one class: `FeatureRanker(...)`, then `.fit(...)`, then `.rank_featur
 
 Returns the ranker itself. Raises if no model fits.
 
-### `.rank_features(X_eval, y_eval, *, scoring, feature_groups=None, n_repeats=10, random_state=None, sample_weight=None)`
+### `.rank_features(X_eval, y_eval, *, scoring, feature_groups=None, n_repeats=10, random_state=None, sample_weight=None, max_samples=None)`
 
 | Parameter | Default | Meaning |
 |---|---|---|
@@ -45,6 +45,7 @@ Returns the ranker itself. Raises if no model fits.
 | `n_repeats` | `10` | Shuffles per feature group; a positive integer. More repeats give a more precise average importance and take longer. |
 | `random_state` | `None` | Integer seed for permutation-importance shuffles. Reproducible reports also require deterministic or seeded estimators and deterministic scoring; with shadows enabled, fix `shadow_seed` too. |
 | `sample_weight` | `None` | 1-D array-like of finite, non-negative evaluation weights, one per evaluation row, with a positive sum. The baseline, permuted, and dummy scores are weighted with them. See [Sample weights](#sample-weights). |
+| `max_samples` | `None` | Score on a random subsample of the evaluation rows: an int (rows; more than there are uses all) or a float in (0, 1] (share of rows, rounded down, at least 1). Anything else raises `ValueError` before scoring. See [Speed](#speed). |
 
 Returns the report dict described in [Report](report.md). Raises if every model fails ranking.
 
@@ -144,6 +145,29 @@ fast: 5 models, 5 families, top 3 ['s5', 'bmi', 'bp']
 ```
 
 Output shown with the `xgboost` and `catboost` extras installed; without them `"all"` runs 16 models. The trade-off is a thinner vote: each family is one model instead of the median of several, so one unlucky model moves its family's rank more. `"all"` stays the default. `svr_regression`, the regression kernel family's only model, takes time quadratic in the number of rows; on large data pass your own `models=` instead (`group="fast"` cannot be combined with `models=`).
+
+### Fewer evaluation rows: `max_samples`
+
+Permutation importance predicts over every evaluation row once per model, feature group, and repeat, so on a large evaluation set most of that time buys little precision. `max_samples` scores on a random subsample instead: an int is a number of rows, a float in (0, 1] a share of them (`int(max_samples * n)`, rounded down as in scikit-learn: 0.29 of 200 rows is 57). One subsample, drawn without replacement with `random_state`, is used for the dummy gate, every baseline, and every permuted score, so they stay comparable; the training scores and the [evidence](#evidence) are unchanged (the SHAP values and shadows still use every row; `overfit_gap` is the train score minus the model's score on the subsample). With `sample_weight`, the weights follow their rows. The report gains `max_samples` and `n_eval_rows`, and `run["data_sha256"]` still fingerprints all the evaluation rows you passed. The sample is plain random, not stratified: a small one can miss a rare class, and a scorer such as `roc_auc` can then fail (if every model fails, `rank_features()` raises a `RuntimeError` listing the failures), so keep `max_samples` large enough to hold every class; there is no stratified option. It works the same in `rank_resampled()` (each split's evaluation rows), `ConsensusSelector(max_samples=...)`, and the CLI (`--max-samples`). To cut cost further, combine it with `group="fast"` and [`n_jobs`](#parallel-models).
+
+```python
+ranker = FeatureRanker(task="reg", group="fast", verbose=False)
+ranker.fit(X_train, y_train, feature_names=list(data.feature_names))
+for max_samples in (None, 0.5, 40):
+    report = ranker.rank_features(
+        X_eval, y_eval, scoring="r2", random_state=42, max_samples=max_samples
+    )
+    top = [row["feature_group"] for row in report["consensus"][:3]]
+    print(f"max_samples={max_samples}: {report.get('n_eval_rows', len(y_eval))} rows, top 3 {top}")
+```
+
+```text
+max_samples=None: 133 rows, top 3 ['s5', 'bmi', 'bp']
+max_samples=0.5: 66 rows, top 3 ['s5', 'bmi', 's6']
+max_samples=40: 40 rows, top 3 ['bmi', 's5', 'sex']
+```
+
+Same data and split as the example above. A half-size sample already swaps `bp` out of the top three, so judge the ranking's stability before you trade rows for speed.
 
 <a id="your-own-models"></a>
 
@@ -436,7 +460,7 @@ featranker \
   --output report.json
 ```
 
-Both CSV files need headers, the same feature columns in the same order, and the target column. Feature values must be numeric; targets may be numeric or strings. With `--missing impute`, empty feature cells are read as missing values and imputed per training split (see [Missing values](#missing-values)); by default they are rejected. Only empty cells and the text `nan` (any case) are read as missing; `NA`, `N/A`, and `null` are not, and raise the numeric-values error. Add `--quiet` to hide progress bars and `--evidence` to add [evidence](#evidence) to the report. `--feature-groups` takes a YAML file, or the word `auto` to group correlated columns of the training CSV with [`auto_groups()`](#auto-groups) (a file literally named `auto` must be written `./auto`); `--auto-groups-threshold 0.5` changes its default 0.7 cut. `--categorical auto` reads the training-CSV columns that have a non-numeric cell as text (so a stray `NA` makes its whole column categorical; a column literally named `auto` cannot be listed, since `auto` always means detection), and `--categorical city,segment` reads the named columns as text (see [Categorical features](#categorical-features)); levels are learned from the training CSV only, and an empty cell in such a column is a missing level. `--sample-weight w` reads column `w` of both files as [sample weights](#sample-weights) and leaves it out of the features. Run `featranker --help` for every flag.
+Both CSV files need headers, the same feature columns in the same order, and the target column. Feature values must be numeric; targets may be numeric or strings. With `--missing impute`, empty feature cells are read as missing values and imputed per training split (see [Missing values](#missing-values)); by default they are rejected. Only empty cells and the text `nan` (any case) are read as missing; `NA`, `N/A`, and `null` are not, and raise the numeric-values error. Add `--quiet` to hide progress bars and `--evidence` to add [evidence](#evidence) to the report. `--feature-groups` takes a YAML file, or the word `auto` to group correlated columns of the training CSV with [`auto_groups()`](#auto-groups) (a file literally named `auto` must be written `./auto`); `--auto-groups-threshold 0.5` changes its default 0.7 cut. `--categorical auto` reads the training-CSV columns that have a non-numeric cell as text (so a stray `NA` makes its whole column categorical; a column literally named `auto` cannot be listed, since `auto` always means detection), and `--categorical city,segment` reads the named columns as text (see [Categorical features](#categorical-features)); levels are learned from the training CSV only, and an empty cell in such a column is a missing level. `--sample-weight w` reads column `w` of both files as [sample weights](#sample-weights) and leaves it out of the features. `--max-samples 5000` (rows) or `--max-samples 0.25` (a share; a decimal point makes it a float) scores on a [subsample](#speed) of the evaluation rows. Run `featranker --help` for every flag.
 
 <details>
 <summary><b>Example input files</b></summary>
@@ -509,7 +533,7 @@ for row in report["stability"][:4]:
 
 Output shown with the `xgboost` and `catboost` extras installed. A group's *place* in a split is its position in that split's sorted consensus. `s5` and `bmi` swap first and second place, `bp` is third in every split, and `s3` moves between fourth and seventh.
 
-### `.rank_resampled(X, y, *, scoring, cv=5, groups=None, feature_names=None, feature_groups=None, n_repeats=10, random_state=None, top_k=5, sample_weight=None)`
+### `.rank_resampled(X, y, *, scoring, cv=5, groups=None, feature_names=None, feature_groups=None, n_repeats=10, random_state=None, top_k=5, sample_weight=None, max_samples=None)`
 
 | Parameter | Default | Meaning |
 |---|---|---|
@@ -519,6 +543,7 @@ Output shown with the `xgboost` and `catboost` extras installed. A group's *plac
 | `groups` | `None` | Passed to the splitter's `split()`, for example row groups for `GroupKFold`. |
 | `random_state` | `None` | Seeds integer-`cv` shuffling. Split `i` uses permutation seed `random_state + i`. |
 | `sample_weight` | `None` | Row weights for all of `X`, sliced per split: each split trains with its training rows' weights and scores with its evaluation rows' weights. See [Sample weights](#sample-weights). |
+| `max_samples` | `None` | As in `rank_features()`, applied to each split's evaluation rows (the split's own subsample, drawn with its seed `random_state + i`). |
 | `top_k` | `5` | For `top_k_share`: a group counts as top in a split when its place in that split's consensus is at most `top_k`. Groups tied on both `median_rank` and `mean_rank` share the better place, so a split can have more than `top_k` top groups. |
 
 Each split uses a new ranker with this ranker's settings, so the ranker you call it on is not changed. A split that fails entirely is recorded in `failures` with `stage: "split"` and the run continues; it raises only if no split ranks. Invalid `cv`, `top_k`, scorer, `n_repeats`, or feature groups raise before any model is fit. See [Resampled reports](report.md#resampled-reports) for the output.
@@ -986,7 +1011,7 @@ Output shown with the `xgboost` and `catboost` extras installed. The score is ho
 | `max_shadow_q` | `None` | Keep groups whose stability `shadow_q_value` (the [shadow hits test](#shadow-test)) is at most this (greater than 0, at most 1); a heuristic filter, since the values are [uncalibrated](#shadow-test). Turns on shadow features. Use `cv` with 10 or more splits, such as `RepeatedKFold`; with 5 the test has little power. |
 | `min_shadow_families` | `None` | Keep groups whose stability `shadow_families` (see [family evidence](#family-evidence)) is at least this (a positive integer). Turns on shadow features. `1` and `2` both selected at most 1% of noise groups on null data; `1` kept more noise than `2` in the signal study (see the [calibration study](calibration.md) for how to choose); a heuristic. |
 | `group`, `models`, `n_jobs`, `shadow_seed`, `shadow_mode`, `missing`, `categorical`, `model_input` | as `FeatureRanker` | Passed to the ranker built in `fit()`. |
-| `feature_groups`, `cv`, `n_repeats`, `random_state` | as `rank_resampled()` | Passed to `rank_resampled()` on the data given to `fit()`. |
+| `feature_groups`, `cv`, `n_repeats`, `random_state`, `max_samples` | as `rank_resampled()` | Passed to `rank_resampled()` on the data given to `fit()`. |
 | `feature_groups="auto"` | | Groups correlated columns with [`auto_groups()`](#auto-groups) on the data given to `fit()`, so inside a pipeline from the training fold only. The groups used are in `report_["feature_groups"]`. Any other string raises `ValueError` in `fit()`. |
 | `auto_groups_threshold` | `0.7` | The |rho| cut of `feature_groups="auto"`, as `auto_groups(threshold=...)` (`0 < threshold <= 1`, else `ValueError` in `fit()`). Recorded in `report_["run"]["auto_groups"]`; ignored for other `feature_groups`. |
 | `verbose` | `False` | Progress bars; off by default because pipelines fit many times. |

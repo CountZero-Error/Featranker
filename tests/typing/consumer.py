@@ -44,3 +44,10 @@ auto_selector = ConsensusSelector(
 )
 resampled.summary()
 run_record = resampled["run"]
+subsampled: Report = ranker.rank_features(
+    np.ones((4, 1)), np.ones(4), scoring="r2", max_samples=0.5
+)
+subsampled_resampled: Report = ranker.rank_resampled(
+    np.ones((4, 1)), np.ones(4), scoring="r2", cv=2, max_samples=2
+)
+subsampled_selector = ConsensusSelector("reg", "r2", k=2, max_samples=0.5)

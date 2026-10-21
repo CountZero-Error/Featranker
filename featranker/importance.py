@@ -9,6 +9,7 @@ import importlib.metadata
 import inspect
 import json
 import math
+import numbers
 import platform
 import re
 import warnings
@@ -386,6 +387,22 @@ def _float_target(values: np.ndarray) -> np.ndarray:
 
 def _is_positive_int(value: Any) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and value >= 1
+
+
+def _resolve_max_samples(value: Any, n_rows: int) -> int:
+    """Rows to score: a positive int (capped at n_rows) or a float share in (0, 1]."""
+    if not isinstance(value, numbers.Real) or isinstance(value, bool):
+        raise ValueError("[!] max_samples must be a positive int or a float in (0, 1].")
+    if isinstance(value, numbers.Integral) and int(value) >= 1:
+        return min(int(value), n_rows)
+    if not isinstance(value, numbers.Integral) and 0 < float(value) <= 1:
+        return max(1, int(float(value) * n_rows))
+    raise ValueError("[!] max_samples must be a positive int or a float in (0, 1].")
+
+
+def _plain_number(value: Any) -> Any:
+    """A numpy scalar as a plain int or float, so the report stays JSON-safe."""
+    return int(value) if isinstance(value, numbers.Integral) else float(value)
 
 
 def _resolve_scorer(scoring: Any) -> tuple[Any, str]:
@@ -1296,12 +1313,18 @@ class FeatureRanker:
         n_repeats: int = 10,
         random_state: Optional[int] = None,
         sample_weight: Any = None,
+        max_samples: Any = None,
     ) -> Report:
         """
         Rank feature groups on explicitly supplied evaluation data.
 
         sample_weight: optional 1-D non-negative weights, one per evaluation
         row; the baseline, permuted and dummy scores are weighted with them.
+
+        max_samples: optional int (rows) or float in (0, 1] (share of rows).
+        One random subsample, drawn with random_state, is used for the
+        baseline, dummy and every permuted score; evidence is unchanged, except
+        that overfit_gap compares the train score with the subsampled baseline.
         """
         if not self.is_fitted_:
             raise RuntimeError("[!] Call fit() before rank_features().")
@@ -1328,6 +1351,15 @@ class FeatureRanker:
             )
         y_values = _validate_y(y_eval, len(X_values))
         weights = _validate_weights(sample_weight, len(X_values))
+        rows: Any = slice(None)
+        if max_samples is not None:
+            size = _resolve_max_samples(max_samples, len(X_values))
+            rows = np.sort(
+                np.random.default_rng(
+                    None if random_state is None else [random_state, 2]
+                ).choice(len(X_values), size, replace=False
+                )
+            )
         run = {
             "task": self.task,
             "group": self.group,
@@ -1352,8 +1384,11 @@ class FeatureRanker:
 
         model_reports: Dict[str, Any] = {}
         ranking_failures: List[Dict[str, str]] = []
+        # Scores use the subsample; the shadows and the evidence see every row.
+        y_scored = y_values[rows]
+        weights_scored = None if weights is None else weights[rows]
         baseline_score = self._score_baseline(
-            scorer, X_values, y_values, ranking_failures, weights
+            scorer, X_values[rows], y_scored, ranking_failures, weights_scored
         )
         X_models, shadow_groups = X_values, None
         if self.shadows:
@@ -1388,9 +1423,10 @@ class FeatureRanker:
                         )
                     )
         jobs = [
-            (name, model, scorer, X_models, y_values, groups, n_repeats,
+            (name, model, scorer, X_models[rows], y_scored, groups, n_repeats,
              random_state, baseline_score, self.model_families_.get(name, name),
-             None if name in no_shadows else shadow_groups, train_data, columns, weights)
+             None if name in no_shadows else shadow_groups, train_data, columns,
+             weights_scored)
             for name, model in self.trained_models.items()
         ]
         evidence_failures: List[Dict[str, str]] = []
@@ -1429,6 +1465,9 @@ class FeatureRanker:
         }
         if self.model_input == "dataframe":
             report["model_input"] = "dataframe"
+        if max_samples is not None:
+            report["max_samples"] = _plain_number(max_samples)
+            report["n_eval_rows"] = len(y_scored)
         if self.train_weighted_ or weights is not None:
             report["sample_weight"] = {
                 "train": self.train_weighted_,
@@ -1486,9 +1525,13 @@ class FeatureRanker:
         random_state: Optional[int] = None,
         top_k: int = 5,
         sample_weight: Any = None,
+        max_samples: Any = None,
     ) -> Report:
         """
         Fit and rank on every cv split of X/y and report rank stability.
+
+        max_samples: as in rank_features(), applied to each split's evaluation
+        rows.
 
         sample_weight: optional 1-D non-negative weights, one per row; each
         split trains with its training rows' weights and scores with its
@@ -1512,6 +1555,8 @@ class FeatureRanker:
             raise ValueError("[!] n_repeats must be a positive integer.")
         if not _is_positive_int(top_k):
             raise ValueError("[!] top_k must be a positive integer.")
+        if max_samples is not None:
+            _resolve_max_samples(max_samples, len(X_values))
         _resolve_scorer(scoring)
         _resolve_feature_groups(names, feature_groups)
         splits = _resolve_splits(
@@ -1553,6 +1598,7 @@ class FeatureRanker:
                     n_repeats=n_repeats,
                     random_state=None if random_state is None else random_state + index,
                     sample_weight=None if weights is None else weights[evaluation],
+                    max_samples=max_samples,
                 )
             except Exception as error:
                 failures.append({"split": index, **_failure(None, "split", error)})
@@ -1597,6 +1643,8 @@ class FeatureRanker:
         }
         if self.model_input == "dataframe":
             result["model_input"] = "dataframe"
+        if max_samples is not None:
+            result["max_samples"] = _plain_number(max_samples)
         if self.shadows:
             result["shadows"] = True
             result["shadow_seed"] = self.shadow_seed

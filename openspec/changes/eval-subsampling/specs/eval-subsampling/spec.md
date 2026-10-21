@@ -16,7 +16,7 @@ Trade evaluation rows for speed while keeping the dummy gate and every score on 
 - **THEN** reports equal those of the previous version
 
 ### Requirement: One subsample for every score
-With `max_samples`, one subsample of evaluation rows SHALL be drawn without replacement, using `random_state`, and the baseline score, the dummy's score, and every permuted score SHALL be computed on it. Train scores and evidence SHALL be unchanged. With the same `random_state`, the subsample SHALL be the same. Reports SHALL include `max_samples` (as given) and `n_eval_rows`.
+With `max_samples`, one subsample of evaluation rows SHALL be drawn without replacement, using `random_state`, and the baseline score, the dummy's score, and every permuted score SHALL be computed on it. Train scores and evidence SHALL be unchanged, except that `overfit_gap` is the train score minus the subsampled baseline. With the same `random_state`, the subsample SHALL be the same. Reports SHALL include `max_samples` (as given) and `n_eval_rows`.
 
 #### Scenario: Same rows everywhere
 - **WHEN** a recording scorer is used with `max_samples=50` on 200 evaluation rows

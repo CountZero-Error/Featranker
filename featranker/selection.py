@@ -65,7 +65,8 @@ class ConsensusSelector(SelectorMixin, BaseEstimator):
             imputer after it in a Pipeline for the final model. With
             categorical, selected raw columns come back as given (use an
             encoder after it in a Pipeline for the final model).
-        feature_groups, cv, n_repeats, random_state: As in rank_resampled().
+        feature_groups, cv, n_repeats, random_state, max_samples: As in
+            rank_resampled().
             feature_groups="auto" groups correlated columns with auto_groups()
             on the X given to fit(), so inside a Pipeline from the training
             fold only; the groups used are in report_["feature_groups"] and
@@ -91,6 +92,7 @@ class ConsensusSelector(SelectorMixin, BaseEstimator):
         cv: Any = 5,
         n_repeats: int = 10,
         random_state: Optional[int] = None,
+        max_samples: Any = None,
         shadow_seed: Optional[int] = None,
         shadow_mode: Literal["joint", "independent"] = "joint",
         missing: Literal["error", "impute"] = "error",
@@ -113,6 +115,7 @@ class ConsensusSelector(SelectorMixin, BaseEstimator):
         self.cv = cv
         self.n_repeats = n_repeats
         self.random_state = random_state
+        self.max_samples = max_samples
         self.shadow_seed = shadow_seed
         self.shadow_mode = shadow_mode
         self.missing = missing
@@ -124,11 +127,11 @@ class ConsensusSelector(SelectorMixin, BaseEstimator):
     def __setstate__(self, state: Dict[str, Any]) -> None:
         # Selectors pickled by 1.3 lack the 1.4 max_shadow_q parameter, and
         # those pickled before 1.6 lack min_shadow_families and shadow_mode, and
-        # those pickled before 1.7 lack missing, those before 1.9 lack categorical, those before 1.10 lack model_input, and those before 1.12 lack auto_groups_threshold.
+        # those pickled before 1.7 lack missing, those before 1.9 lack categorical, those before 1.10 lack model_input, those before 1.12 lack auto_groups_threshold, and those before 1.13 lack max_samples.
         defaults = {
             "max_shadow_q": None, "min_shadow_families": None, "shadow_mode": "joint",
             "missing": "error", "categorical": None, "model_input": "array",
-            "auto_groups_threshold": 0.7,
+            "auto_groups_threshold": 0.7, "max_samples": None,
         }
         super().__setstate__({**defaults, **state})
 
@@ -233,6 +236,7 @@ class ConsensusSelector(SelectorMixin, BaseEstimator):
             # k may be a NumPy integer (e.g. from a GridSearchCV grid).
             top_k=int(self.k) if self.k is not None else 5,
             sample_weight=sample_weight,
+            max_samples=self.max_samples,
         )
 
         if is_auto:

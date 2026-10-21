@@ -166,6 +166,8 @@ With `model_input="dataframe"`, every model, custom ones included, receives a pa
 
 With `sample_weight=` on `fit()`, `rank_features()`, and `rank_resampled()` (and `--sample-weight COLUMN` on the CLI), models are fit and every score is computed with your weights; models that cannot take weights (built-in `lda`, `qda`, `pls_regression`) are recorded as fit failures, and correlation and SHAP evidence stay unweighted ([details](https://github.com/CountZero-Error/Featranker/blob/main/docs/usage.md#sample-weights)).
 
+With `max_samples=` on `rank_features()` and `rank_resampled()` (`ConsensusSelector(max_samples=...)`, `--max-samples` on the CLI), permutation scores use one random subsample of the evaluation rows, the same for the dummy gate and every score ([details](https://github.com/CountZero-Error/Featranker/blob/main/docs/usage.md#fewer-evaluation-rows-max_samples)).
+
 Every report carries a `run` block (preset, data and split fingerprints, and the `auto_groups` threshold when grouping was automatic) so repeated runs can be compared, and `summarize()` reads resampled reports too ([details](https://github.com/CountZero-Error/Featranker/blob/main/docs/usage.md#comparing-runs)).
 
 > [!IMPORTANT]
