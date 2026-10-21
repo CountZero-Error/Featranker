@@ -115,6 +115,8 @@ When the data has categorical columns (`categorical="auto"` or a list of names),
 
 With `model_input="dataframe"` the report (and each resampled split report) has `"model_input": "dataframe"`; in the default `"array"` mode the key is absent. See [Columns by name](usage.md#columns-by-name).
 
+When any [sample weights](usage.md#sample-weights) are used, the report (and each resampled split report) has `"sample_weight": {"train": bool, "eval": bool}`, saying whether training and evaluation weights were given; without weights the key is absent. A model that cannot take weights has a `failures` entry with stage `"fit"` and `error_type` `"SampleWeightNotSupported"`. Correlation evidence and the SHAP summary stay unweighted.
+
 With `evidence=True`, each model also has `train_score` and `overfit_gap` (`null` if the training score could not be computed, with a `failures` entry at stage `"evidence"`), the report has a top-level `evidence` block, and models SHAP can explain have `shap`. Without `evidence`, none of these keys appear. See [Evidence](usage.md#evidence).
 
 ```python

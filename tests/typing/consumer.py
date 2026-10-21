@@ -29,3 +29,13 @@ listed_ranker = FeatureRanker(task="reg", categorical=["city"])
 categorical_selector = ConsensusSelector("reg", "r2", k=2, categorical=["city"])
 named_ranker = FeatureRanker(task="reg", model_input="dataframe")
 named_selector = ConsensusSelector("reg", "r2", k=2, model_input="dataframe")
+weights = np.ones(4)
+weighted_ranker = FeatureRanker(task="reg", group="fast")
+weighted_ranker.fit(np.ones((4, 1)), np.ones(4), sample_weight=weights)
+weighted: Report = weighted_ranker.rank_features(
+    np.ones((4, 1)), np.ones(4), scoring="r2", sample_weight=weights
+)
+weighted_resampled: Report = ranker.rank_resampled(
+    np.ones((4, 1)), np.ones(4), scoring="r2", cv=2, sample_weight=[1, 1, 1, 1]
+)
+selector.fit(np.ones((4, 1)), np.ones(4), sample_weight=weights)

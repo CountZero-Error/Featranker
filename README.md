@@ -164,6 +164,8 @@ With `categorical="auto"` (or a list of column names), raw text and category col
 
 With `model_input="dataframe"`, every model, custom ones included, receives a pandas DataFrame with the feature names (and `shadow__<name>` shadow columns), so your own pipelines can select columns by name; a pipeline that drops the shadow columns is flagged and left out of the shadow evidence ([details](https://github.com/CountZero-Error/Featranker/blob/main/docs/usage.md#columns-by-name)).
 
+With `sample_weight=` on `fit()`, `rank_features()`, and `rank_resampled()` (and `--sample-weight COLUMN` on the CLI), models are fit and every score is computed with your weights; models that cannot take weights (built-in `lda`, `qda`, `pls_regression`) are recorded as fit failures, and correlation and SHAP evidence stay unweighted ([details](https://github.com/CountZero-Error/Featranker/blob/main/docs/usage.md#sample-weights)).
+
 > [!IMPORTANT]
 > Ranking belongs inside the training portion of validation. In nested validation, fit and rank on inner folds only, and keep the outer test fold untouched until final evaluation. Never use outer-fold or final-test rankings to choose features. [`ConsensusSelector`](https://github.com/CountZero-Error/Featranker/blob/main/docs/usage.md#feature-selection) does this for you as a scikit-learn `Pipeline` step.
 
@@ -171,7 +173,7 @@ With `model_input="dataframe"`, every model, custom ones included, receives a pa
 
 | Page | Contents |
 |---|---|
-| [**Usage**](https://github.com/CountZero-Error/Featranker/blob/main/docs/usage.md) | API and defaults, working with reports (`summary`, `to_frame`, `plot`), choosing a scorer, your own models, columns by name, missing values, categorical features, parallel runs, the CLI, resampled ranking, shadow features, the shadow hits test, per-family evidence and `min_shadow_families`, mechanism evidence, pipeline feature selection, `summarize`, LLM interpretation (deprecated), labels, troubleshooting |
+| [**Usage**](https://github.com/CountZero-Error/Featranker/blob/main/docs/usage.md) | API and defaults, working with reports (`summary`, `to_frame`, `plot`), choosing a scorer, your own models, columns by name, missing values, categorical features, sample weights, parallel runs, the CLI, resampled ranking, shadow features, the shadow hits test, per-family evidence and `min_shadow_families`, mechanism evidence, pipeline feature selection, `summarize`, LLM interpretation (deprecated), labels, troubleshooting |
 | [**Report**](https://github.com/CountZero-Error/Featranker/blob/main/docs/report.md) | How to read the results, resampled (stability) reports, full report structure, ranking and failure rules |
 | [**Models**](https://github.com/CountZero-Error/Featranker/blob/main/docs/models.md) | All 40 built-in models, optional extras, known issues |
 | [**API**](https://github.com/CountZero-Error/Featranker/blob/main/docs/api.md) | Public API, stability policy, typing, releases |

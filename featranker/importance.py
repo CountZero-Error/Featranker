@@ -5,6 +5,7 @@ Feature importance ranking via permutation importance across multiple ML models.
 import datetime
 import importlib
 import importlib.metadata
+import inspect
 import json
 import math
 import platform
@@ -315,6 +316,53 @@ def _validate_y(y: Any, n_rows: int) -> np.ndarray:
     if len(values) == 0:
         raise ValueError("[!] y must contain at least one value.")
     return values
+
+
+def _validate_weights(weights: Any, n_rows: int) -> Optional[np.ndarray]:
+    """None, or a validated float copy of the sample weights."""
+    if weights is None:
+        return None
+    try:
+        values = np.array(weights, dtype=float)  # a copy, like _validate_X
+    except (TypeError, ValueError) as error:
+        raise ValueError("[!] sample_weight must be numeric.") from error
+    if values.ndim != 1 or len(values) != n_rows:
+        raise ValueError(
+            f"[!] sample_weight must be one-dimensional with one value per row "
+            f"({n_rows}), got shape {values.shape}."
+        )
+    if not np.isfinite(values).all() or (values < 0).any():
+        raise ValueError("[!] sample_weight must be finite and non-negative.")
+    total = values.sum()
+    if not np.isfinite(total) or total <= 0:
+        raise ValueError("[!] sample_weight must have a finite, positive sum.")
+    return values
+
+
+class SampleWeightNotSupported(Exception):
+    """A model's final estimator has no sample_weight in fit()."""
+
+
+def _takes_sample_weight(estimator: Any) -> bool:
+    """fit() names sample_weight or takes **kwargs (a real error is a fit failure)."""
+    parameters = inspect.signature(estimator.fit).parameters
+    return "sample_weight" in parameters or any(
+        parameter.kind is inspect.Parameter.VAR_KEYWORD for parameter in parameters.values()
+    )
+
+
+def _fit_weight_key(model: Any) -> Optional[str]:
+    """fit() keyword that routes sample_weight to the final estimator, else None."""
+    if not isinstance(model, Pipeline):
+        return "sample_weight" if _takes_sample_weight(model) else None
+    last_name, last = model.steps[-1]
+    inner = _fit_weight_key(last)
+    return None if inner is None else f"{last_name}__{inner}"
+
+
+def _score_weights(weights: Optional[np.ndarray]) -> Dict[str, np.ndarray]:
+    """scorer() and dummy fit() keywords; empty without weights, so calls are unchanged."""
+    return {} if weights is None else {"sample_weight": weights}
 
 
 def _encode_labels(label_encoder: LabelEncoder, values: np.ndarray) -> np.ndarray:
@@ -677,6 +725,15 @@ def _build_stability(
     )
 
 
+def _unrouted(call: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+    """
+    Run call with metadata routing off: weights are passed explicitly, and
+    routing would reject them (the setting is thread-local, so set it here).
+    """
+    with sklearn.config_context(enable_metadata_routing=False):
+        return call(*args, **kwargs)
+
+
 def _run_models(
     worker: Callable[..., tuple],
     jobs: List[tuple],
@@ -686,8 +743,8 @@ def _run_models(
 ) -> List[tuple]:
     """Run one worker per model, in order; sequentially unless n_jobs > 1 or -1."""
     if n_jobs is None or n_jobs == 1:
-        return [worker(*job) for job in tqdm(jobs, desc=desc, disable=not verbose)]
-    return Parallel(n_jobs=n_jobs)(delayed(worker)(*job) for job in jobs)
+        return [_unrouted(worker, *job) for job in tqdm(jobs, desc=desc, disable=not verbose)]
+    return Parallel(n_jobs=n_jobs)(delayed(_unrouted)(worker, *job) for job in jobs)
 
 
 def _with_shadows(X_values: np.ndarray, seed: Any, mode: str = "joint") -> np.ndarray:
@@ -752,9 +809,21 @@ def _fit_model(
     X_values: np.ndarray,
     y_values: np.ndarray,
     names: Optional[List[str]] = None,
+    weights: Optional[np.ndarray] = None,
 ) -> tuple[str, Any, Optional[Dict[str, str]]]:
     try:
-        fitted = clone(model, safe=False).fit(_model_X(X_values, names), y_values)
+        fit_params: Dict[str, np.ndarray] = {}
+        if weights is not None:
+            key = _fit_weight_key(model)
+            if key is None:
+                raise SampleWeightNotSupported(
+                    "The final estimator does not accept sample_weight in fit(), "
+                    "so it is not fit unweighted."
+                )
+            fit_params[key] = weights
+        fitted = clone(model, safe=False).fit(
+            _model_X(X_values, names), y_values, **fit_params
+        )
         return name, fitted, None
     except Exception as error:
         return name, None, _failure(name, "fit", error)
@@ -770,6 +839,7 @@ def _group_importances(
     rng: np.random.Generator,
     baseline: float,
     names: Optional[List[str]] = None,
+    weights: Optional[np.ndarray] = None,
 ) -> Dict[str, Dict[str, Any]]:
     # One scratch copy per model; only the group's columns are
     # rewritten per repeat and restored after the group.
@@ -782,7 +852,10 @@ def _group_importances(
             row_order = rng.permutation(len(X_values))
             X_permuted[:, columns] = X_values[np.ix_(row_order, columns)]
             permuted_score = _finite_float(
-                scorer(model, _model_X(X_permuted, names), y_values), "permuted score"
+                scorer(
+                    model, _model_X(X_permuted, names), y_values, **_score_weights(weights)
+                ),
+                "permuted score",
             )
             values.append(
                 _finite_float(baseline - permuted_score, "permutation importance")
@@ -807,10 +880,12 @@ def _permutation_importances(
     baseline: float,
     shadow_groups: Optional[Dict[str, List[int]]] = None,
     names: Optional[List[str]] = None,
+    weights: Optional[np.ndarray] = None,
 ) -> tuple[Dict[str, Dict[str, Any]], Optional[Dict[str, Dict[str, Any]]]]:
     rng = np.random.default_rng(random_state)
     importances = _group_importances(
-        model, scorer, X_values, y_values, groups, n_repeats, rng, baseline, names
+        model, scorer, X_values, y_values, groups, n_repeats, rng, baseline, names,
+        weights,
     )
     # Real groups are ranked among themselves only; shadows are compared, not ranked.
     ranks = _assign_ranks(
@@ -824,7 +899,7 @@ def _permutation_importances(
     if shadow_groups is not None:
         shadow = _group_importances(
             model, scorer, X_values, y_values, shadow_groups, n_repeats, rng, baseline,
-            names,
+            names, weights,
         )
     return importances, shadow
 
@@ -841,19 +916,21 @@ def _rank_model(
     baseline_score: Optional[float],
     family: str,
     shadow_groups: Optional[Dict[str, List[int]]] = None,
-    train_data: Optional[tuple[np.ndarray, np.ndarray]] = None,
+    train_data: Optional[tuple[np.ndarray, np.ndarray, Optional[np.ndarray]]] = None,
     names: Optional[List[str]] = None,
+    weights: Optional[np.ndarray] = None,
 ) -> tuple[
     str, Optional[Dict[str, Any]], Optional[Dict[str, str]], Optional[Dict[str, str]]
 ]:
     """Returns (name, report, ranking failure, evidence failure)."""
     try:
         baseline = _finite_float(
-            scorer(model, _model_X(X_values, names), y_values), "baseline score"
+            scorer(model, _model_X(X_values, names), y_values, **_score_weights(weights)),
+            "baseline score",
         )
         importances, shadow = _permutation_importances(
             model, scorer, X_values, y_values, groups, n_repeats, random_state,
-            baseline, shadow_groups, names,
+            baseline, shadow_groups, names, weights,
         )
         report = {
             "family": family,
@@ -871,9 +948,13 @@ def _rank_model(
         evidence_failure = None
         if train_data is not None:
             try:
-                train_X, train_y = train_data
+                train_X, train_y, train_weights = train_data
                 train_score = _finite_float(
-                    scorer(model, _model_X(train_X, names), train_y), "train score"
+                    scorer(
+                        model, _model_X(train_X, names), train_y,
+                        **_score_weights(train_weights),
+                    ),
+                    "train score",
                 )
                 report["train_score"] = train_score
                 report["overfit_gap"] = _finite_float(
@@ -1012,6 +1093,9 @@ class FeatureRanker:
         self.__dict__.setdefault("categorical_levels_", {})
         # ... and those pickled by 1.9 lack the 1.10 model input.
         self.__dict__.setdefault("model_input", "array")
+        # ... and those pickled by 1.10 lack the 1.11 sample weights.
+        self.__dict__.setdefault("train_weighted_", False)
+        self.__dict__.setdefault("train_weight_", None)
         if "model_families_" not in self.__dict__:
             self.model_families_ = (
                 _registry_families() if self.user_models is None else {}
@@ -1028,8 +1112,16 @@ class FeatureRanker:
         X: Any,
         y: Any,
         feature_names: Optional[List[str]] = None,
+        sample_weight: Any = None,
     ) -> "FeatureRanker":
-        """Fit configured models using training data only."""
+        """
+        Fit configured models using training data only.
+
+        sample_weight: optional 1-D non-negative weights, one per row. Every
+        model is fit with them (built-in pipelines pass them to the final
+        estimator); a model that cannot take weights is recorded as a fit
+        failure, not fit unweighted.
+        """
         self.is_fitted_ = False
         categorical = _categorical_indices(X, self.categorical, feature_names)
         X_values, names = _validate_X(
@@ -1046,6 +1138,7 @@ class FeatureRanker:
                     "model_input='dataframe' reserves for shadow columns."
                 )
         y_values = _validate_y(y, len(X_values))
+        weights = _validate_weights(sample_weight, len(X_values))
         levels: Dict[str, List[Optional[str]]] = {}
         categorical_missing: Dict[str, int] = {}
         if categorical:
@@ -1093,7 +1186,7 @@ class FeatureRanker:
         )
         columns = self._model_columns(names)
         jobs = [
-            (name, model, X_models, y_values, columns)
+            (name, model, X_models, y_values, columns, weights)
             for name, model in candidates.items()
         ]
         for name, fitted, failure in _run_models(
@@ -1111,7 +1204,9 @@ class FeatureRanker:
         baseline_model = None
         try:
             dummy = DummyClassifier() if self.task == "clf" else DummyRegressor()
-            baseline_model = dummy.fit(X_values, y_values)
+            baseline_model = _unrouted(
+                lambda: dummy.fit(X_values, y_values, **_score_weights(weights))
+            )
         except Exception as error:
             self.fit_failures_.append(_failure(BASELINE_NAME, "fit", error))
 
@@ -1120,6 +1215,8 @@ class FeatureRanker:
             # As the models saw them (shadow block included), for train scores.
             self.train_X_ = X_models
             self.train_y_ = y_values
+            self.train_weight_ = weights
+        self.train_weighted_ = weights is not None
         self.label_encoder = label_encoder
         self.feature_names_ = names
         self.categorical_features_ = [names[index] for index in categorical]
@@ -1142,8 +1239,14 @@ class FeatureRanker:
         feature_groups: Optional[Dict[str, List[str]]] = None,
         n_repeats: int = 10,
         random_state: Optional[int] = None,
+        sample_weight: Any = None,
     ) -> Report:
-        """Rank feature groups on explicitly supplied evaluation data."""
+        """
+        Rank feature groups on explicitly supplied evaluation data.
+
+        sample_weight: optional 1-D non-negative weights, one per evaluation
+        row; the baseline, permuted and dummy scores are weighted with them.
+        """
         if not self.is_fitted_:
             raise RuntimeError("[!] Call fit() before rank_features().")
         if not _is_positive_int(n_repeats):
@@ -1167,6 +1270,7 @@ class FeatureRanker:
                 X_values, categorical, self.feature_names_, self.categorical_levels_
             )
         y_values = _validate_y(y_eval, len(X_values))
+        weights = _validate_weights(sample_weight, len(X_values))
         if self.label_encoder is not None:
             y_values = _encode_labels(self.label_encoder, y_values)
         else:
@@ -1180,7 +1284,7 @@ class FeatureRanker:
         model_reports: Dict[str, Any] = {}
         ranking_failures: List[Dict[str, str]] = []
         baseline_score = self._score_baseline(
-            scorer, X_values, y_values, ranking_failures
+            scorer, X_values, y_values, ranking_failures, weights
         )
         X_models, shadow_groups = X_values, None
         if self.shadows:
@@ -1192,7 +1296,9 @@ class FeatureRanker:
                 name: [index + offset for index in indices]
                 for name, indices in groups.items()
             }
-        train_data = (self.train_X_, self.train_y_) if self.evidence else None
+        train_data = (
+            (self.train_X_, self.train_y_, self.train_weight_) if self.evidence else None
+        )
         columns = self._model_columns(self.feature_names_)
         # A model that ignores the shadow columns gets no shadow evidence.
         shadow_failures: List[Dict[str, str]] = []
@@ -1215,7 +1321,7 @@ class FeatureRanker:
         jobs = [
             (name, model, scorer, X_models, y_values, groups, n_repeats,
              random_state, baseline_score, self.model_families_.get(name, name),
-             None if name in no_shadows else shadow_groups, train_data, columns)
+             None if name in no_shadows else shadow_groups, train_data, columns, weights)
             for name, model in self.trained_models.items()
         ]
         evidence_failures: List[Dict[str, str]] = []
@@ -1253,6 +1359,11 @@ class FeatureRanker:
         }
         if self.model_input == "dataframe":
             report["model_input"] = "dataframe"
+        if self.train_weighted_ or weights is not None:
+            report["sample_weight"] = {
+                "train": self.train_weighted_,
+                "eval": weights is not None,
+            }
         if self.shadows:
             report["shadows"] = True
             report["shadow_seed"] = self.shadow_seed
@@ -1304,9 +1415,14 @@ class FeatureRanker:
         n_repeats: int = 10,
         random_state: Optional[int] = None,
         top_k: int = 5,
+        sample_weight: Any = None,
     ) -> Report:
         """
         Fit and rank on every cv split of X/y and report rank stability.
+
+        sample_weight: optional 1-D non-negative weights, one per row; each
+        split trains with its training rows' weights and scores with its
+        evaluation rows' weights.
 
         Each split uses a fresh ranker with this ranker's settings; this
         ranker's own fitted state is not changed. Pass development data only,
@@ -1321,6 +1437,7 @@ class FeatureRanker:
             categorical=categorical,
         )
         y_values = _validate_y(y, len(X_values))
+        weights = _validate_weights(sample_weight, len(X_values))
         if not _is_positive_int(n_repeats):
             raise ValueError("[!] n_repeats must be a positive integer.")
         if not _is_positive_int(top_k):
@@ -1352,7 +1469,12 @@ class FeatureRanker:
                     # Names, so "auto" survives the loss of the DataFrame dtypes.
                     categorical=[names[column] for column in categorical] or None,
                 )
-                ranker.fit(X_values[train], y_values[train], feature_names=names)
+                ranker.fit(
+                    X_values[train],
+                    y_values[train],
+                    feature_names=names,
+                    sample_weight=None if weights is None else weights[train],
+                )
                 report = ranker.rank_features(
                     X_values[evaluation],
                     y_values[evaluation],
@@ -1360,6 +1482,7 @@ class FeatureRanker:
                     feature_groups=feature_groups,
                     n_repeats=n_repeats,
                     random_state=None if random_state is None else random_state + index,
+                    sample_weight=None if weights is None else weights[evaluation],
                 )
             except Exception as error:
                 failures.append({"split": index, **_failure(None, "split", error)})
@@ -1416,13 +1539,18 @@ class FeatureRanker:
         X_values: np.ndarray,
         y_values: np.ndarray,
         failures: List[Dict[str, str]],
+        weights: Optional[np.ndarray] = None,
     ) -> Optional[float]:
         """Score the dummy baseline; None (no gating) if it was unusable."""
         if self.baseline_model_ is None:
             return None
         try:
             return _finite_float(
-                scorer(self.baseline_model_, X_values, y_values), "baseline score"
+                _unrouted(
+                    scorer, self.baseline_model_, X_values, y_values,
+                    **_score_weights(weights),
+                ),
+                "baseline score",
             )
         except Exception as error:
             failures.append(_failure(BASELINE_NAME, "ranking", error))

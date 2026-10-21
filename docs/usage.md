@@ -23,17 +23,18 @@ The API is one class: `FeatureRanker(...)`, then `.fit(...)`, then `.rank_featur
 | `categorical` | `None` | `None` accepts numeric features only. `"auto"` treats DataFrame columns of object, string, or category dtype as categorical; a list of feature names marks those columns. Levels are learned in each `fit()` from the training rows only and each column stays one feature. See [Categorical features](#categorical-features). |
 | `model_input` | `"array"` | `"array"` gives models a float NumPy array. `"dataframe"` gives every model a pandas DataFrame with the feature names (and `shadow__<name>` columns with shadows), so custom pipelines can select columns by name. Needs pandas. See [Columns by name](#columns-by-name). |
 
-### `.fit(X, y, feature_names=None)`
+### `.fit(X, y, feature_names=None, sample_weight=None)`
 
 | Parameter | Default | Meaning |
 |---|---|---|
 | `X` | required | Training features: 2-D NumPy array or pandas DataFrame of numbers (plus the columns named by `categorical`), with at least one row and one column. Infinite values are rejected, and so is NaN unless `missing="impute"`. |
 | `y` | required | Training target, one value per row. Class labels may be numbers or strings; regression targets must be numeric. |
 | `feature_names` | `None` | Unique, non-empty column names. Required for NumPy input; taken from the columns for a DataFrame. |
+| `sample_weight` | `None` | 1-D array-like of finite, non-negative training weights, one per row, with a positive sum. Every model is fit with them; see [Sample weights](#sample-weights). |
 
 Returns the ranker itself. Raises if no model fits.
 
-### `.rank_features(X_eval, y_eval, *, scoring, feature_groups=None, n_repeats=10, random_state=None)`
+### `.rank_features(X_eval, y_eval, *, scoring, feature_groups=None, n_repeats=10, random_state=None, sample_weight=None)`
 
 | Parameter | Default | Meaning |
 |---|---|---|
@@ -43,6 +44,7 @@ Returns the ranker itself. Raises if no model fits.
 | `feature_groups` | `None` | Dict of `{group_name: [feature, ...]}` to shuffle together. Ungrouped features are ranked on their own. See [Grouped permutation](#grouped-permutation). |
 | `n_repeats` | `10` | Shuffles per feature group; a positive integer. More repeats give a more precise average importance and take longer. |
 | `random_state` | `None` | Integer seed for permutation-importance shuffles. Reproducible reports also require deterministic or seeded estimators and deterministic scoring; with shadows enabled, fix `shadow_seed` too. |
+| `sample_weight` | `None` | 1-D array-like of finite, non-negative evaluation weights, one per evaluation row, with a positive sum. The baseline, permuted, and dummy scores are weighted with them. See [Sample weights](#sample-weights). |
 
 Returns the report dict described in [Report](report.md). Raises if every model fails ranking.
 
@@ -362,6 +364,59 @@ for row in report["consensus"]:
 
 **Limitations.** Levels are compared by their string forms, so `1` and `"1"` are the same level, and so are `1` and `1.0` (a column that pandas upcast to float because of a missing value still matches its integer training levels); clean such columns first. Target encoding and other supervised encoders are not offered, because they leak the target; build one into a custom model pipeline if you need it. Date and time columns are still rejected ("X must be numeric"), also when listed as categorical; convert them to numbers or to labels first. To give custom models column names, see [Columns by name](#columns-by-name).
 
+## ▍ Sample weights
+
+Survey data, imbalanced classes, and aggregated rows come with sample weights. Pass them as `sample_weight` to `fit()` (training rows), `rank_features()` (evaluation rows), or `rank_resampled()` (all rows; each split takes its slices), and the ranking answers the question your weighted model asks. Each is a 1-D array-like of finite, non-negative numbers, one per row, with a positive sum; anything else raises `ValueError` before any model is fit. The weights are copied.
+
+**What is weighted.** With training weights, every model is fit with them: for a built-in pipeline they go to the final estimator only (the imputer, scaler, and one-hot encoder stay unweighted, as in scikit-learn's own pipelines), and the dummy baseline is fit with them too, so a weighted majority class is what it predicts. With evaluation weights, the baseline score, every permuted score, and the dummy's score are weighted; with `evidence=True` and training weights, the train score uses them. You can pass either set alone. The report records which were used as `sample_weight: {"train": ..., "eval": ...}` (see [Report](report.md#structure)); without weights the key is absent and reports are unchanged.
+
+**Models that cannot take weights.** A model whose final estimator has no `sample_weight` in `fit()` is not fit unweighted, because its importances would answer a different question than the others'. It is recorded in `failures` with stage `"fit"` and `error_type` `"SampleWeightNotSupported"`. Among the built-in models these are `lda` and `qda` (classification) and `pls_regression`, so under weights the other built-in models vote without them. The same holds for your own models, bare or as the last step of a `Pipeline`; wrap or replace them with a weight-aware estimator if they must vote. An estimator whose `fit` takes `**kwargs` counts as weight-capable (a real error is then an ordinary fit failure), and a nested `Pipeline` is followed to its last step. FeatureRanker runs its own fits and scorers with scikit-learn metadata routing off, since it passes weights explicitly.
+
+**Unweighted evidence.** Correlation evidence and the SHAP summary describe the data and the fitted models' behaviour, not the weighted objective, and stay unweighted. Custom scorers must accept a `sample_weight=` keyword when weights are given; scikit-learn scorer names do.
+
+```python
+import numpy as np
+from sklearn.ensemble import RandomForestRegressor
+
+from featranker import FeatureRanker
+
+rng = np.random.default_rng(0)
+n = 600
+survey = np.arange(n) % 2 == 0  # rows that carry almost all of the weight
+x1, x2 = rng.normal(size=n), rng.normal(size=n)
+X = np.column_stack([x1, x2, survey.astype(float)])
+y = np.where(survey, x1, x2) + 0.1 * rng.normal(size=n)
+w = np.where(survey, 1.0, 0.001)
+names = ["x1", "x2", "is_survey"]
+models = {"forest": RandomForestRegressor(n_estimators=50, random_state=0)}
+
+for label, weights in [("unweighted", None), ("weighted", w)]:
+    ranker = FeatureRanker(task="reg", models=models, verbose=False)
+    ranker.fit(X[:400], y[:400], feature_names=names,
+               sample_weight=None if weights is None else weights[:400])
+    report = ranker.rank_features(
+        X[400:], y[400:], scoring="r2", n_repeats=5, random_state=0,
+        sample_weight=None if weights is None else weights[400:],
+    )
+    importance = report["models"]["forest"]["importance"]
+    print(label, report.get("sample_weight"),
+          {name: round(importance[name]["mean"], 2) for name in names[:2]})
+
+builtin = FeatureRanker(task="clf", group="all", verbose=False)
+builtin.fit(X[:400], (y[:400] > 0).astype(int), feature_names=names, sample_weight=w[:400])
+print([(f["model"], f["error_type"]) for f in builtin.fit_failures_])
+```
+
+```text
+unweighted None {'x1': 0.85, 'x2': 0.8}
+weighted {'train': True, 'eval': True} {'x1': 1.44, 'x2': 0.02}
+[('lda', 'SampleWeightNotSupported'), ('qda', 'SampleWeightNotSupported')]
+```
+
+`x1` drives the target in the heavily weighted rows and `x2` in the nearly weightless ones. Unweighted, the two look alike; weighted, `x2` all but disappears.
+
+**Selector and pipelines.** `ConsensusSelector.fit(X, y, groups=None, sample_weight=None)` passes the weights to its resampled ranking. Inside a `Pipeline`, use scikit-learn metadata routing: `sklearn.set_config(enable_metadata_routing=True)`, `ConsensusSelector(...).set_fit_request(sample_weight=True)`, then `pipeline.fit(X, y, sample_weight=w)`. Without routing enabled, scikit-learn raises its usual error for `sample_weight` on a pipeline. **The command line** takes `--sample-weight COLUMN`: the column must exist in both CSV files, is read as the weights (training and evaluation), and is not ranked as a feature.
+
 ## ▍ Command line
 
 The CLI takes separate training and evaluation CSV files; the features are numeric unless named by `--categorical`.
@@ -381,7 +436,7 @@ featranker \
   --output report.json
 ```
 
-Both CSV files need headers, the same feature columns in the same order, and the target column. Feature values must be numeric; targets may be numeric or strings. With `--missing impute`, empty feature cells are read as missing values and imputed per training split (see [Missing values](#missing-values)); by default they are rejected. Only empty cells and the text `nan` (any case) are read as missing; `NA`, `N/A`, and `null` are not, and raise the numeric-values error. Add `--quiet` to hide progress bars and `--evidence` to add [evidence](#evidence) to the report. `--feature-groups` takes a YAML file, or the word `auto` to group correlated columns of the training CSV with [`auto_groups()`](#auto-groups) (a file literally named `auto` must be written `./auto`). `--categorical auto` reads the training-CSV columns that have a non-numeric cell as text (so a stray `NA` makes its whole column categorical; a column literally named `auto` cannot be listed, since `auto` always means detection), and `--categorical city,segment` reads the named columns as text (see [Categorical features](#categorical-features)); levels are learned from the training CSV only, and an empty cell in such a column is a missing level. Run `featranker --help` for every flag.
+Both CSV files need headers, the same feature columns in the same order, and the target column. Feature values must be numeric; targets may be numeric or strings. With `--missing impute`, empty feature cells are read as missing values and imputed per training split (see [Missing values](#missing-values)); by default they are rejected. Only empty cells and the text `nan` (any case) are read as missing; `NA`, `N/A`, and `null` are not, and raise the numeric-values error. Add `--quiet` to hide progress bars and `--evidence` to add [evidence](#evidence) to the report. `--feature-groups` takes a YAML file, or the word `auto` to group correlated columns of the training CSV with [`auto_groups()`](#auto-groups) (a file literally named `auto` must be written `./auto`). `--categorical auto` reads the training-CSV columns that have a non-numeric cell as text (so a stray `NA` makes its whole column categorical; a column literally named `auto` cannot be listed, since `auto` always means detection), and `--categorical city,segment` reads the named columns as text (see [Categorical features](#categorical-features)); levels are learned from the training CSV only, and an empty cell in such a column is a missing level. `--sample-weight w` reads column `w` of both files as [sample weights](#sample-weights) and leaves it out of the features. Run `featranker --help` for every flag.
 
 <details>
 <summary><b>Example input files</b></summary>
@@ -454,7 +509,7 @@ for row in report["stability"][:4]:
 
 Output shown with the `xgboost` and `catboost` extras installed. A group's *place* in a split is its position in that split's sorted consensus. `s5` and `bmi` swap first and second place, `bp` is third in every split, and `s3` moves between fourth and seventh.
 
-### `.rank_resampled(X, y, *, scoring, cv=5, groups=None, feature_names=None, feature_groups=None, n_repeats=10, random_state=None, top_k=5)`
+### `.rank_resampled(X, y, *, scoring, cv=5, groups=None, feature_names=None, feature_groups=None, n_repeats=10, random_state=None, top_k=5, sample_weight=None)`
 
 | Parameter | Default | Meaning |
 |---|---|---|
@@ -463,6 +518,7 @@ Output shown with the `xgboost` and `catboost` extras installed. A group's *plac
 | `cv` | `5` | An integer number of folds (shuffled; stratified for `task="clf"`), any scikit-learn splitter such as `RepeatedKFold` or `GroupKFold`, or a list of `(train_indices, eval_indices)` pairs. |
 | `groups` | `None` | Passed to the splitter's `split()`, for example row groups for `GroupKFold`. |
 | `random_state` | `None` | Seeds integer-`cv` shuffling. Split `i` uses permutation seed `random_state + i`. |
+| `sample_weight` | `None` | Row weights for all of `X`, sliced per split: each split trains with its training rows' weights and scores with its evaluation rows' weights. See [Sample weights](#sample-weights). |
 | `top_k` | `5` | For `top_k_share`: a group counts as top in a split when its place in that split's consensus is at most `top_k`. Groups tied on both `median_rank` and `mean_rank` share the better place, so a split can have more than `top_k` top groups. |
 
 Each split uses a new ranker with this ranker's settings, so the ranker you call it on is not changed. A split that fails entirely is recorded in `failures` with `stage: "split"` and the run continues; it raises only if no split ranks. Invalid `cv`, `top_k`, scorer, `n_repeats`, or feature groups raise before any model is fit. See [Resampled reports](report.md#resampled-reports) for the output.

@@ -71,13 +71,15 @@ def _load_csv(
     target: str,
     allow_nan: bool = False,
     categorical: Optional[List[str]] = None,
+    weight: Optional[str] = None,
 ) -> tuple[np.ndarray, np.ndarray, List[str]]:
     """
     Load a numeric feature matrix and target column from a CSV file.
 
     With allow_nan, an empty feature cell is NaN (infinite values still raise).
     Columns named in categorical stay text (an empty cell is None, a missing
-    level) and the matrix is then an object array.
+    level) and the matrix is then an object array. The weight column is not a
+    feature (see _load_weights).
     """
     header, rows = _read_csv(path, target)
     text = set(categorical or [])
@@ -85,7 +87,10 @@ def _load_csv(
     if unknown:
         raise ValueError(f"[!] categorical names unknown column '{unknown[0]}' in '{path}'.")
     target_index = header.index(target)
-    feature_indices = [index for index in range(len(header)) if index != target_index]
+    feature_indices = [
+        index for index in range(len(header))
+        if index != target_index and header[index] != weight
+    ]
     features: List[List[Any]] = []
     targets: List[str] = []
     for row_number, row in rows:
@@ -138,6 +143,18 @@ def _load_csv(
         np.asarray(targets),
         [header[index] for index in feature_indices],
     )
+
+
+def _load_weights(path: Path, target: str, column: str) -> np.ndarray:
+    """The sample-weight column of a CSV file (rows were checked by _load_csv)."""
+    header, rows = _read_csv(path, target)
+    if column == target or column not in header:
+        raise ValueError(f"[!] Weight column '{column}' was not found in '{path}'.")
+    index = header.index(column)
+    try:
+        return np.array([float(row[index]) for _, row in rows])
+    except ValueError as error:
+        raise ValueError(f"[!] CSV weight values must be numeric in '{path}'.") from error
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -241,6 +258,15 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--sample-weight",
+        default=None,
+        metavar="COLUMN",
+        help=(
+            "Weight column present in both CSV files: used as sample weights "
+            "for fitting and scoring, and not ranked as a feature."
+        ),
+    )
+    parser.add_argument(
         "--quiet",
         action="store_true",
         help="Hide progress bars (warnings and errors are still shown).",
@@ -284,12 +310,30 @@ def _load_cli_inputs(args: argparse.Namespace) -> Dict[str, Any]:
     """Load the CSV files and validate options before any model is fit."""
     allow_nan = args.missing == "impute"
     categorical = _categorical_names(args)
+    if args.sample_weight == args.target:
+        raise ValueError(
+            f"[!] --sample-weight '{args.sample_weight}' is the target column."
+        )
+    if args.sample_weight is not None and args.sample_weight in categorical:
+        raise ValueError(
+            f"[!] '{args.sample_weight}' is given to both --sample-weight and --categorical."
+        )
     X_train, y_train, feature_names = _load_csv(
-        args.train_data, args.target, allow_nan, categorical
+        args.train_data, args.target, allow_nan, categorical, args.sample_weight
     )
     X_eval, y_eval, eval_names = _load_csv(
-        args.eval_data, args.target, allow_nan, categorical
+        args.eval_data, args.target, allow_nan, categorical, args.sample_weight
     )
+    # Only when given, so a ranker without the option still works here.
+    train_weight: Dict[str, Any] = {}
+    eval_weight: Dict[str, Any] = {}
+    if args.sample_weight is not None:
+        train_weight["sample_weight"] = _load_weights(
+            args.train_data, args.target, args.sample_weight
+        )
+        eval_weight["sample_weight"] = _load_weights(
+            args.eval_data, args.target, args.sample_weight
+        )
     if eval_names != feature_names:
         raise ValueError(
             "[!] Evaluation feature names and order must match training data."
@@ -313,6 +357,8 @@ def _load_cli_inputs(args: argparse.Namespace) -> Dict[str, Any]:
         "eval": (X_eval, y_eval),
         "feature_groups": feature_groups,
         "categorical": categorical,
+        "train_weight": train_weight,
+        "eval_weight": eval_weight,
     }
 
 
@@ -328,9 +374,10 @@ def _run_ranking(args: argparse.Namespace) -> Dict[str, Any]:
         # Only when given, so a ranker without the option still works here.
         **({"categorical": inputs["categorical"]} if inputs["categorical"] else {}),
     )
-    ranker.fit(*inputs["train"])
+    ranker.fit(*inputs["train"], **inputs["train_weight"])
     return ranker.rank_features(
         *inputs["eval"],
+        **inputs["eval_weight"],
         scoring=args.scoring,
         feature_groups=inputs["feature_groups"],
         n_repeats=args.n_repeats,

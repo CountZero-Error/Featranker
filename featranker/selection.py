@@ -158,12 +158,16 @@ class ConsensusSelector(SelectorMixin, BaseEstimator):
         ):
             raise ValueError("[!] min_shadow_families must be a positive integer.")
 
-    def fit(self, X: Any, y: Any, groups: Any = None) -> "ConsensusSelector":
+    def fit(
+        self, X: Any, y: Any, groups: Any = None, sample_weight: Any = None
+    ) -> "ConsensusSelector":
         """
         Rank on X/y only (resampled) and keep the groups the rule selects.
 
         groups: row groups for a group-aware cv (e.g. GroupKFold); in a
-        Pipeline pass it as select__groups.
+        Pipeline pass it as select__groups. sample_weight: row weights, as in
+        rank_resampled(); in a Pipeline, enable scikit-learn metadata routing
+        and call set_fit_request(sample_weight=True) on the selector.
         """
         # A failed refit must not leave the previous fit's state behind.
         for attribute in FITTED_ATTRIBUTES:
@@ -218,6 +222,7 @@ class ConsensusSelector(SelectorMixin, BaseEstimator):
             random_state=self.random_state,
             # k may be a NumPy integer (e.g. from a GridSearchCV grid).
             top_k=int(self.k) if self.k is not None else 5,
+            sample_weight=sample_weight,
         )
 
         rows = report["stability"]
