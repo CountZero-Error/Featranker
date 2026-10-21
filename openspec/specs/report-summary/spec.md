@@ -55,18 +55,11 @@ Turn the report reading guide into a deterministic, offline function that lists 
 - **THEN** a `few_families` warning is emitted
 
 ### Requirement: Invalid input
-`summarize` SHALL raise `TypeError` when given a non-dict. It SHALL raise `ValueError` naming the missing key when a required report key is absent. The required keys are `baseline_score`, `models`, `consensus`, and `failures`.
+`summarize` SHALL raise `TypeError` when given a non-dict. It SHALL raise `ValueError` naming the missing key when a required report key is absent. The required keys are `baseline_score`, `models`, `consensus`, and `failures`; for a report with `evaluation_mode == "resampled"` they are `splits`, `stability`, and `failures`.
 
 #### Scenario: Missing key
 - **WHEN** `summarize({"models": {}})` is called
 - **THEN** a `ValueError` mentioning `baseline_score` is raised
-
-### Requirement: Resampled reports are rejected with guidance
-`summarize` SHALL raise `ValueError` when given a report with `evaluation_mode == "resampled"`. The message SHALL say to summarize each entry of `report["splits"]` (its `report` field) instead.
-
-#### Scenario: Resampled report
-- **WHEN** `summarize(resampled_report)` is called
-- **THEN** a `ValueError` mentioning `splits` is raised
 
 ### Requirement: Groups below shadow are reported
 When consensus rows include `above_shadow_share`, `summarize` SHALL emit one `below_shadow` finding, with severity `info`, listing every consensus group whose `above_shadow_share < 0.5` along with its share. The finding SHALL come after `within_noise`. Without `above_shadow_share`, no `below_shadow` finding SHALL be emitted.
@@ -100,4 +93,26 @@ When the report has `evidence.correlation.pairs` and it is non-empty, `summarize
 #### Scenario: Evidence stage failures
 - **WHEN** `failures` contains a failure with stage `"evidence"`
 - **THEN** the `failures` rule emits a finding for that stage with severity `"info"`
+
+### Requirement: Resampled reports are summarised
+`summarize` SHALL accept a report with `evaluation_mode == "resampled"` and return these findings, in this order, each only when its condition holds:
+- `split_failures` (warning): splits that failed outright, with their indices and error types.
+- `failures`: model failures aggregated over splits, one finding per stage, each model listed with the splits it failed in; severity as for single-split reports.
+- `gate_off` (warning): splits whose `baseline_score` is `None`.
+- `empty_consensus` (warning): splits whose consensus is empty.
+- `below_shadow` (info): stability rows with `above_shadow_share < 0.5`, with their shares.
+- `insufficient_splits` (info): shadows are on and `shadow_test.min_p_value > 0.05`, stating that no group can reach a q-value of 0.05 with this many splits.
+Findings SHALL have the same shape as single-split findings, and the report SHALL not be modified.
+
+#### Scenario: Failed split
+- **WHEN** split 2 of a resampled report failed outright
+- **THEN** a `split_failures` warning lists split 2
+
+#### Scenario: Few splits
+- **WHEN** a resampled report with shadows has 3 splits
+- **THEN** an `insufficient_splits` finding is emitted
+
+#### Scenario: Clean resampled report
+- **WHEN** every split ranked with a gate and a consensus, without shadows
+- **THEN** `summarize` returns no warnings
 

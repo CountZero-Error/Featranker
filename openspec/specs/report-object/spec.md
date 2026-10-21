@@ -17,7 +17,7 @@ Each split's report inside a resampled report SHALL also be a `Report`.
 - **THEN** it equals the dict, serializes to the same JSON as the dict, and round-trips through pickle as an equal `Report`
 
 ### Requirement: summary
-`Report.summary()` SHALL return `summarize(self)`. For a resampled report it SHALL raise the same `ValueError` as `summarize`.
+`Report.summary()` SHALL return `summarize(self)`. For a resampled report it SHALL return the same resampled findings as `summarize`.
 
 #### Scenario: Same findings
 - **WHEN** `report.summary()` is called on a single-split report
