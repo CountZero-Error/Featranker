@@ -128,6 +128,10 @@ When any [sample weights](usage.md#sample-weights) are used, the report (and eac
 
 With [`max_samples`](usage.md#fewer-evaluation-rows-max_samples), the report has top-level `max_samples` (as given) and, for `rank_features()` (and each resampled split report), `n_eval_rows`, the number of evaluation rows actually scored; without it neither key appears. `run["data_sha256"]` still covers all the evaluation rows passed.
 
+<a id="several-scorers"></a>
+
+With [several scorers](usage.md#several-metrics) (`scoring=["r2", "neg_mean_absolute_error"]`), `scoring` names the primary scorer, and the report adds `secondary_scoring` (the other names, in order) and `secondary_baseline_scores` (name to the fitted dummy's score, or `null` if it could not be scored). Each model gains `secondary`: per secondary scorer, `{"evaluation_score": ..., "importance": {group: {"mean": ..., "std": ...}}}` computed on the same permuted copies as the primary `importance`, or `null` if that scorer failed for the model (the model stays ranked, with a `failures` entry at stage `"evidence"` naming the scorer). `consensus`, `stability`, shadows, and everything else use the primary scorer only. Resampled reports have `secondary_scoring` at the top and `secondary` in each split's models. With one scorer none of these keys appear.
+
 With `evidence=True`, each model also has `train_score` and `overfit_gap` (`null` if the training score could not be computed, with a `failures` entry at stage `"evidence"`), the report has a top-level `evidence` block, and models SHAP can explain have `shap`. Without `evidence`, none of these keys appear. See [Evidence](usage.md#evidence).
 
 ```python

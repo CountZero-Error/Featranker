@@ -168,6 +168,8 @@ With `sample_weight=` on `fit()`, `rank_features()`, and `rank_resampled()` (and
 
 With `max_samples=` on `rank_features()` and `rank_resampled()` (`ConsensusSelector(max_samples=...)`, `--max-samples` on the CLI), permutation scores use one random subsample of the evaluation rows, the same for the dummy gate and every score ([details](https://github.com/CountZero-Error/Featranker/blob/main/docs/usage.md#fewer-evaluation-rows-max_samples)).
 
+With `scoring=["r2", "neg_mean_absolute_error"]` (a list; `--scoring a,b` on the CLI), the first scorer ranks and the others are scored on the same permuted copies, reported per model as `secondary` ([details](https://github.com/CountZero-Error/Featranker/blob/main/docs/usage.md#several-metrics)).
+
 Every report carries a `run` block (preset, data and split fingerprints, and the `auto_groups` threshold when grouping was automatic) so repeated runs can be compared, and `summarize()` reads resampled reports too ([details](https://github.com/CountZero-Error/Featranker/blob/main/docs/usage.md#comparing-runs)).
 
 > [!IMPORTANT]

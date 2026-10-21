@@ -12,7 +12,6 @@ from typing import Any, Dict, List, Optional
 
 import numpy as np
 import yaml
-from sklearn.metrics import get_scorer
 
 from .evidence import auto_groups, auto_groups_record
 from .importance import (
@@ -20,6 +19,7 @@ from .importance import (
     _float_target,
     _resolve_feature_groups,
     _resolve_max_samples,
+    _resolve_scorers,
 )
 
 
@@ -203,7 +203,10 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--scoring",
         required=True,
-        help="Scikit-learn scorer name, such as neg_mean_absolute_error.",
+        help=(
+            "Scikit-learn scorer name, such as neg_mean_absolute_error, or "
+            "several separated by commas (the first is primary)."
+        ),
     )
     parser.add_argument(
         "--feature-groups",
@@ -337,6 +340,13 @@ def _categorical_names(args: argparse.Namespace) -> List[str]:
     return names
 
 
+def _scoring_names(args: argparse.Namespace) -> List[str]:
+    names = [name.strip() for name in args.scoring.split(",")]
+    if not all(names):
+        raise ValueError("[!] --scoring has an empty scorer name.")
+    return names
+
+
 def _load_cli_inputs(args: argparse.Namespace) -> Dict[str, Any]:
     """Load the CSV files and validate options before any model is fit."""
     allow_nan = args.missing == "impute"
@@ -382,7 +392,7 @@ def _load_cli_inputs(args: argparse.Namespace) -> Dict[str, Any]:
         feature_groups = _load_feature_groups(args.feature_groups)
     # Fail fast: rank_features repeats these checks, but only after
     # every model has been fit.
-    get_scorer(args.scoring)
+    _resolve_scorers(_scoring_names(args))
     if args.n_repeats < 1:
         raise ValueError("[!] n_repeats must be a positive integer.")
     if args.max_samples is not None:
@@ -416,10 +426,12 @@ def _run_ranking(args: argparse.Namespace) -> Dict[str, Any]:
     max_samples: Dict[str, Any] = (
         {} if inputs["max_samples"] is None else {"max_samples": inputs["max_samples"]}
     )
+    names = _scoring_names(args)
+    scoring = names[0] if len(names) == 1 else names
     report = ranker.rank_features(
         *inputs["eval"],
         **{**inputs["eval_weight"], **max_samples},
-        scoring=args.scoring,
+        scoring=scoring,
         feature_groups=inputs["feature_groups"],
         n_repeats=args.n_repeats,
         random_state=args.random_state,

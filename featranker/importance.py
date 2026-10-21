@@ -14,7 +14,7 @@ import platform
 import re
 import warnings
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterator, List, Literal, Optional, Union
+from typing import Any, Callable, Dict, Iterator, List, Literal, Optional, Sequence, Union
 
 import numpy as np
 import sklearn
@@ -409,8 +409,26 @@ def _resolve_scorer(scoring: Any) -> tuple[Any, str]:
     if isinstance(scoring, str):
         return get_scorer(scoring), scoring
     if callable(scoring):
-        return scoring, getattr(scoring, "__name__", type(scoring).__name__)
+        # make_scorer objects have no __name__; their score function does.
+        named = getattr(scoring, "_score_func", scoring)
+        return scoring, getattr(named, "__name__", type(scoring).__name__)
     raise TypeError("[!] scoring must be a scikit-learn scorer name or callable.")
+
+
+def _resolve_scorers(scoring: Any) -> List[tuple[Any, str]]:
+    """[(scorer, name)], primary first; a name or callable is a one-element list."""
+    if not isinstance(scoring, (list, tuple)):
+        return [_resolve_scorer(scoring)]
+    if not scoring:
+        raise ValueError("[!] scoring must contain at least one scorer.")
+    resolved = [_resolve_scorer(entry) for entry in scoring]
+    names = [name for _, name in resolved]
+    if len(set(names)) != len(names):
+        raise ValueError(
+            "[!] Scorer names in scoring must be unique. Wrap a scorer in a function "
+            "with a distinct __name__ to tell two apart."
+        )
+    return resolved
 
 
 def _failure(model: Optional[str], stage: str, error: Exception) -> Dict[str, Any]:
@@ -907,33 +925,72 @@ def _group_importances(
     baseline: float,
     names: Optional[List[str]] = None,
     weights: Optional[np.ndarray] = None,
-) -> Dict[str, Dict[str, Any]]:
+    secondary: Optional[Dict[str, tuple[Any, float]]] = None,
+) -> tuple[Dict[str, Dict[str, Any]], Dict[str, Any]]:
+    """
+    Importances per group, and per secondary scorer ({name: (scorer, baseline)})
+    its {group: {mean, std}} or, if it raised, the exception. Secondary
+    scorers score the same permuted copies as the primary.
+    """
     # One scratch copy per model; only the group's columns are
     # rewritten per repeat and restored after the group.
     X_permuted = X_values.copy()
     importances: Dict[str, Dict[str, Any]] = {}
+    secondary_drops: Dict[str, Dict[str, List[float]]] = {
+        name: {} for name in secondary or {}
+    }
+    errors: Dict[str, Exception] = {}
     for group_name, column_indices in groups.items():
         columns = np.asarray(column_indices, dtype=np.intp)
         values: List[float] = []
+        for name in secondary_drops:
+            secondary_drops[name][group_name] = []
         for _ in range(n_repeats):
             row_order = rng.permutation(len(X_values))
             X_permuted[:, columns] = X_values[np.ix_(row_order, columns)]
+            X_model = _model_X(X_permuted, names)
             permuted_score = _finite_float(
-                scorer(
-                    model, _model_X(X_permuted, names), y_values, **_score_weights(weights)
-                ),
+                scorer(model, X_model, y_values, **_score_weights(weights)),
                 "permuted score",
             )
             values.append(
                 _finite_float(baseline - permuted_score, "permutation importance")
             )
+            for name, (other, other_baseline) in (secondary or {}).items():
+                if name in errors:
+                    continue
+                try:
+                    score = _finite_float(
+                        other(model, X_model, y_values, **_score_weights(weights)),
+                        "permuted score",
+                    )
+                    secondary_drops[name][group_name].append(
+                        _finite_float(other_baseline - score, "permutation importance")
+                    )
+                except Exception as error:
+                    errors[name] = error
         X_permuted[:, columns] = X_values[:, columns]
         importances[group_name] = {
             "values": values,
             "mean": _finite_float(np.mean(values), "importance mean"),
             "std": _finite_float(np.std(values), "importance standard deviation"),
         }
-    return importances
+    results: Dict[str, Any] = {}
+    for name, by_group in secondary_drops.items():
+        if name in errors:
+            results[name] = errors[name]
+            continue
+        try:
+            results[name] = {
+                group: {
+                    "mean": _finite_float(np.mean(drops), "importance mean"),
+                    "std": _finite_float(np.std(drops), "importance standard deviation"),
+                }
+                for group, drops in by_group.items()
+            }
+        except Exception as error:
+            results[name] = error
+    return importances, results
 
 
 def _permutation_importances(
@@ -948,11 +1005,14 @@ def _permutation_importances(
     shadow_groups: Optional[Dict[str, List[int]]] = None,
     names: Optional[List[str]] = None,
     weights: Optional[np.ndarray] = None,
-) -> tuple[Dict[str, Dict[str, Any]], Optional[Dict[str, Dict[str, Any]]]]:
+    secondary: Optional[Dict[str, tuple[Any, float]]] = None,
+) -> tuple[
+    Dict[str, Dict[str, Any]], Optional[Dict[str, Dict[str, Any]]], Dict[str, Any]
+]:
     rng = np.random.default_rng(random_state)
-    importances = _group_importances(
+    importances, secondary_results = _group_importances(
         model, scorer, X_values, y_values, groups, n_repeats, rng, baseline, names,
-        weights,
+        weights, secondary,
     )
     # Real groups are ranked among themselves only; shadows are compared, not ranked.
     ranks = _assign_ranks(
@@ -964,11 +1024,11 @@ def _permutation_importances(
     # values match a run without shadows on the same matrix.
     shadow = None
     if shadow_groups is not None:
-        shadow = _group_importances(
+        shadow, _ = _group_importances(
             model, scorer, X_values, y_values, shadow_groups, n_repeats, rng, baseline,
             names, weights,
         )
-    return importances, shadow
+    return importances, shadow, secondary_results
 
 
 def _rank_model(
@@ -986,18 +1046,34 @@ def _rank_model(
     train_data: Optional[tuple[np.ndarray, np.ndarray, Optional[np.ndarray]]] = None,
     names: Optional[List[str]] = None,
     weights: Optional[np.ndarray] = None,
+    secondary_scorers: Sequence[tuple[Any, str]] = (),
 ) -> tuple[
-    str, Optional[Dict[str, Any]], Optional[Dict[str, str]], Optional[Dict[str, str]]
+    str, Optional[Dict[str, Any]], Optional[Dict[str, str]], List[Dict[str, str]]
 ]:
-    """Returns (name, report, ranking failure, evidence failure)."""
+    """Returns (name, report, ranking failure, evidence failures)."""
     try:
+        X_model = _model_X(X_values, names)
         baseline = _finite_float(
-            scorer(model, _model_X(X_values, names), y_values, **_score_weights(weights)),
+            scorer(model, X_model, y_values, **_score_weights(weights)),
             "baseline score",
         )
-        importances, shadow = _permutation_importances(
+        # A secondary scorer that fails is dropped (null) and reported as evidence.
+        secondary: Dict[str, tuple[Any, float]] = {}
+        secondary_errors: Dict[str, Exception] = {}
+        for other, other_name in secondary_scorers:
+            try:
+                secondary[other_name] = (
+                    other,
+                    _finite_float(
+                        other(model, X_model, y_values, **_score_weights(weights)),
+                        "baseline score",
+                    ),
+                )
+            except Exception as error:
+                secondary_errors[other_name] = error
+        importances, shadow, secondary_results = _permutation_importances(
             model, scorer, X_values, y_values, groups, n_repeats, random_state,
-            baseline, shadow_groups, names, weights,
+            baseline, shadow_groups, names, weights, secondary,
         )
         report = {
             "family": family,
@@ -1012,7 +1088,25 @@ def _rank_model(
                 entry["above_shadow"] = entry["mean"] > shadow_max
             report["shadow_importance"] = shadow
             report["shadow_max"] = shadow_max
-        evidence_failure = None
+        evidence_failures: List[Dict[str, str]] = []
+        if secondary_scorers:
+            secondary_errors.update(
+                {n: r for n, r in secondary_results.items() if isinstance(r, Exception)}
+            )
+            report["secondary"] = {
+                other_name: None
+                if other_name in secondary_errors
+                else {
+                    "evaluation_score": secondary[other_name][1],
+                    "importance": secondary_results[other_name],
+                }
+                for _, other_name in secondary_scorers
+            }
+            for other_name, other_error in secondary_errors.items():
+                failure = _failure(name, "evidence", other_error)
+                evidence_failures.append(
+                    {**failure, "message": f"scorer {other_name}: {failure['message']}"}
+                )
         if train_data is not None:
             try:
                 train_X, train_y, train_weights = train_data
@@ -1029,10 +1123,10 @@ def _rank_model(
                 )
             except Exception as error:
                 report["train_score"] = report["overfit_gap"] = None
-                evidence_failure = _failure(name, "evidence", error)
-        return name, report, None, evidence_failure
+                evidence_failures.append(_failure(name, "evidence", error))
+        return name, report, None, evidence_failures
     except Exception as error:
-        return name, None, _failure(name, "ranking", error), None
+        return name, None, _failure(name, "ranking", error), []
 
 
 class FeatureRanker:
@@ -1330,7 +1424,7 @@ class FeatureRanker:
             raise RuntimeError("[!] Call fit() before rank_features().")
         if not _is_positive_int(n_repeats):
             raise ValueError("[!] n_repeats must be a positive integer.")
-        scorer, scoring_name = _resolve_scorer(scoring)
+        (scorer, scoring_name), *secondary_scorers = _resolve_scorers(scoring)
 
         categorical = [
             index
@@ -1390,6 +1484,13 @@ class FeatureRanker:
         baseline_score = self._score_baseline(
             scorer, X_values[rows], y_scored, ranking_failures, weights_scored
         )
+        # The dummy is not ranked, so a failure here is null, not a failure entry.
+        secondary_baselines = {
+            other_name: self._score_baseline(
+                other, X_values[rows], y_scored, [], weights_scored
+            )
+            for other, other_name in secondary_scorers
+        }
         X_models, shadow_groups = X_values, None
         if self.shadows:
             # An independent, reproducible shuffle of the evaluation rows.
@@ -1426,19 +1527,18 @@ class FeatureRanker:
             (name, model, scorer, X_models[rows], y_scored, groups, n_repeats,
              random_state, baseline_score, self.model_families_.get(name, name),
              None if name in no_shadows else shadow_groups, train_data, columns,
-             weights_scored)
+             weights_scored, secondary_scorers)
             for name, model in self.trained_models.items()
         ]
         evidence_failures: List[Dict[str, str]] = []
-        for name, model_report, failure, evidence_failure in _run_models(
+        for name, model_report, failure, model_evidence_failures in _run_models(
             _rank_model, jobs, self.n_jobs, "[*] Ranking models", self.verbose
         ):
             if failure is None:
                 model_reports[name] = model_report
             else:
                 ranking_failures.append(failure)
-            if evidence_failure is not None:
-                evidence_failures.append(evidence_failure)
+            evidence_failures.extend(model_evidence_failures)
 
         if not model_reports:
             details = json.dumps(ranking_failures)
@@ -1463,6 +1563,9 @@ class FeatureRanker:
             + evidence_failures
             + shadow_failures,
         }
+        if secondary_scorers:
+            report["secondary_scoring"] = [name for _, name in secondary_scorers]
+            report["secondary_baseline_scores"] = secondary_baselines
         if self.model_input == "dataframe":
             report["model_input"] = "dataframe"
         if max_samples is not None:
@@ -1557,7 +1660,7 @@ class FeatureRanker:
             raise ValueError("[!] top_k must be a positive integer.")
         if max_samples is not None:
             _resolve_max_samples(max_samples, len(X_values))
-        _resolve_scorer(scoring)
+        _resolve_scorers(scoring)
         _resolve_feature_groups(names, feature_groups)
         splits = _resolve_splits(
             cv, X_values, y_values, groups, self.task, random_state
@@ -1641,6 +1744,8 @@ class FeatureRanker:
             "stability": _build_stability(split_reports, len(splits), top_k),
             "failures": failures,
         }
+        if "secondary_scoring" in first:
+            result["secondary_scoring"] = first["secondary_scoring"]
         if self.model_input == "dataframe":
             result["model_input"] = "dataframe"
         if max_samples is not None:

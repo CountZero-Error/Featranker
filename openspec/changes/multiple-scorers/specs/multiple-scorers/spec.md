@@ -5,7 +5,7 @@ Check a ranking under several metrics in one run, while one primary scorer drive
 ## ADDED Requirements
 
 ### Requirement: Scorer list
-`scoring` SHALL accept a scorer name, a callable, or a non-empty list or tuple of them. Names SHALL be unique (a callable is named as today); an empty list, a duplicate name, or an invalid entry SHALL raise before any model is ranked. With a single scorer, given alone or in a one-element list, the report SHALL be unchanged. The first entry SHALL be primary: `scoring` in the report SHALL name it, and the dummy gate, consensus, shadow evidence, stability, and selection SHALL use it alone.
+`scoring` SHALL accept a scorer name, a callable, or a non-empty list or tuple of them. Names SHALL be unique (a callable is named by its `__name__`, a `make_scorer` object by its score function's; two with the same name SHALL be told apart by wrapping one in a function); an empty list, a duplicate name, or an invalid entry SHALL raise before any model is ranked. With a single scorer, given alone or in a one-element list, the report SHALL be unchanged. The first entry SHALL be primary: `scoring` in the report SHALL name it, and the dummy gate, consensus, shadow evidence, stability, and selection SHALL use it alone.
 
 #### Scenario: Primary unchanged
 - **WHEN** the same data is ranked with `scoring="accuracy"` and with `scoring=["accuracy", "neg_log_loss"]`

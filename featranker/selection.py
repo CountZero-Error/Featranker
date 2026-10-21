@@ -41,7 +41,8 @@ class ConsensusSelector(SelectorMixin, BaseEstimator):
 
     Args:
         task: "clf" or "reg".
-        scoring: scikit-learn scorer name or callable.
+        scoring: scikit-learn scorer name or callable, or a list of them: the
+            first selects, the others are only reported (secondary results).
         k: Keep the first k groups in the stability order.
         min_shadow_share: Keep groups whose above_shadow_share is at least
             this (turns shadow features on). With k too, filter then take k.

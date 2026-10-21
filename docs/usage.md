@@ -40,7 +40,7 @@ Returns the ranker itself. Raises if no model fits.
 |---|---|---|
 | `X_eval` | required | Evaluation features with the same columns, in the same order, as `fit()`. Keeping them separate from the training data is up to you. |
 | `y_eval` | required | Evaluation target. Class labels must have appeared in training. |
-| `scoring` | required, keyword-only | scikit-learn scorer name or a callable `(estimator, X, y) -> float` where higher is better. See [Choosing a scorer](#choosing-a-scorer). |
+| `scoring` | required, keyword-only | scikit-learn scorer name or a callable `(estimator, X, y) -> float` where higher is better, or a non-empty list or tuple of them (the first is primary). See [Choosing a scorer](#choosing-a-scorer) and [Several metrics](#several-metrics). |
 | `feature_groups` | `None` | Dict of `{group_name: [feature, ...]}` to shuffle together. Ungrouped features are ranked on their own. See [Grouped permutation](#grouped-permutation). |
 | `n_repeats` | `10` | Shuffles per feature group; a positive integer. More repeats give a more precise average importance and take longer. |
 | `random_state` | `None` | Integer seed for permutation-importance shuffles. Reproducible reports also require deterministic or seeded estimators and deterministic scoring; with shadows enabled, fix `shadow_seed` too. |
@@ -168,6 +168,35 @@ max_samples=40: 40 rows, top 3 ['bmi', 's5', 'sex']
 ```
 
 Same data and split as the example above. A half-size sample already swaps `bp` out of the top three, so judge the ranking's stability before you trade rows for speed.
+
+### Several metrics
+
+`scoring` also takes a list or tuple, such as `["accuracy", "neg_log_loss"]`, to check a ranking under more than one metric without refitting the models. Names must be unique (a callable is named by its `__name__`, a `make_scorer` object by its score function's, so wrap one of two `make_scorer(f1_score, ...)` scorers in a function with a distinct `__name__`; an empty list, a repeated name, or an invalid entry raises before any model is ranked). The first scorer is primary: the dummy gate, consensus, shadow evidence, stability, `summarize()`, and `ConsensusSelector` use it alone, so the ranking is exactly what a single-scorer run gives (a one-element list changes nothing). Every other scorer is secondary: on the same permuted copies of the data, each model also gets its score, and its importance per feature group (`mean`, `std`), under that scorer. There is no consensus or stability table per secondary scorer; read `report["models"][model]["secondary"][scorer]` (see [Report](report.md#several-scorers)). Each secondary scorer predicts again on every permuted copy, so time grows with the number of scorers; `max_samples` offsets it, and applies the same subsample, and `sample_weight` the same weights, to every scorer. If a secondary scorer raises or returns a non-finite value for a model, that model stays ranked, its entry is `null`, and `failures` gets an `"evidence"` entry. It works the same in `rank_resampled()`, `ConsensusSelector(scoring=[...])`, and the CLI (`--scoring accuracy,neg_log_loss`).
+
+```python
+report = ranker.rank_features(
+    X_eval, y_eval, scoring=["r2", "neg_mean_absolute_error"], random_state=42
+)
+
+print(report["scoring"], report["secondary_scoring"])
+for name, model in report["models"].items():
+    mae = model["secondary"]["neg_mean_absolute_error"]
+    top = max(mae["importance"], key=lambda group: mae["importance"][group]["mean"])
+    print(f"{name}: r2 {model['evaluation_score']:.2f}, MAE {-mae['evaluation_score']:.1f}, top under MAE {top}")
+print([row["feature_group"] for row in report["consensus"][:3]])
+```
+
+```text
+r2 ['neg_mean_absolute_error']
+ridge_regression: r2 0.39, MAE 44.7, top under MAE s5
+svr_regression: r2 0.14, MAE 53.4, top under MAE bmi
+decision_tree_regressor: r2 -0.30, MAE 64.0, top under MAE s5
+random_forest_regressor: r2 0.30, MAE 47.9, top under MAE bmi
+hist_gradient_boosting_regressor: r2 0.28, MAE 46.6, top under MAE s5
+['s5', 'bmi', 'bp']
+```
+
+Same data and split as the example above, with `group="fast"`. The consensus is the `r2` ranking; the MAE columns show whether each model would rank the top group the same way under the second metric.
 
 <a id="your-own-models"></a>
 
@@ -443,7 +472,7 @@ weighted {'train': True, 'eval': True} {'x1': 1.44, 'x2': 0.02}
 
 ## ▍ Command line
 
-The CLI takes separate training and evaluation CSV files; the features are numeric unless named by `--categorical`.
+The CLI takes separate training and evaluation CSV files; the features are numeric unless named by `--categorical`. `--scoring` takes one scorer name or several separated by commas (`--scoring accuracy,neg_log_loss`; the first is primary, see [Several metrics](#several-metrics)).
 
 ```bash
 featranker \
@@ -538,7 +567,7 @@ Output shown with the `xgboost` and `catboost` extras installed. A group's *plac
 | Parameter | Default | Meaning |
 |---|---|---|
 | `X`, `y`, `feature_names` | | All development data, with the same rules as `fit()`. Each split takes its own training and evaluation rows from it. |
-| `scoring`, `feature_groups`, `n_repeats` | | Same as `rank_features()`. |
+| `scoring`, `feature_groups`, `n_repeats` | | Same as `rank_features()`; `scoring` may be a list, and the split reports then carry the secondary results (stability uses the primary scorer). |
 | `cv` | `5` | An integer number of folds (shuffled; stratified for `task="clf"`), any scikit-learn splitter such as `RepeatedKFold` or `GroupKFold`, or a list of `(train_indices, eval_indices)` pairs. |
 | `groups` | `None` | Passed to the splitter's `split()`, for example row groups for `GroupKFold`. |
 | `random_state` | `None` | Seeds integer-`cv` shuffling. Split `i` uses permutation seed `random_state + i`. |
@@ -1005,7 +1034,7 @@ Output shown with the `xgboost` and `catboost` extras installed. The score is ho
 
 | Parameter | Default | Meaning |
 |---|---|---|
-| `task`, `scoring` | required | As in `FeatureRanker` and `rank_features()`. |
+| `task`, `scoring` | required | As in `FeatureRanker` and `rank_features()`; `scoring` may be a list (the first scorer selects, the rest are reported in `report_`). |
 | `k` | `None` | Keep the first `k` groups in the [stability](report.md#resampled-reports) order (or all groups if there are fewer). Python or NumPy integer. |
 | `min_shadow_share` | `None` | Keep groups whose stability `above_shadow_share` is at least this (0 to 1). Turns on [shadow features](#shadow-features). |
 | `max_shadow_q` | `None` | Keep groups whose stability `shadow_q_value` (the [shadow hits test](#shadow-test)) is at most this (greater than 0, at most 1); a heuristic filter, since the values are [uncalibrated](#shadow-test). Turns on shadow features. Use `cv` with 10 or more splits, such as `RepeatedKFold`; with 5 the test has little power. |

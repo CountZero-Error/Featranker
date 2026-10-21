@@ -49,7 +49,9 @@ def _empty_consensus(report: Dict[str, Any]) -> List[Dict[str, Any]]:
 def _failures(report: Dict[str, Any]) -> List[Dict[str, Any]]:
     findings = []
     for stage in FAILURE_STAGES:
-        models = [f["model"] for f in report["failures"] if f.get("stage") == stage]
+        models = list(dict.fromkeys(
+            f["model"] for f in report["failures"] if f.get("stage") == stage
+        ))
         if not models:
             continue
         severity = "info" if stage in ("initialization", "evidence") else "warning"
@@ -201,7 +203,9 @@ def _resampled_failures(report: Dict[str, Any]) -> List[Dict[str, Any]]:
         models: Dict[str, List[int]] = {}
         for f in report["failures"]:
             if f.get("stage") == stage:
-                models.setdefault(f["model"], []).append(f["split"])
+                at = models.setdefault(f["model"], [])
+                if f["split"] not in at:
+                    at.append(f["split"])
         if not models:
             continue
         severity = "info" if stage in ("initialization", "evidence") else "warning"

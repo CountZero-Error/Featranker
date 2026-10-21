@@ -51,3 +51,10 @@ subsampled_resampled: Report = ranker.rank_resampled(
     np.ones((4, 1)), np.ones(4), scoring="r2", cv=2, max_samples=2
 )
 subsampled_selector = ConsensusSelector("reg", "r2", k=2, max_samples=0.5)
+multi: Report = ranker.rank_features(
+    np.ones((4, 1)), np.ones(4), scoring=["r2", "neg_mean_absolute_error"]
+)
+multi_resampled: Report = ranker.rank_resampled(
+    np.ones((4, 1)), np.ones(4), scoring=("r2", "neg_mean_absolute_error"), cv=2
+)
+multi_selector = ConsensusSelector("reg", ["r2", "neg_mean_absolute_error"], k=2)
