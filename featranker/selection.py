@@ -59,7 +59,7 @@ class ConsensusSelector(SelectorMixin, BaseEstimator):
             fitting noise can pass alone. Its false-selection rate is not
             yet measured (see the calibration study). Turns shadow features
             on; combines with the other rules.
-        group, models, n_jobs, shadow_seed, shadow_mode, missing, categorical:
+        group, models, n_jobs, shadow_seed, shadow_mode, missing, categorical, model_input:
             As in FeatureRanker. With missing="impute", NaN is accepted in
             fit() and transform() (the selector only picks columns), so put an
             imputer after it in a Pipeline for the final model. With
@@ -91,6 +91,7 @@ class ConsensusSelector(SelectorMixin, BaseEstimator):
         shadow_mode: Literal["joint", "independent"] = "joint",
         missing: Literal["error", "impute"] = "error",
         categorical: Union[List[str], Literal["auto"], None] = None,
+        model_input: Literal["array", "dataframe"] = "array",
         n_jobs: Optional[int] = None,
         verbose: bool = False,
     ) -> None:
@@ -111,16 +112,17 @@ class ConsensusSelector(SelectorMixin, BaseEstimator):
         self.shadow_mode = shadow_mode
         self.missing = missing
         self.categorical = categorical
+        self.model_input = model_input
         self.n_jobs = n_jobs
         self.verbose = verbose
 
     def __setstate__(self, state: Dict[str, Any]) -> None:
         # Selectors pickled by 1.3 lack the 1.4 max_shadow_q parameter, and
         # those pickled before 1.6 lack min_shadow_families and shadow_mode, and
-        # those pickled before 1.7 lack missing, and those before 1.9 lack categorical.
+        # those pickled before 1.7 lack missing, those before 1.9 lack categorical, and those before 1.10 lack model_input.
         defaults = {
             "max_shadow_q": None, "min_shadow_families": None, "shadow_mode": "joint",
-            "missing": "error", "categorical": None,
+            "missing": "error", "categorical": None, "model_input": "array",
         }
         super().__setstate__({**defaults, **state})
 
@@ -202,6 +204,7 @@ class ConsensusSelector(SelectorMixin, BaseEstimator):
             shadow_mode=self.shadow_mode,
             missing=self.missing,
             categorical=self.categorical,
+            model_input=self.model_input,
         )
         report = ranker.rank_resampled(
             X,

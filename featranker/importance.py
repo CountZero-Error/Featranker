@@ -10,7 +10,7 @@ import math
 import platform
 import warnings
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Literal, Optional, Union
+from typing import Any, Callable, Dict, Iterator, List, Literal, Optional, Union
 
 import numpy as np
 import sklearn
@@ -23,18 +23,19 @@ from sklearn.dummy import DummyClassifier, DummyRegressor
 from sklearn.impute import SimpleImputer
 from sklearn.metrics import get_scorer
 from sklearn.model_selection import KFold, StratifiedKFold
-from sklearn.pipeline import make_pipeline
+from sklearn.pipeline import Pipeline, make_pipeline
 from sklearn.preprocessing import LabelEncoder, OneHotEncoder, StandardScaler
 from sklearn.utils.fixes import parse_version
 from tqdm import tqdm
 
-from .evidence import correlation_evidence, shap_evidence
+from .evidence import _model_X, correlation_evidence, shap_evidence
 from .report import Report
 
 try:
     import pandas as _pd
     PANDAS_MISSING: tuple = (type(_pd.NA), type(_pd.NaT))
 except ImportError:  # pandas is optional
+    _pd = None
     PANDAS_MISSING = ()
 
 task_map = {
@@ -706,11 +707,55 @@ def _with_shadows(X_values: np.ndarray, seed: Any, mode: str = "joint") -> np.nd
     return np.hstack([X_values, shadow])
 
 
+class ShadowColumnsDropped(Exception):
+    """A model's ColumnTransformer ignores some shadow columns."""
+
+
+def _column_transformers(model: Any) -> Iterator[Any]:
+    if isinstance(model, Pipeline):
+        for _, step in model.steps:
+            yield from _column_transformers(step)
+    elif isinstance(model, ColumnTransformer):
+        yield model
+
+
+def _drops_shadows(name: str, model: Any, n_real: int, n_total: int) -> bool:
+    """True if a fitted ColumnTransformer inside `model` leaves a shadow column unused."""
+    shadows = set(range(n_real, n_total))
+    for transformer in _column_transformers(model):
+        # One that sees other columns than the model input is not about the shadows.
+        if getattr(transformer, "n_features_in_", None) != n_total:
+            continue
+        try:
+            indices = transformer._transformer_to_input_indices
+            used: set = set()
+            for step_name, step, _ in transformer.transformers:
+                if not (isinstance(step, str) and step == "drop"):
+                    used.update(indices[step_name])
+            if not (isinstance(transformer.remainder, str) and transformer.remainder == "drop"):
+                used.update(indices["remainder"])
+        except Exception:  # private scikit-learn attributes; cannot verify
+            warnings.warn(
+                f"Cannot verify that model '{name}' keeps the shadow columns.",
+                UserWarning,
+                stacklevel=2,
+            )
+            continue
+        if not shadows <= used:
+            return True
+    return False
+
+
 def _fit_model(
-    name: str, model: Any, X_values: np.ndarray, y_values: np.ndarray
+    name: str,
+    model: Any,
+    X_values: np.ndarray,
+    y_values: np.ndarray,
+    names: Optional[List[str]] = None,
 ) -> tuple[str, Any, Optional[Dict[str, str]]]:
     try:
-        return name, clone(model, safe=False).fit(X_values, y_values), None
+        fitted = clone(model, safe=False).fit(_model_X(X_values, names), y_values)
+        return name, fitted, None
     except Exception as error:
         return name, None, _failure(name, "fit", error)
 
@@ -724,6 +769,7 @@ def _group_importances(
     n_repeats: int,
     rng: np.random.Generator,
     baseline: float,
+    names: Optional[List[str]] = None,
 ) -> Dict[str, Dict[str, Any]]:
     # One scratch copy per model; only the group's columns are
     # rewritten per repeat and restored after the group.
@@ -736,7 +782,7 @@ def _group_importances(
             row_order = rng.permutation(len(X_values))
             X_permuted[:, columns] = X_values[np.ix_(row_order, columns)]
             permuted_score = _finite_float(
-                scorer(model, X_permuted, y_values), "permuted score"
+                scorer(model, _model_X(X_permuted, names), y_values), "permuted score"
             )
             values.append(
                 _finite_float(baseline - permuted_score, "permutation importance")
@@ -760,10 +806,11 @@ def _permutation_importances(
     random_state: Optional[int],
     baseline: float,
     shadow_groups: Optional[Dict[str, List[int]]] = None,
+    names: Optional[List[str]] = None,
 ) -> tuple[Dict[str, Dict[str, Any]], Optional[Dict[str, Dict[str, Any]]]]:
     rng = np.random.default_rng(random_state)
     importances = _group_importances(
-        model, scorer, X_values, y_values, groups, n_repeats, rng, baseline
+        model, scorer, X_values, y_values, groups, n_repeats, rng, baseline, names
     )
     # Real groups are ranked among themselves only; shadows are compared, not ranked.
     ranks = _assign_ranks(
@@ -776,7 +823,8 @@ def _permutation_importances(
     shadow = None
     if shadow_groups is not None:
         shadow = _group_importances(
-            model, scorer, X_values, y_values, shadow_groups, n_repeats, rng, baseline
+            model, scorer, X_values, y_values, shadow_groups, n_repeats, rng, baseline,
+            names,
         )
     return importances, shadow
 
@@ -794,15 +842,18 @@ def _rank_model(
     family: str,
     shadow_groups: Optional[Dict[str, List[int]]] = None,
     train_data: Optional[tuple[np.ndarray, np.ndarray]] = None,
+    names: Optional[List[str]] = None,
 ) -> tuple[
     str, Optional[Dict[str, Any]], Optional[Dict[str, str]], Optional[Dict[str, str]]
 ]:
     """Returns (name, report, ranking failure, evidence failure)."""
     try:
-        baseline = _finite_float(scorer(model, X_values, y_values), "baseline score")
+        baseline = _finite_float(
+            scorer(model, _model_X(X_values, names), y_values), "baseline score"
+        )
         importances, shadow = _permutation_importances(
             model, scorer, X_values, y_values, groups, n_repeats, random_state,
-            baseline, shadow_groups,
+            baseline, shadow_groups, names,
         )
         report = {
             "family": family,
@@ -820,7 +871,10 @@ def _rank_model(
         evidence_failure = None
         if train_data is not None:
             try:
-                train_score = _finite_float(scorer(model, *train_data), "train score")
+                train_X, train_y = train_data
+                train_score = _finite_float(
+                    scorer(model, _model_X(train_X, names), train_y), "train score"
+                )
                 report["train_score"] = train_score
                 report["overfit_gap"] = _finite_float(
                     train_score - baseline, "overfit gap"
@@ -847,6 +901,7 @@ class FeatureRanker:
         shadow_mode: Literal["joint", "independent"] = "joint",
         missing: Literal["error", "impute"] = "error",
         categorical: Union[List[str], Literal["auto"], None] = None,
+        model_input: Literal["array", "dataframe"] = "array",
     ) -> None:
         """
         Initialize configured models without loading or fitting data.
@@ -881,6 +936,11 @@ class FeatureRanker:
                 inside fit() from the training rows only, ranked as one
                 feature, and one-hot encoded by built-in linear models; trees
                 and custom models receive the integer codes.
+            model_input: "array" (default) gives models a float NumPy array.
+                "dataframe" gives every model a pandas DataFrame whose columns
+                are the feature names, then "shadow__<name>" for each shadow
+                column, so custom pipelines can select columns by name.
+                Needs pandas.
         """
         if task not in {"clf", "reg"}:
             raise ValueError("[!] task must be 'clf' or 'reg'.")
@@ -905,6 +965,10 @@ class FeatureRanker:
             raise ValueError("[!] shadow_mode must be 'joint' or 'independent'.")
         if not isinstance(missing, str) or missing not in {"error", "impute"}:
             raise ValueError("[!] missing must be 'error' or 'impute'.")
+        if not isinstance(model_input, str) or model_input not in {"array", "dataframe"}:
+            raise ValueError("[!] model_input must be 'array' or 'dataframe'.")
+        if model_input == "dataframe" and _pd is None:
+            raise ImportError("[!] model_input='dataframe' needs pandas: pip install pandas")
         self.task = task
         self.group = group
         self.n_jobs = n_jobs
@@ -914,6 +978,7 @@ class FeatureRanker:
         self.shadow_mode = shadow_mode
         self.evidence = evidence
         self.missing = missing
+        self.model_input = model_input
         self.categorical = _validate_categorical(categorical)
         self.categorical_features_: List[str] = []
         self.categorical_levels_: Dict[str, List[Optional[str]]] = {}
@@ -945,10 +1010,18 @@ class FeatureRanker:
         self.__dict__.setdefault("categorical", None)
         self.__dict__.setdefault("categorical_features_", [])
         self.__dict__.setdefault("categorical_levels_", {})
+        # ... and those pickled by 1.9 lack the 1.10 model input.
+        self.__dict__.setdefault("model_input", "array")
         if "model_families_" not in self.__dict__:
             self.model_families_ = (
                 _registry_families() if self.user_models is None else {}
             )
+
+    def _model_columns(self, names: List[str]) -> Optional[List[str]]:
+        """Column names models see in "dataframe" mode (shadows last), else None."""
+        if self.model_input != "dataframe":
+            return None
+        return names + [f"shadow__{name}" for name in names] if self.shadows else names
 
     def fit(
         self,
@@ -965,6 +1038,13 @@ class FeatureRanker:
             allow_nan=self.missing == "impute",
             categorical=categorical,
         )
+        if self.model_input == "dataframe" and self.shadows:
+            clashing = [name for name in names if name.startswith("shadow__")]
+            if clashing:
+                raise ValueError(
+                    f"[!] Feature names {clashing} start with 'shadow__', which "
+                    "model_input='dataframe' reserves for shadow columns."
+                )
         y_values = _validate_y(y, len(X_values))
         levels: Dict[str, List[Optional[str]]] = {}
         categorical_missing: Dict[str, int] = {}
@@ -1011,7 +1091,11 @@ class FeatureRanker:
             if self.shadows
             else X_values
         )
-        jobs = [(name, model, X_models, y_values) for name, model in candidates.items()]
+        columns = self._model_columns(names)
+        jobs = [
+            (name, model, X_models, y_values, columns)
+            for name, model in candidates.items()
+        ]
         for name, fitted, failure in _run_models(
             _fit_model, jobs, self.n_jobs, "[*] Training models", self.verbose
         ):
@@ -1109,10 +1193,29 @@ class FeatureRanker:
                 for name, indices in groups.items()
             }
         train_data = (self.train_X_, self.train_y_) if self.evidence else None
+        columns = self._model_columns(self.feature_names_)
+        # A model that ignores the shadow columns gets no shadow evidence.
+        shadow_failures: List[Dict[str, str]] = []
+        no_shadows: set = set()
+        if self.shadows:
+            n_real = len(self.feature_names_)
+            for name, model in self.trained_models.items():
+                if _drops_shadows(name, model, n_real, 2 * n_real):
+                    no_shadows.add(name)
+                    shadow_failures.append(
+                        _failure(
+                            name,
+                            "shadows",
+                            ShadowColumnsDropped(
+                                "A ColumnTransformer in the model does not use every "
+                                "shadow column, so it is left out of the shadow evidence."
+                            ),
+                        )
+                    )
         jobs = [
             (name, model, scorer, X_models, y_values, groups, n_repeats,
              random_state, baseline_score, self.model_families_.get(name, name),
-             shadow_groups, train_data)
+             None if name in no_shadows else shadow_groups, train_data, columns)
             for name, model in self.trained_models.items()
         ]
         evidence_failures: List[Dict[str, str]] = []
@@ -1145,8 +1248,11 @@ class FeatureRanker:
             "failures": self.initialization_failures_
             + self.fit_failures_
             + ranking_failures
-            + evidence_failures,
+            + evidence_failures
+            + shadow_failures,
         }
+        if self.model_input == "dataframe":
+            report["model_input"] = "dataframe"
         if self.shadows:
             report["shadows"] = True
             report["shadow_seed"] = self.shadow_seed
@@ -1173,6 +1279,7 @@ class FeatureRanker:
                 self.train_X_,
                 groups,
                 categorical,
+                columns,
             )
             for name, entry in shap_models.items():
                 model_reports[name]["shap"] = entry
@@ -1241,6 +1348,7 @@ class FeatureRanker:
                     evidence=self.evidence,
                     shadow_mode=self.shadow_mode,
                     missing=self.missing,
+                    model_input=self.model_input,
                     # Names, so "auto" survives the loss of the DataFrame dtypes.
                     categorical=[names[column] for column in categorical] or None,
                 )
@@ -1284,6 +1392,8 @@ class FeatureRanker:
             "stability": _build_stability(split_reports, len(splits), top_k),
             "failures": failures,
         }
+        if self.model_input == "dataframe":
+            result["model_input"] = "dataframe"
         if self.shadows:
             result["shadows"] = True
             result["shadow_seed"] = self.shadow_seed

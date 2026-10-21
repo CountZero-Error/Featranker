@@ -512,7 +512,7 @@ def test_shap_explains_trees_on_codes_and_lists_one_hot_pipelines():
     tree = set(r.models["reg"]["tree"]) & set(report["models"])
     assert linear and tree
     assert linear <= set(unsupported)
-    assert all("one-hot" in unsupported[name] for name in linear)
+    assert all("ColumnTransformer" in unsupported[name] for name in linear)
     explained = {name for name, m in report["models"].items() if "shap" in m}
     assert explained and explained <= tree
     for name in explained & {"random_forest_regressor", "decision_tree_regressor"}:

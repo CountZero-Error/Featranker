@@ -13,7 +13,7 @@ MIN_SHADOW_SHARE = 0.5
 MIN_OVERFIT_SHARE = 0.5
 
 REQUIRED_KEYS = ("baseline_score", "models", "consensus", "failures")
-FAILURE_STAGES = ("initialization", "fit", "ranking", "evidence")
+FAILURE_STAGES = ("initialization", "fit", "ranking", "evidence", "shadows")
 
 
 def _finding(code: str, severity: str, message: str, evidence: Dict[str, Any]) -> Dict[str, Any]:

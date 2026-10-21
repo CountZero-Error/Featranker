@@ -113,6 +113,8 @@ With `missing="impute"`, the report has a top-level `missing` block: `policy` (`
 
 When the data has categorical columns (`categorical="auto"` or a list of names), the report has a top-level `categorical` block: `columns` (the categorical feature names), `train_levels` (name to the number of levels learned from the training rows, the missing-value level included), and `unseen_eval` (name to the number of evaluation values that got the shared "unseen" code). Resampled reports carry it in each split's report, learned on that split's training rows. Without categorical columns there is no `categorical` key. See [Categorical features](usage.md#categorical-features).
 
+With `model_input="dataframe"` the report (and each resampled split report) has `"model_input": "dataframe"`; in the default `"array"` mode the key is absent. See [Columns by name](usage.md#columns-by-name).
+
 With `evidence=True`, each model also has `train_score` and `overfit_gap` (`null` if the training score could not be computed, with a `failures` entry at stage `"evidence"`), the report has a top-level `evidence` block, and models SHAP can explain have `shap`. Without `evidence`, none of these keys appear. See [Evidence](usage.md#evidence).
 
 ```python
@@ -213,7 +215,7 @@ With `evidence=True`, each model also has `train_score` and `overfit_gap` (`null
 
 ## ▍ Failures
 
-- Failures contain `model`, `stage`, `error_type`, and `message`. The stages are `initialization`, `fit`, `ranking`, and (with `evidence=True`) `evidence`; an `evidence` failure leaves the model's ranking untouched.
+- Failures contain `model`, `stage`, `error_type`, and `message`. The stages are `initialization`, `fit`, `ranking`, (with `evidence=True`) `evidence`, and (with `shadows=True`) `shadows`. An `evidence` failure leaves the model's ranking untouched. A `shadows` failure (`error_type` `ShadowColumnsDropped`) means a `ColumnTransformer` in a custom model ignores some shadow columns: the model keeps its importances and ranking vote but has no shadow evidence in that report (see [Columns by name](usage.md#columns-by-name)).
 - Failed models get no zero placeholder and do not enter the consensus.
 - `fit()` raises if no model fits; `rank_features()` raises if every model fails ranking.
 

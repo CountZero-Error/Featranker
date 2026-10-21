@@ -6,7 +6,7 @@
 
 The API is one class: `FeatureRanker(...)`, then `.fit(...)`, then `.rank_features(...)`, which returns a [`Report`](#working-with-reports). [`.rank_resampled(...)`](#resampled-ranking) repeats that over cross-validation splits, [`ConsensusSelector`](#feature-selection) turns the ranking into a scikit-learn pipeline step, [`summarize(report)`](#summarize) reads the result, and [`to_prompt` / `explain`](#llm-interpretation) hand it to an LLM with checked citations (deprecated since 1.1). `evidence=True` adds [mechanism evidence](#evidence) to the report.
 
-### `FeatureRanker(task, group="all", models=None, n_jobs=None, verbose=True, shadows=False, shadow_seed=None, evidence=False, shadow_mode="joint", missing="error", categorical=None)`
+### `FeatureRanker(task, group="all", models=None, n_jobs=None, verbose=True, shadows=False, shadow_seed=None, evidence=False, shadow_mode="joint", missing="error", categorical=None, model_input="array")`
 
 | Parameter | Default | Meaning |
 |---|---|---|
@@ -21,6 +21,7 @@ The API is one class: `FeatureRanker(...)`, then `.fit(...)`, then `.rank_featur
 | `shadow_mode` | `"joint"` | `"joint"` shuffles all shadow columns with one shared row order; `"independent"` shuffles each shadow column on its own. Only used with `shadows=True`. See [Shadow mode](#shadow-mode). |
 | `missing` | `"error"` | `"error"` rejects NaN in features. `"impute"` accepts NaN and gives every built-in model a median imputer fit on its training rows only; custom models receive NaN unchanged. See [Missing values](#missing-values). |
 | `categorical` | `None` | `None` accepts numeric features only. `"auto"` treats DataFrame columns of object, string, or category dtype as categorical; a list of feature names marks those columns. Levels are learned in each `fit()` from the training rows only and each column stays one feature. See [Categorical features](#categorical-features). |
+| `model_input` | `"array"` | `"array"` gives models a float NumPy array. `"dataframe"` gives every model a pandas DataFrame with the feature names (and `shadow__<name>` columns with shadows), so custom pipelines can select columns by name. Needs pandas. See [Columns by name](#columns-by-name). |
 
 ### `.fit(X, y, feature_names=None)`
 
@@ -166,7 +167,75 @@ ranker = FeatureRanker(
 ```
 
 > [!IMPORTANT]
-> Your estimators receive a float NumPy array, even when you pass a DataFrame. Inside a pipeline, select columns by position (for example `ColumnTransformer([("scale", StandardScaler(), [0, 1])])`), not by name. Categorical values must be numbers by then: either encode them yourself, or pass `categorical=` and your estimators receive the integer codes (see [Categorical features](#categorical-features)). With `missing="impute"` your estimators receive NaN unchanged; see [Missing values](#missing-values).
+> By default your estimators receive a float NumPy array, even when you pass a DataFrame. Inside a pipeline, select columns by position (for example `ColumnTransformer([("scale", StandardScaler(), [0, 1])])`), or pass `model_input="dataframe"` to select by name (see [Columns by name](#columns-by-name)). Categorical values must be numbers by then: either encode them yourself, or pass `categorical=` and your estimators receive the integer codes (see [Categorical features](#categorical-features)). With `missing="impute"` your estimators receive NaN unchanged; see [Missing values](#missing-values).
+
+<a id="columns-by-name"></a>
+
+## ▍ Columns by name
+
+`FeatureRanker(..., model_input="dataframe")` fits, scores, and permutes every model (built-in and custom) on a pandas DataFrame instead of a NumPy array. Its columns are the feature names in order, then, with `shadows=True`, `shadow__<name>` for each shadow column. This is the normal scikit-learn way to preprocess mixed data: `ColumnTransformer([("num", StandardScaler(), ["age", "income"])])`. Importances, scores, train scores, and the SHAP summary equal those of the default `"array"` mode for models that do not depend on column names; the DataFrame is rebuilt from the permuted array for each scoring call, which costs a little time on wide data. The report records `model_input: "dataframe"` (the key is absent in the default mode). `rank_resampled()` and `ConsensusSelector(model_input=...)` use it in every split; the CLI keeps array input. Without pandas, `model_input="dataframe"` raises `ImportError` at construction.
+
+**The shadow contract.** With shadows on, a custom pipeline must keep the shadow columns, because a model that never sees them has shadow importances of zero, so every real feature "beats" the shadows. After fitting, FeatRanker inspects every fitted `ColumnTransformer` inside a model (also nested in a `Pipeline`) that sees all input columns, in both input modes. If its transformers and `remainder` together leave a shadow column unused, the model is left out of every shadow comparison in that report (no `above_shadow` flags, no `shadow_max`, not counted in `family_above_shadow` or `above_shadow_share`) and `failures` gets an entry with stage `"shadows"` and `error_type` `"ShadowColumnsDropped"`. Its importances and its ranking vote are unaffected. Use `remainder="passthrough"`, or list the `shadow__` columns, to keep it in the shadow evidence. Only `ColumnTransformer` is inspected: other estimators that drop columns (a `SelectKBest` step, a custom selector) are your responsibility. A column selector that cannot be resolved gives a `UserWarning` and no failure.
+
+```python
+import numpy as np
+import pandas as pd
+from sklearn.compose import ColumnTransformer
+from sklearn.linear_model import Ridge
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import StandardScaler
+
+from featranker import FeatureRanker
+
+rng = np.random.default_rng(0)
+n = 300
+df = pd.DataFrame({"age": rng.uniform(20, 70, n), "income": rng.normal(50, 10, n), "noise": rng.normal(size=n)})
+y = 0.3 * df["age"] + 0.1 * df["income"] + rng.normal(0, 1, n)
+train, evaluation = df.iloc[:200], df.iloc[200:]
+
+models = {
+    # Lists only the real columns and drops the rest, shadows included.
+    "drops_shadows": make_pipeline(
+        ColumnTransformer([("num", StandardScaler(), ["age", "income", "noise"])]), Ridge()
+    ),
+    "keeps_shadows": make_pipeline(
+        ColumnTransformer(
+            [("num", StandardScaler(), ["age", "income"])], remainder="passthrough"
+        ),
+        Ridge(),
+    ),
+}
+ranker = FeatureRanker(
+    task="reg", models=models, shadows=True, shadow_seed=0,
+    model_input="dataframe", verbose=False,
+)
+ranker.fit(train, y[:200])
+report = ranker.rank_features(evaluation, y[200:], scoring="r2", random_state=0)
+
+print(report["model_input"])
+print([(f["model"], f["stage"], f["error_type"]) for f in report["failures"]])
+print([m for m, r in report["models"].items() if "shadow_max" in r])
+for row in report["consensus"]:
+    print(f"{row['feature_group']:>6}  median rank {row['median_rank']:.1f}  "
+          f"n_models {row['n_models']}  above_shadow_share {row['above_shadow_share']:.1f}")
+```
+
+```text
+dataframe
+[('drops_shadows', 'shadows', 'ShadowColumnsDropped')]
+['keeps_shadows']
+   age  median rank 1.0  n_models 2  above_shadow_share 1.0
+income  median rank 2.0  n_models 2  above_shadow_share 1.0
+ noise  median rank 3.0  n_models 2  above_shadow_share 0.0
+```
+
+Both models vote in the consensus, but only `keeps_shadows` supplies shadow evidence; `summarize()` reports the `"shadows"` stage as a warning.
+
+Limitations of named input:
+
+- XGBoost rejects feature names containing `[`, `]` or `<` in dataframe mode; those fit failures appear in `failures`. Rename the columns or use array mode.
+- The shadow check only inspects `ColumnTransformer`s inside `Pipeline`s (nested ones too), not ones wrapped in `TransformedTargetRegressor`, `GridSearchCV` or other meta-estimators.
+- Only the `ColumnTransformer` that sees all input columns is checked.
 
 <a id="parallel-models"></a>
 
@@ -291,7 +360,7 @@ for row in report["consensus"]:
 
 `city` is one feature although it has four training levels; the 28 evaluation rows from Cairo got the shared unseen code instead of shaping the encoding. `ConsensusSelector(..., categorical="auto")` takes the same option and returns the selected raw columns from `transform()` (put an encoder after it in a `Pipeline` for the final model), and `featranker ... --categorical auto` (or `--categorical city,segment`) reads those CSV columns as text; an empty cell in such a column is the missing level.
 
-**Limitations.** Levels are compared by their string forms, so `1` and `"1"` are the same level, and so are `1` and `1.0` (a column that pandas upcast to float because of a missing value still matches its integer training levels); clean such columns first. Target encoding and other supervised encoders are not offered, because they leak the target; build one into a custom model pipeline if you need it. Date and time columns are still rejected ("X must be numeric"), also when listed as categorical; convert them to numbers or to labels first. Passing column names to custom models is not part of this feature.
+**Limitations.** Levels are compared by their string forms, so `1` and `"1"` are the same level, and so are `1` and `1.0` (a column that pandas upcast to float because of a missing value still matches its integer training levels); clean such columns first. Target encoding and other supervised encoders are not offered, because they leak the target; build one into a custom model pipeline if you need it. Date and time columns are still rejected ("X must be numeric"), also when listed as categorical; convert them to numbers or to labels first. To give custom models column names, see [Columns by name](#columns-by-name).
 
 ## ▍ Command line
 
@@ -860,7 +929,7 @@ Output shown with the `xgboost` and `catboost` extras installed. The score is ho
 | `min_shadow_share` | `None` | Keep groups whose stability `above_shadow_share` is at least this (0 to 1). Turns on [shadow features](#shadow-features). |
 | `max_shadow_q` | `None` | Keep groups whose stability `shadow_q_value` (the [shadow hits test](#shadow-test)) is at most this (greater than 0, at most 1); a heuristic filter, since the values are [uncalibrated](#shadow-test). Turns on shadow features. Use `cv` with 10 or more splits, such as `RepeatedKFold`; with 5 the test has little power. |
 | `min_shadow_families` | `None` | Keep groups whose stability `shadow_families` (see [family evidence](#family-evidence)) is at least this (a positive integer). Turns on shadow features. `1` and `2` both selected at most 1% of noise groups on null data; `1` kept more noise than `2` in the signal study (see the [calibration study](calibration.md) for how to choose); a heuristic. |
-| `group`, `models`, `n_jobs`, `shadow_seed`, `shadow_mode`, `missing`, `categorical` | as `FeatureRanker` | Passed to the ranker built in `fit()`. |
+| `group`, `models`, `n_jobs`, `shadow_seed`, `shadow_mode`, `missing`, `categorical`, `model_input` | as `FeatureRanker` | Passed to the ranker built in `fit()`. |
 | `feature_groups`, `cv`, `n_repeats`, `random_state` | as `rank_resampled()` | Passed to `rank_resampled()` on the data given to `fit()`. |
 | `feature_groups="auto"` | | Groups correlated columns with [`auto_groups()`](#auto-groups) on the data given to `fit()`, so inside a pipeline from the training fold only. The groups used are in `report_["feature_groups"]`. Any other string raises `ValueError` in `fit()`. |
 | `verbose` | `False` | Progress bars; off by default because pipelines fit many times. |

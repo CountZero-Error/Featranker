@@ -180,7 +180,10 @@ def _unwrap(model: Any, *arrays: np.ndarray) -> Tuple[Any, List[np.ndarray]]:
     *earlier, (_, final) = model.steps
     for _, step in earlier:
         if isinstance(step, ColumnTransformer):
-            raise ValueError("pipeline one-hot encodes categorical columns")
+            raise ValueError(
+                "pipeline contains a ColumnTransformer; SHAP needs the model's input "
+                "columns to match the features"
+            )
         # "passthrough" and None are scikit-learn's identity step.
         identity = step is None or (isinstance(step, str) and step == "passthrough")
         if not (identity or _is_column_step(step)):
@@ -195,7 +198,7 @@ def _unwrap(model: Any, *arrays: np.ndarray) -> Tuple[Any, List[np.ndarray]]:
 
 
 def _shap_values(
-    model: Any, X: np.ndarray, background: np.ndarray, shap: Any
+    model: Any, X: Any, background: Any, shap: Any
 ) -> Tuple[str, np.ndarray]:
     """(explainer name, SHAP values shaped (k, n_rows, n_columns))."""
     final, (X_final, background_final) = _unwrap(model, X, background)
@@ -240,12 +243,22 @@ def _group_summary(
     return summary
 
 
+def _model_X(X: np.ndarray, names: Optional[List[str]]) -> Any:
+    """What models see: X itself, or a DataFrame named `names` (no copy)."""
+    if names is None:
+        return X
+    import pandas as pd
+
+    return pd.DataFrame(X, columns=names, copy=False)
+
+
 def shap_evidence(
     models: Dict[str, Any],
     X_eval: np.ndarray,
     X_train: np.ndarray,
     groups: Dict[str, List[int]],
     categorical: Sequence[int] = (),
+    names: Optional[List[str]] = None,
 ) -> Tuple[Dict[str, Any], Dict[str, Dict[str, Any]]]:
     """
     SHAP summary per model on evenly spaced evaluation rows.
@@ -253,7 +266,8 @@ def shap_evidence(
     Linear models use evenly spaced training rows as the background. Returns
     (the report's evidence.shap block, model name -> its shap entry). X_eval
     and X_train have every column the models were fit on; groups name real
-    columns only; categorical lists the code columns, whose direction is None.
+    columns only; categorical lists the code columns, whose direction is None;
+    names, if given, are the column names models get as a DataFrame.
     """
     try:
         import shap
@@ -277,7 +291,9 @@ def shap_evidence(
     per_model: Dict[str, Dict[str, Any]] = {}
     for name, model in models.items():
         try:
-            explainer, stacked = _shap_values(model, rows, background, shap)
+            explainer, stacked = _shap_values(
+                model, _model_X(rows, names), _model_X(background, names), shap
+            )
             per_model[name] = {
                 "explainer": explainer,
                 "groups": _group_summary(stacked, rows, groups, categorical),
