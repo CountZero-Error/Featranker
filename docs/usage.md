@@ -906,7 +906,7 @@ Output from scikit-learn models only (`group="fast"`). The two modes agree on th
 
 ## ▍ Evidence
 
-A rank says which groups matter, not why. With `evidence=True`, `fit()` also keeps the training data (as its own copy, so changing your arrays afterwards does not change the evidence) and `rank_features()` adds evidence about the mechanism behind the ranking:
+A rank says which groups matter, not why. With `evidence=True`, `fit()` also keeps the training data (as its own copy, so changing your arrays afterwards does not change the evidence) and `rank_features()` adds evidence about the mechanism behind the ranking. Because of that copy, a pickled ranker with `evidence=True` contains its training data: expect the file to grow by roughly the size of the training arrays (about twice that with shadows on, which adds the shadow columns), and treat it with the same care as the data.
 
 - **Train score and overfit gap.** Each model gets `train_score` (the same scorer on the data it was fit on) and `overfit_gap = train_score - evaluation_score`. A large gap means the model scores much better on its training data than on the evaluation data. Memorization is one cause; a shift between the training and evaluation distributions, or a small evaluation sample, can produce the same gap, so check those before concluding that the model does not generalize.
 - **Correlated groups.** `evidence.correlation` lists pairs of feature groups whose strongest member-column Spearman correlation on the **training** data is at least 0.5, with its sign. Permutation importance can split credit between correlated groups; consider putting them in one `feature_groups` entry. Categorical columns are left out.

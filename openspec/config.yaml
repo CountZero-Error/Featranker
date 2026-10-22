@@ -44,8 +44,21 @@ context: |
          docs corrections (SHAP scale and direction, overfit gap, fast
          voting, benchmark reproduction, time-series recipe); small review
          items (fast tag, scaler test, CLI test, passthrough steps)
-  Known limitations (found 2026-10-19/20 in reviews and the benchmark;
-  not scheduled; maintainer decides):
+    1.6  family-evidence: per-family shadow shares, min_shadow_families,
+         shadow_mode="independent"
+    --   calibration-study: null and signal studies (docs/calibration.md)
+    1.7  missing-values: missing="impute", fold-local median imputation
+    1.8  stability-denominator: above_shadow_share divides by n_splits
+    1.9  categorical-features: categorical=[...]|"auto", fold-local levels
+    1.10 named-model-input: model_input="dataframe", shadow-drop check
+    1.11 sample-weights: weights through fit, baseline, scores, selector, CLI
+    1.12 repeated-use: run record (fingerprints, cv, auto_groups), resampled
+         summaries, selector warning when splits did not vote
+    1.13 eval-subsampling: max_samples
+    1.14 multiple-scorers: secondary scorers on the same permuted copies
+    1.15 dependent-shuffling: shuffle="within_groups" | "circular"
+  Known limitations (found 2026-10-19/20 in reviews and the benchmark,
+  updated 2026-10-22 after 1.6-1.15; maintainer decides):
     Method and statistics
     L1  interaction blind spot: above_shadow_share averages families, so
         effects only some families can model fail the 0.5 rule
@@ -55,12 +68,13 @@ context: |
         shuffling caused them remains untested
     L3  shadow hits test: its 0.5 null and false-discovery control are not
         established for arbitrary estimators or overlapping splits (label
-        added in 1.5: shadow_test.calibrated is false; calibration is 1.6);
+        added in 1.5: shadow_test.calibrated is false; measured in the
+        calibration study, docs/calibration.md);
         at cv=5 only 5/5 reaches p=0.031; in the benchmark max_shadow_q never
         beat min_shadow_share
     L4  correlated features still split permutation importance unless
-        grouped; auto_groups threshold is fixed at 0.7 in the selector and
-        CLI; small samples inflate |rho|
+        grouped; small samples inflate |rho| (the selector's
+        auto_groups_threshold is configurable and recorded since 1.12)
     L5  SHAP only for linear and tree models (no model-agnostic fallback);
         mean |SHAP| is on the explainer's output scale, which may be a link
         scale, and is not comparable across models; linear direction is the
@@ -74,11 +88,13 @@ context: |
         respect declared groups or time order, but are opt-in and need the
         user to supply the labels or the row order
     Data coverage
-    L7  missing values rejected, even for models that handle NaN natively
-        (HistGradientBoosting, XGBoost, CatBoost)
-    L8  numeric input only: no categorical or string columns; estimators
-        receive float arrays without column names
-    L9  no sample weights
+    L7  (1.7) missing="impute" median-imputes inside each built-in model;
+        models that handle NaN natively still get the imputer, and custom
+        models receive NaN unchanged
+    L8  (1.9, 1.10) categorical columns are coded or one-hot encoded;
+        model_input="dataframe" gives models column names; date columns are
+        still rejected
+    L9  (fixed in 1.11) sample weights; correlations and SHAP stay unweighted
     L10 tabular data and scikit-learn-style estimators only
     L19 feature groups name raw input columns; for a custom pipeline that
         transforms columns (PCA, encoders) no mapping between raw and
@@ -86,20 +102,20 @@ context: |
         per-column scalers and identity ("passthrough"/None) steps
     Selection
     L20 ConsensusSelector selects when only some splits ranked (it fails
-        only if none did): no minimum of ranked splits and no warning
+        only if none did); since 1.12 it warns, but there is no minimum
     Performance
     L11 slower than single-model selectors (benchmark means 3-19 s vs
         0.3-5 s); SVR in "fast" is quadratic in rows; models that lose to
-        the dummy are still permuted
-    L12 correlation evidence and auto_groups are O(columns^2)
+        the dummy are still permuted; max_samples (1.13) caps scoring rows
+    L12 correlation evidence and auto_groups are O(columns^2) (a faster
+        pairwise Spearman was considered and deferred; no measured need)
     Traceability
-    L13 the report does not record the model group/preset or the
-        auto_groups threshold and method used
+    L13 (fixed in 1.12) the run block records group, auto_groups threshold
+        and method
     L14 rankers with evidence=True pickle their training data (about 2x
-        with shadows)
-    L21 run identity beyond L13: the report carries no fingerprint of the
-        input data or the cv splitter used, so two reports cannot be checked
-        as coming from the same data and splits
+        with shadows; measured and documented in docs/usage.md Evidence)
+    L21 (fixed in 1.12) the run block fingerprints data, weights, labels,
+        and splits
     API and deprecation
     L15 explain()/to_prompt() deprecated, removal in 2.0; the prompt rules
         do not describe the hits test (only the shadow_test block is shown)
@@ -110,8 +126,8 @@ context: |
     L17 n_jobs tests and mypy with types-PyYAML are verified only in CI,
         not in the local sandbox
     Release
-    L18 1.0-1.4 unreleased; local main is ahead of origin; six older
-        commits carry Claude-Session lines
+    L18 1.0-1.15 unreleased (PyPI has 0.4.1); local main is ahead of
+        origin; six older commits carry Claude-Session lines
 
 rules:
   proposal:
