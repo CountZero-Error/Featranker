@@ -832,20 +832,103 @@ def _run_models(
     return Parallel(n_jobs=n_jobs)(delayed(_unrouted)(worker, *job) for job in jobs)
 
 
-def _with_shadows(X_values: np.ndarray, seed: Any, mode: str = "joint") -> np.ndarray:
+def _shuffle_labels(
+    shuffle: str,
+    labels: Any,
+    n_rows: int,
+    name: str = "shuffle_groups",
+    singletons_ok: bool = False,
+) -> Optional[np.ndarray]:
+    """
+    Validated group labels for `n_rows` rows (None unless "within_groups").
+    `singletons_ok` skips the all-singleton check, for labels that are not used.
+    """
+    if shuffle == "circular" and n_rows < 2:
+        raise ValueError(f"[!] shuffle='circular' needs at least 2 rows, got {n_rows}.")
+    if shuffle != "within_groups":
+        if labels is not None:
+            raise ValueError(f"[!] {name} needs shuffle='within_groups'.")
+        return None
+    if labels is None:
+        raise ValueError(f"[!] shuffle='within_groups' needs {name}, one label per row.")
+    values = np.asarray(labels)
+    if values.shape != (n_rows,):
+        raise ValueError(
+            f"[!] {name} needs one label per row: {n_rows} rows, got shape {values.shape}."
+        )
+    if any(item is None or item != item for item in values.tolist()):
+        raise ValueError(f"[!] {name} must not contain None or NaN.")
+    try:
+        n_groups = len(np.unique(values))
+    except TypeError:
+        raise ValueError(f"[!] {name} labels must be sortable, not of mixed types.") from None
+    if n_groups == n_rows and not singletons_ok:
+        raise ValueError(
+            "[!] shuffle='within_groups' needs at least one group with two rows."
+        )
+    return values
+
+
+def _sample_whole_groups(rng: np.random.Generator, labels: np.ndarray, size: int) -> np.ndarray:
+    """Sorted rows of whole groups, drawn in random order until `size` rows are covered."""
+    _, inverse = np.unique(labels, return_inverse=True)
+    order = rng.permutation(inverse.max() + 1)
+    covered = np.cumsum(np.bincount(inverse)[order])
+    chosen = order[: np.searchsorted(covered, size) + 1]
+    return np.flatnonzero(np.isin(inverse, chosen))
+
+
+def _labels_fingerprint(labels: Optional[np.ndarray]) -> Optional[str]:
+    """SHA-256 hex digest of the shuffle group labels, or None without labels."""
+    if labels is None:
+        return None
+    digest = hashlib.sha256()
+    _hash_column(digest, labels)
+    return digest.hexdigest()
+
+
+def _shuffle_index(
+    rng: np.random.Generator, n: int, mode: str, labels: Optional[np.ndarray]
+) -> np.ndarray:
+    """Row index for one shuffle of n rows: "rows", "within_groups" or "circular"."""
+    if mode == "circular":
+        return np.roll(np.arange(n), rng.integers(1, n))
+    if mode == "within_groups":
+        assert labels is not None  # checked by _shuffle_labels
+        # Sort rows by (label, random key): a random order inside each group,
+        # and a group of one maps to itself.
+        grouped = np.argsort(labels, kind="stable")
+        index = np.empty(n, dtype=np.intp)
+        index[grouped] = np.lexsort((rng.random(n), labels))
+        return index
+    return rng.permutation(n)
+
+
+def _with_shadows(
+    X_values: np.ndarray,
+    seed: Any,
+    mode: str = "joint",
+    shuffle: str = "rows",
+    labels: Optional[np.ndarray] = None,
+) -> np.ndarray:
     """
     Real columns followed by a shadow block.
 
     "joint": the same rows in one shuffled order. "independent": each column
     in its own shuffled order, drawn in column order from one generator.
+    `shuffle` and `labels` choose how rows are shuffled (_shuffle_index).
     """
     rng = np.random.default_rng(seed)
+    n_rows = len(X_values)
     if mode == "independent":
         shadow = np.column_stack(
-            [X_values[rng.permutation(len(X_values)), j] for j in range(X_values.shape[1])]
+            [
+                X_values[_shuffle_index(rng, n_rows, shuffle, labels), j]
+                for j in range(X_values.shape[1])
+            ]
         )
     else:
-        shadow = X_values[rng.permutation(len(X_values))]
+        shadow = X_values[_shuffle_index(rng, n_rows, shuffle, labels)]
     return np.hstack([X_values, shadow])
 
 
@@ -926,6 +1009,7 @@ def _group_importances(
     names: Optional[List[str]] = None,
     weights: Optional[np.ndarray] = None,
     secondary: Optional[Dict[str, tuple[Any, float]]] = None,
+    shuffle: tuple[str, Optional[np.ndarray]] = ("rows", None),
 ) -> tuple[Dict[str, Dict[str, Any]], Dict[str, Any]]:
     """
     Importances per group, and per secondary scorer ({name: (scorer, baseline)})
@@ -946,7 +1030,7 @@ def _group_importances(
         for name in secondary_drops:
             secondary_drops[name][group_name] = []
         for _ in range(n_repeats):
-            row_order = rng.permutation(len(X_values))
+            row_order = _shuffle_index(rng, len(X_values), *shuffle)
             X_permuted[:, columns] = X_values[np.ix_(row_order, columns)]
             X_model = _model_X(X_permuted, names)
             permuted_score = _finite_float(
@@ -1006,13 +1090,14 @@ def _permutation_importances(
     names: Optional[List[str]] = None,
     weights: Optional[np.ndarray] = None,
     secondary: Optional[Dict[str, tuple[Any, float]]] = None,
+    shuffle: tuple[str, Optional[np.ndarray]] = ("rows", None),
 ) -> tuple[
     Dict[str, Dict[str, Any]], Optional[Dict[str, Dict[str, Any]]], Dict[str, Any]
 ]:
     rng = np.random.default_rng(random_state)
     importances, secondary_results = _group_importances(
         model, scorer, X_values, y_values, groups, n_repeats, rng, baseline, names,
-        weights, secondary,
+        weights, secondary, shuffle,
     )
     # Real groups are ranked among themselves only; shadows are compared, not ranked.
     ranks = _assign_ranks(
@@ -1026,7 +1111,7 @@ def _permutation_importances(
     if shadow_groups is not None:
         shadow, _ = _group_importances(
             model, scorer, X_values, y_values, shadow_groups, n_repeats, rng, baseline,
-            names, weights,
+            names, weights, None, shuffle,
         )
     return importances, shadow, secondary_results
 
@@ -1047,6 +1132,7 @@ def _rank_model(
     names: Optional[List[str]] = None,
     weights: Optional[np.ndarray] = None,
     secondary_scorers: Sequence[tuple[Any, str]] = (),
+    shuffle: tuple[str, Optional[np.ndarray]] = ("rows", None),
 ) -> tuple[
     str, Optional[Dict[str, Any]], Optional[Dict[str, str]], List[Dict[str, str]]
 ]:
@@ -1073,7 +1159,7 @@ def _rank_model(
                 secondary_errors[other_name] = error
         importances, shadow, secondary_results = _permutation_importances(
             model, scorer, X_values, y_values, groups, n_repeats, random_state,
-            baseline, shadow_groups, names, weights, secondary,
+            baseline, shadow_groups, names, weights, secondary, shuffle,
         )
         report = {
             "family": family,
@@ -1144,6 +1230,7 @@ class FeatureRanker:
         missing: Literal["error", "impute"] = "error",
         categorical: Union[List[str], Literal["auto"], None] = None,
         model_input: Literal["array", "dataframe"] = "array",
+        shuffle: Literal["rows", "within_groups", "circular"] = "rows",
     ) -> None:
         """
         Initialize configured models without loading or fitting data.
@@ -1183,6 +1270,12 @@ class FeatureRanker:
                 are the feature names, then "shadow__<name>" for each shadow
                 column, so custom pipelines can select columns by name.
                 Needs pandas.
+            shuffle: How permutations and shadow columns shuffle rows. "rows"
+                (default) shuffles freely. "within_groups" moves values only
+                among rows with the same label in shuffle_groups (passed to
+                fit() for shadows and to rank_features() for permutations).
+                "circular" shifts the rows cyclically by a random offset,
+                which keeps autocorrelation and assumes rows in time order.
         """
         if task not in {"clf", "reg"}:
             raise ValueError("[!] task must be 'clf' or 'reg'.")
@@ -1209,6 +1302,8 @@ class FeatureRanker:
             raise ValueError("[!] missing must be 'error' or 'impute'.")
         if not isinstance(model_input, str) or model_input not in {"array", "dataframe"}:
             raise ValueError("[!] model_input must be 'array' or 'dataframe'.")
+        if not isinstance(shuffle, str) or shuffle not in {"rows", "within_groups", "circular"}:
+            raise ValueError("[!] shuffle must be 'rows', 'within_groups', or 'circular'.")
         if model_input == "dataframe" and _pd is None:
             raise ImportError("[!] model_input='dataframe' needs pandas: pip install pandas")
         self.task = task
@@ -1221,6 +1316,7 @@ class FeatureRanker:
         self.evidence = evidence
         self.missing = missing
         self.model_input = model_input
+        self.shuffle = shuffle
         self.categorical = _validate_categorical(categorical)
         self.categorical_features_: List[str] = []
         self.categorical_levels_: Dict[str, List[Optional[str]]] = {}
@@ -1260,6 +1356,9 @@ class FeatureRanker:
         # ... and those pickled by 1.11 lack the 1.12 training-data fingerprint.
         self.__dict__.setdefault("train_data_sha256_", None)
         self.__dict__.setdefault("train_weights_sha256_", None)
+        self.__dict__.setdefault("train_shuffle_groups_sha256_", None)
+        # ... and those pickled by 1.14 lack the 1.15 shuffle mode.
+        self.__dict__.setdefault("shuffle", "rows")
         if "model_families_" not in self.__dict__:
             self.model_families_ = (
                 _registry_families() if self.user_models is None else {}
@@ -1277,9 +1376,14 @@ class FeatureRanker:
         y: Any,
         feature_names: Optional[List[str]] = None,
         sample_weight: Any = None,
+        shuffle_groups: Any = None,
     ) -> "FeatureRanker":
         """
         Fit configured models using training data only.
+
+        shuffle_groups: with shuffle="within_groups", one group label per
+        training row; shadow columns are shuffled within each group. Not
+        allowed with another shuffle.
 
         sample_weight: optional 1-D non-negative weights, one per row. Every
         model is fit with them (built-in pipelines pass them to the final
@@ -1303,6 +1407,9 @@ class FeatureRanker:
                 )
         y_values = _validate_y(y, len(X_values))
         weights = _validate_weights(sample_weight, len(X_values))
+        shuffle_labels = _shuffle_labels(
+            self.shuffle, shuffle_groups, len(X_values), singletons_ok=not self.shadows
+        )
         train_data_sha256 = _fingerprint(names, X_values, y_values)
         levels: Dict[str, List[Optional[str]]] = {}
         categorical_missing: Dict[str, int] = {}
@@ -1345,7 +1452,9 @@ class FeatureRanker:
         self.fit_failures_ = []
         # Models see the shadow block too; the dummy below sees real columns only.
         X_models = (
-            _with_shadows(X_values, self.shadow_seed, self.shadow_mode)
+            _with_shadows(
+                X_values, self.shadow_seed, self.shadow_mode, self.shuffle, shuffle_labels
+            )
             if self.shadows
             else X_values
         )
@@ -1384,6 +1493,7 @@ class FeatureRanker:
         self.train_weighted_ = weights is not None
         self.train_data_sha256_ = train_data_sha256
         self.train_weights_sha256_ = _weights_fingerprint(weights)
+        self.train_shuffle_groups_sha256_ = _labels_fingerprint(shuffle_labels)
         self.label_encoder = label_encoder
         self.feature_names_ = names
         self.categorical_features_ = [names[index] for index in categorical]
@@ -1408,9 +1518,15 @@ class FeatureRanker:
         random_state: Optional[int] = None,
         sample_weight: Any = None,
         max_samples: Any = None,
+        shuffle_groups: Any = None,
     ) -> Report:
         """
         Rank feature groups on explicitly supplied evaluation data.
+
+        shuffle_groups: with shuffle="within_groups", one group label per
+        evaluation row; permuted and shadow columns are shuffled within each
+        group (after max_samples, the sampled rows' labels are used). Not
+        allowed with another shuffle.
 
         sample_weight: optional 1-D non-negative weights, one per evaluation
         row; the baseline, permuted and dummy scores are weighted with them.
@@ -1445,15 +1561,22 @@ class FeatureRanker:
             )
         y_values = _validate_y(y_eval, len(X_values))
         weights = _validate_weights(sample_weight, len(X_values))
+        shuffle_labels = _shuffle_labels(self.shuffle, shuffle_groups, len(X_values))
         rows: Any = slice(None)
         if max_samples is not None:
             size = _resolve_max_samples(max_samples, len(X_values))
-            rows = np.sort(
-                np.random.default_rng(
-                    None if random_state is None else [random_state, 2]
-                ).choice(len(X_values), size, replace=False
-                )
+            sampler = np.random.default_rng(None if random_state is None else [random_state, 2])
+            # Within groups, sample whole groups: a lone sampled row could never move.
+            rows = (
+                _sample_whole_groups(sampler, shuffle_labels, size)
+                if shuffle_labels is not None
+                else np.sort(sampler.choice(len(X_values), size, replace=False))
             )
+        scored_labels = _shuffle_labels(
+            self.shuffle,
+            None if shuffle_labels is None else shuffle_labels[rows],
+            len(y_values[rows]),
+        )
         run = {
             "task": self.task,
             "group": self.group,
@@ -1463,6 +1586,8 @@ class FeatureRanker:
         for key, value in (
             ("train_weights_sha256", self.train_weights_sha256_),
             ("weights_sha256", _weights_fingerprint(weights)),
+            ("train_shuffle_groups_sha256", self.train_shuffle_groups_sha256_),
+            ("shuffle_groups_sha256", _labels_fingerprint(shuffle_labels)),
         ):
             if value is not None:
                 run[key] = value
@@ -1495,7 +1620,9 @@ class FeatureRanker:
         if self.shadows:
             # An independent, reproducible shuffle of the evaluation rows.
             eval_seed = None if self.shadow_seed is None else [self.shadow_seed, 1]
-            X_models = _with_shadows(X_values, eval_seed, self.shadow_mode)
+            X_models = _with_shadows(
+                X_values, eval_seed, self.shadow_mode, self.shuffle, shuffle_labels
+            )
             offset = len(self.feature_names_)
             shadow_groups = {
                 name: [index + offset for index in indices]
@@ -1527,7 +1654,7 @@ class FeatureRanker:
             (name, model, scorer, X_models[rows], y_scored, groups, n_repeats,
              random_state, baseline_score, self.model_families_.get(name, name),
              None if name in no_shadows else shadow_groups, train_data, columns,
-             weights_scored, secondary_scorers)
+             weights_scored, secondary_scorers, (self.shuffle, scored_labels))
             for name, model in self.trained_models.items()
         ]
         evidence_failures: List[Dict[str, str]] = []
@@ -1580,6 +1707,8 @@ class FeatureRanker:
             report["shadows"] = True
             report["shadow_seed"] = self.shadow_seed
             report["shadow_mode"] = self.shadow_mode
+        if self.shuffle != "rows":
+            report["shuffle"] = self.shuffle
         if self.missing == "impute":
             report["missing"] = {
                 "policy": "impute",
@@ -1633,6 +1762,9 @@ class FeatureRanker:
         """
         Fit and rank on every cv split of X/y and report rank stability.
 
+        groups: also the group labels of shuffle="within_groups" (required
+        then), sliced per split into training and evaluation labels.
+
         max_samples: as in rank_features(), applied to each split's evaluation
         rows.
 
@@ -1662,9 +1794,18 @@ class FeatureRanker:
             _resolve_max_samples(max_samples, len(X_values))
         _resolve_scorers(scoring)
         _resolve_feature_groups(names, feature_groups)
+        shuffle_labels = _shuffle_labels(
+            self.shuffle,
+            groups if self.shuffle == "within_groups" else None,
+            len(X_values),
+            "groups",
+        )
         splits = _resolve_splits(
             cv, X_values, y_values, groups, self.task, random_state
         )
+        if self.shuffle == "circular":
+            # Splitters may give unordered indices; a cyclic shift needs time order.
+            splits = [(np.sort(train), np.sort(test)) for train, test in splits]
 
         split_reports: List[Dict[str, Any]] = []
         failures: List[Dict[str, Any]] = []
@@ -1684,6 +1825,7 @@ class FeatureRanker:
                     shadow_mode=self.shadow_mode,
                     missing=self.missing,
                     model_input=self.model_input,
+                    shuffle=self.shuffle,
                     # Names, so "auto" survives the loss of the DataFrame dtypes.
                     categorical=[names[column] for column in categorical] or None,
                 )
@@ -1692,6 +1834,7 @@ class FeatureRanker:
                     y_values[train],
                     feature_names=names,
                     sample_weight=None if weights is None else weights[train],
+                    shuffle_groups=None if shuffle_labels is None else shuffle_labels[train],
                 )
                 report = ranker.rank_features(
                     X_values[evaluation],
@@ -1702,6 +1845,9 @@ class FeatureRanker:
                     random_state=None if random_state is None else random_state + index,
                     sample_weight=None if weights is None else weights[evaluation],
                     max_samples=max_samples,
+                    shuffle_groups=(
+                        None if shuffle_labels is None else shuffle_labels[evaluation]
+                    ),
                 )
             except Exception as error:
                 failures.append({"split": index, **_failure(None, "split", error)})
@@ -1730,6 +1876,8 @@ class FeatureRanker:
         }
         if weights is not None:
             run["weights_sha256"] = _weights_fingerprint(weights)
+        if shuffle_labels is not None:
+            run["shuffle_groups_sha256"] = _labels_fingerprint(shuffle_labels)
         result = {
             "evaluation_mode": "resampled",
             "scoring": first["scoring"],
@@ -1764,6 +1912,8 @@ class FeatureRanker:
                 "calibrated": False,
                 "note": SHADOW_TEST_NOTE,
             }
+        if self.shuffle != "rows":
+            result["shuffle"] = self.shuffle
         return Report(result)
 
     def _score_baseline(

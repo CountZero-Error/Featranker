@@ -6,7 +6,7 @@
 
 The API is one class: `FeatureRanker(...)`, then `.fit(...)`, then `.rank_features(...)`, which returns a [`Report`](#working-with-reports). [`.rank_resampled(...)`](#resampled-ranking) repeats that over cross-validation splits, [`ConsensusSelector`](#feature-selection) turns the ranking into a scikit-learn pipeline step, [`summarize(report)`](#summarize) reads the result, and [`to_prompt` / `explain`](#llm-interpretation) hand it to an LLM with checked citations (deprecated since 1.1). `evidence=True` adds [mechanism evidence](#evidence) to the report.
 
-### `FeatureRanker(task, group="all", models=None, n_jobs=None, verbose=True, shadows=False, shadow_seed=None, evidence=False, shadow_mode="joint", missing="error", categorical=None, model_input="array")`
+### `FeatureRanker(task, group="all", models=None, n_jobs=None, verbose=True, shadows=False, shadow_seed=None, evidence=False, shadow_mode="joint", missing="error", categorical=None, model_input="array", shuffle="rows")`
 
 | Parameter | Default | Meaning |
 |---|---|---|
@@ -22,8 +22,9 @@ The API is one class: `FeatureRanker(...)`, then `.fit(...)`, then `.rank_featur
 | `missing` | `"error"` | `"error"` rejects NaN in features. `"impute"` accepts NaN and gives every built-in model a median imputer fit on its training rows only; custom models receive NaN unchanged. See [Missing values](#missing-values). |
 | `categorical` | `None` | `None` accepts numeric features only. `"auto"` treats DataFrame columns of object, string, or category dtype as categorical; a list of feature names marks those columns. Levels are learned in each `fit()` from the training rows only and each column stays one feature. See [Categorical features](#categorical-features). |
 | `model_input` | `"array"` | `"array"` gives models a float NumPy array. `"dataframe"` gives every model a pandas DataFrame with the feature names (and `shadow__<name>` columns with shadows), so custom pipelines can select columns by name. Needs pandas. See [Columns by name](#columns-by-name). |
+| `shuffle` | `"rows"` | How permutations and shadows shuffle rows: `"rows"` (free), `"within_groups"` (only among rows with the same label in `shuffle_groups`), or `"circular"` (cyclic shift, for rows in time order). Anything else raises `ValueError`. See [Shuffling dependent rows](#shuffling-dependent-rows). |
 
-### `.fit(X, y, feature_names=None, sample_weight=None)`
+### `.fit(X, y, feature_names=None, sample_weight=None, shuffle_groups=None)`
 
 | Parameter | Default | Meaning |
 |---|---|---|
@@ -31,10 +32,11 @@ The API is one class: `FeatureRanker(...)`, then `.fit(...)`, then `.rank_featur
 | `y` | required | Training target, one value per row. Class labels may be numbers or strings; regression targets must be numeric. |
 | `feature_names` | `None` | Unique, non-empty column names. Required for NumPy input; taken from the columns for a DataFrame. |
 | `sample_weight` | `None` | 1-D array-like of finite, non-negative training weights, one per row, with a positive sum. Every model is fit with them; see [Sample weights](#sample-weights). |
+| `shuffle_groups` | `None` | One group label per training row; required with `shuffle="within_groups"` (shadows are shuffled within groups), an error with another `shuffle`. See [Shuffling dependent rows](#shuffling-dependent-rows). |
 
 Returns the ranker itself. Raises if no model fits.
 
-### `.rank_features(X_eval, y_eval, *, scoring, feature_groups=None, n_repeats=10, random_state=None, sample_weight=None, max_samples=None)`
+### `.rank_features(X_eval, y_eval, *, scoring, feature_groups=None, n_repeats=10, random_state=None, sample_weight=None, max_samples=None, shuffle_groups=None)`
 
 | Parameter | Default | Meaning |
 |---|---|---|
@@ -46,6 +48,7 @@ Returns the ranker itself. Raises if no model fits.
 | `random_state` | `None` | Integer seed for permutation-importance shuffles. Reproducible reports also require deterministic or seeded estimators and deterministic scoring; with shadows enabled, fix `shadow_seed` too. |
 | `sample_weight` | `None` | 1-D array-like of finite, non-negative evaluation weights, one per evaluation row, with a positive sum. The baseline, permuted, and dummy scores are weighted with them. See [Sample weights](#sample-weights). |
 | `max_samples` | `None` | Score on a random subsample of the evaluation rows: an int (rows; more than there are uses all) or a float in (0, 1] (share of rows, rounded down, at least 1). Anything else raises `ValueError` before scoring. See [Speed](#speed). |
+| `shuffle_groups` | `None` | One group label per evaluation row; required with `shuffle="within_groups"` (permutations and shadows are shuffled within groups), an error with another `shuffle`. See [Shuffling dependent rows](#shuffling-dependent-rows). |
 
 Returns the report dict described in [Report](report.md). Raises if every model fails ranking.
 
@@ -569,7 +572,7 @@ Output shown with the `xgboost` and `catboost` extras installed. A group's *plac
 | `X`, `y`, `feature_names` | | All development data, with the same rules as `fit()`. Each split takes its own training and evaluation rows from it. |
 | `scoring`, `feature_groups`, `n_repeats` | | Same as `rank_features()`; `scoring` may be a list, and the split reports then carry the secondary results (stability uses the primary scorer). |
 | `cv` | `5` | An integer number of folds (shuffled; stratified for `task="clf"`), any scikit-learn splitter such as `RepeatedKFold` or `GroupKFold`, or a list of `(train_indices, eval_indices)` pairs. |
-| `groups` | `None` | Passed to the splitter's `split()`, for example row groups for `GroupKFold`. |
+| `groups` | `None` | Passed to the splitter's `split()`, for example row groups for `GroupKFold`. With `shuffle="within_groups"` they are also the shuffle groups, sliced per split, and required. |
 | `random_state` | `None` | Seeds integer-`cv` shuffling. Split `i` uses permutation seed `random_state + i`. |
 | `sample_weight` | `None` | Row weights for all of `X`, sliced per split: each split trains with its training rows' weights and scores with its evaluation rows' weights. See [Sample weights](#sample-weights). |
 | `max_samples` | `None` | As in `rank_features()`, applied to each split's evaluation rows (the split's own subsample, drawn with its seed `random_state + i`). |
@@ -604,16 +607,19 @@ names = ["strong", "weak", "noise_1", "noise_2"]
 patients = np.repeat(np.arange(30), 10)  # 10 rows per patient
 
 ranker = FeatureRanker(task="reg", group="fast", verbose=False)
+# Shuffles that respect the structure (see "Shuffling dependent rows" below).
+ordered = FeatureRanker(task="reg", group="fast", shuffle="circular", verbose=False)
+grouped = FeatureRanker(task="reg", group="fast", shuffle="within_groups", verbose=False)
 
 # Rows are in time order: every split trains on the past and evaluates on the future.
-by_time = ranker.rank_resampled(
+by_time = ordered.rank_resampled(
     X, y, feature_names=names, scoring="r2", cv=TimeSeriesSplit(n_splits=4),
     n_repeats=3, random_state=0,
 )
 print("time:", [row["feature_group"] for row in by_time["stability"]])
 
 # Rows from one patient never sit on both sides of a split.
-by_patient = ranker.rank_resampled(
+by_patient = grouped.rank_resampled(
     X, y, feature_names=names, scoring="r2", cv=GroupKFold(n_splits=5), groups=patients,
     n_repeats=3, random_state=0,
 )
@@ -622,7 +628,8 @@ print("patient:", [row["feature_group"] for row in by_patient["stability"]])
 # The same splitters in a pipeline, so selection never sees the rows it is scored on.
 pipeline = Pipeline([
     ("select", ConsensusSelector(
-        "reg", "r2", k=2, group="fast", cv=GroupKFold(n_splits=5), n_repeats=3, random_state=0)),
+        "reg", "r2", k=2, group="fast", cv=GroupKFold(n_splits=5), n_repeats=3, random_state=0,
+        shuffle="within_groups")),
     ("model", Ridge()),
 ])
 scores = cross_val_score(
@@ -638,7 +645,34 @@ patient: ['strong', 'weak', 'noise_2', 'noise_1']
 pipeline R2 per outer fold: [0.98 0.98 0.98]
 ```
 
-The splitter only controls how rows are divided. Shadow features shuffle rows within each training and evaluation set, and permutation importance shuffles rows within the evaluation set, which ignores any dependence between neighbouring rows (autocorrelation). Treat shadows and the hits test as less reliable on such data. This is a known limitation listed in the roadmap (`openspec/config.yaml`).
+The splitter only controls how rows are divided. By default, shadow features shuffle rows within each training and evaluation set, and permutation importance shuffles rows within the evaluation set, which ignores any dependence between neighbouring rows (autocorrelation) or between rows of one group. The `shuffle` option, used for `ordered` and `grouped` above, makes both shuffles respect that structure; see [Shuffling dependent rows](#shuffling-dependent-rows). Without it, treat shadows and the hits test as less reliable on such data.
+
+### Shuffling dependent rows
+
+`FeatureRanker(shuffle=...)` (and `ConsensusSelector(shuffle=...)`) sets how permutation importance and shadow columns shuffle rows:
+
+| `shuffle` | Behaviour |
+|---|---|
+| `"rows"` (default) | Rows are shuffled freely, as in earlier versions; reports are unchanged. |
+| `"within_groups"` | A column's values move only among rows with the same group label. Pass one label per row as `shuffle_groups` to `fit()` (shadows) and to `rank_features()` (permutations); `rank_resampled()` and `ConsensusSelector.fit()` use their `groups` and slice them per split. A row in a group of one keeps its value; if every group has one row the call raises `ValueError`. With few rows per group there are few distinct shuffles, so importances are noisier. Labels must be sortable: `None`, NaN and mixed types raise `ValueError`. |
+| `"circular"` | Each shuffle is a cyclic shift of the rows by a random offset from 1 to n-1, which keeps a series' autocorrelation. It assumes the rows are in time order (as `TimeSeriesSplit` does); on unordered rows it is just a shift and means nothing. `rank_resampled()` sorts each split's train and evaluation rows into their original order first. |
+
+Joint shadows share one offset (or one within-group order); `shadow_mode="independent"` draws one per column. With `max_samples`, permutations shuffle the sampled rows only (their labels, or a shift within the sample). Under `"within_groups"` the subsample is made of whole groups, drawn in random order until the target row count is reached, so it can slightly exceed it (`n_eval_rows` records the actual count). Under `"circular"` the sampled rows keep their order, but subsampling thins the series, so a shift no longer moves values by whole time steps. Correlation and SHAP evidence do not shuffle and are unchanged. `shuffle_groups` is required with `"within_groups"` (also when `shadows=False`, in both `fit()` and `rank_features()`, though `fit()` then ignores it and accepts all-singleton labels) and is an error with another mode. A report records `shuffle` when it is not `"rows"`. The CLI has no group column and always uses `"rows"`.
+
+The recipe above ranks the time-ordered rows with `shuffle="circular"` and the patient rows with `shuffle="within_groups"`; for single fits:
+
+```python
+ranker = FeatureRanker(task="reg", group="fast", shuffle="within_groups", verbose=False)
+ranker.fit(X[:150], y[:150], feature_names=names, shuffle_groups=patients[:150])
+report = ranker.rank_features(
+    X[150:], y[150:], scoring="r2", shuffle_groups=patients[150:], random_state=0,
+)
+print(report["shuffle"], [row["feature_group"] for row in report["consensus"]])
+```
+
+```text
+within_groups ['strong', 'weak', 'noise_1', 'noise_2']
+```
 
 <a id="shadow-features"></a>
 
@@ -1039,7 +1073,7 @@ Output shown with the `xgboost` and `catboost` extras installed. The score is ho
 | `min_shadow_share` | `None` | Keep groups whose stability `above_shadow_share` is at least this (0 to 1). Turns on [shadow features](#shadow-features). |
 | `max_shadow_q` | `None` | Keep groups whose stability `shadow_q_value` (the [shadow hits test](#shadow-test)) is at most this (greater than 0, at most 1); a heuristic filter, since the values are [uncalibrated](#shadow-test). Turns on shadow features. Use `cv` with 10 or more splits, such as `RepeatedKFold`; with 5 the test has little power. |
 | `min_shadow_families` | `None` | Keep groups whose stability `shadow_families` (see [family evidence](#family-evidence)) is at least this (a positive integer). Turns on shadow features. `1` and `2` both selected at most 1% of noise groups on null data; `1` kept more noise than `2` in the signal study (see the [calibration study](calibration.md) for how to choose); a heuristic. |
-| `group`, `models`, `n_jobs`, `shadow_seed`, `shadow_mode`, `missing`, `categorical`, `model_input` | as `FeatureRanker` | Passed to the ranker built in `fit()`. |
+| `group`, `models`, `n_jobs`, `shadow_seed`, `shadow_mode`, `missing`, `categorical`, `model_input`, `shuffle` | as `FeatureRanker` | Passed to the ranker built in `fit()`. |
 | `feature_groups`, `cv`, `n_repeats`, `random_state`, `max_samples` | as `rank_resampled()` | Passed to `rank_resampled()` on the data given to `fit()`. |
 | `feature_groups="auto"` | | Groups correlated columns with [`auto_groups()`](#auto-groups) on the data given to `fit()`, so inside a pipeline from the training fold only. The groups used are in `report_["feature_groups"]`. Any other string raises `ValueError` in `fit()`. |
 | `auto_groups_threshold` | `0.7` | The |rho| cut of `feature_groups="auto"`, as `auto_groups(threshold=...)` (`0 < threshold <= 1`, else `ValueError` in `fit()`). Recorded in `report_["run"]["auto_groups"]`; ignored for other `feature_groups`. |
@@ -1078,7 +1112,7 @@ A selected group keeps all of its columns, in their original order. Feature name
 - `report_` reflects only the data that particular fit saw. For the ranking of your whole development set, call `rank_resampled()` directly.
 - If any split failed or produced no consensus, `fit()` warns how many of the splits did not vote. Those splits already count as misses in the shares, so the selection still happens; look at `report_["failures"]` and `report_["splits"]` to see why.
 - If no group passes, `fit()` warns and the selector keeps no columns, as scikit-learn's own selectors do. Most downstream estimators (such as `Ridge`) then fail on zero columns, so that pipeline fit errors out. Loosen `min_shadow_share`, `max_shadow_q`, or `min_shadow_families`, or use only the top-k rule by setting the shadow rules to `None` and a positive `k`.
-- For a group-aware inner `cv` such as `GroupKFold`, pass row groups to `fit(X, y, groups=...)`; in a `Pipeline`, pass `select__groups=...` (for example `cross_val_score(..., params={"select__groups": groups})`, which slices them to each training fold).
+- For a group-aware inner `cv` such as `GroupKFold`, pass row groups to `fit(X, y, groups=...)`; in a `Pipeline`, pass `select__groups=...` (for example `cross_val_score(..., params={"select__groups": groups})`, which slices them to each training fold). With `shuffle="within_groups"` the same groups also confine the permutation and shadow shuffles (see [Shuffling dependent rows](#shuffling-dependent-rows)).
 - DataFrame column labels are compared as strings, in `fit()` and `transform()`. A failed `fit()` clears any earlier fitted state.
 - **Cost.** Each `fit()` is one `rank_resampled()` run: `cv` rankings, doubled with shadows. Inside `cross_val_score(cv=n)` that is `n × cv` rankings; fitting the final pipeline afterwards adds one more run. `GridSearchCV` multiplies the cost by the number of candidates, plus its final refit. Use `group="fast"` or `"tree"`, a small `cv`, and fewer `n_repeats` while searching.
 
@@ -1158,6 +1192,7 @@ Every report has a `run` block that says what it was computed from, so two repor
 - `data_sha256`: a fingerprint of the evaluation data for `rank_features()`, and of all the data passed to `rank_resampled()`.
 - `train_data_sha256`: a fingerprint of the data passed to `fit()` (`rank_features()` reports only; `null` for a ranker pickled before 1.12).
 - `weights_sha256` (and `train_weights_sha256` for `rank_features()`): a fingerprint of the sample weights, present only when weights were given.
+- `shuffle_groups_sha256` (and `train_shuffle_groups_sha256` for `rank_features()`): a fingerprint of the shuffle group labels, present only when labels were given.
 - `rank_resampled()` only: `cv` (the integer given, the splitter's `repr` without memory addresses, such as `KFold(n_splits=5, random_state=0, shuffle=True)`, or `"iterable of splits"`) and `splits_sha256`, a fingerprint of every split's train and evaluation row indices. Each split's own report has its `run` as well.
 - `auto_groups`: `{"threshold": 0.7, "method": "spearman-complete-linkage"}`, only when [`feature_groups="auto"`](#auto-groups) chose the groups (`ConsensusSelector`, `--feature-groups auto`).
 

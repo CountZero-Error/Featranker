@@ -74,6 +74,8 @@ class ConsensusSelector(SelectorMixin, BaseEstimator):
             the threshold in report_["run"]["auto_groups"].
         auto_groups_threshold: The |rho| threshold of feature_groups="auto"
             (see auto_groups()); ignored for other feature_groups.
+        shuffle: As in FeatureRanker. With "within_groups" the groups passed
+            to fit() are the shuffle groups (and cv's), so they are required.
         verbose: Show progress bars (off by default; pipelines fit often).
     """
 
@@ -99,6 +101,7 @@ class ConsensusSelector(SelectorMixin, BaseEstimator):
         missing: Literal["error", "impute"] = "error",
         categorical: Union[List[str], Literal["auto"], None] = None,
         model_input: Literal["array", "dataframe"] = "array",
+        shuffle: Literal["rows", "within_groups", "circular"] = "rows",
         n_jobs: Optional[int] = None,
         verbose: bool = False,
     ) -> None:
@@ -122,17 +125,18 @@ class ConsensusSelector(SelectorMixin, BaseEstimator):
         self.missing = missing
         self.categorical = categorical
         self.model_input = model_input
+        self.shuffle = shuffle
         self.n_jobs = n_jobs
         self.verbose = verbose
 
     def __setstate__(self, state: Dict[str, Any]) -> None:
         # Selectors pickled by 1.3 lack the 1.4 max_shadow_q parameter, and
         # those pickled before 1.6 lack min_shadow_families and shadow_mode, and
-        # those pickled before 1.7 lack missing, those before 1.9 lack categorical, those before 1.10 lack model_input, those before 1.12 lack auto_groups_threshold, and those before 1.13 lack max_samples.
+        # those pickled before 1.7 lack missing, those before 1.9 lack categorical, those before 1.10 lack model_input, those before 1.12 lack auto_groups_threshold, those before 1.13 lack max_samples, and those before 1.15 lack shuffle.
         defaults = {
             "max_shadow_q": None, "min_shadow_families": None, "shadow_mode": "joint",
             "missing": "error", "categorical": None, "model_input": "array",
-            "auto_groups_threshold": 0.7, "max_samples": None,
+            "auto_groups_threshold": 0.7, "max_samples": None, "shuffle": "rows",
         }
         super().__setstate__({**defaults, **state})
 
@@ -223,6 +227,7 @@ class ConsensusSelector(SelectorMixin, BaseEstimator):
             missing=self.missing,
             categorical=self.categorical,
             model_input=self.model_input,
+            shuffle=self.shuffle,
         )
         report = ranker.rank_resampled(
             X,

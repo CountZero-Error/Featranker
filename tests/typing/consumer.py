@@ -58,3 +58,14 @@ multi_resampled: Report = ranker.rank_resampled(
     np.ones((4, 1)), np.ones(4), scoring=("r2", "neg_mean_absolute_error"), cv=2
 )
 multi_selector = ConsensusSelector("reg", ["r2", "neg_mean_absolute_error"], k=2)
+circular_ranker = FeatureRanker(task="reg", group="fast", shadows=True, shuffle="circular")
+grouped_ranker = FeatureRanker(task="reg", group="fast", shuffle="within_groups")
+patients = np.array([0, 0, 1, 1])
+grouped_ranker.fit(np.ones((4, 1)), np.ones(4), shuffle_groups=patients)
+shuffled: Report = grouped_ranker.rank_features(
+    np.ones((4, 1)), np.ones(4), scoring="r2", shuffle_groups=patients
+)
+shuffled_resampled: Report = grouped_ranker.rank_resampled(
+    np.ones((4, 1)), np.ones(4), scoring="r2", cv=2, groups=patients
+)
+shuffled_selector = ConsensusSelector("reg", "r2", k=2, shuffle="within_groups")

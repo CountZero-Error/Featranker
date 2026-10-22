@@ -70,7 +70,9 @@ context: |
         a one-model family vote is less robust than a family median
     L22 shadows and permutations shuffle rows even with TimeSeriesSplit or
         GroupKFold, ignoring dependence between rows (documented in the
-        time-series recipe)
+        time-series recipe); shuffle="within_groups" and "circular" (1.15)
+        respect declared groups or time order, but are opt-in and need the
+        user to supply the labels or the row order
     Data coverage
     L7  missing values rejected, even for models that handle NaN natively
         (HistGradientBoosting, XGBoost, CatBoost)
