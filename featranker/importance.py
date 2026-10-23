@@ -1916,6 +1916,40 @@ class FeatureRanker:
             result["shuffle"] = self.shuffle
         return Report(result)
 
+    def ablate(
+        self,
+        X: Any,
+        y: Any,
+        X_eval: Any,
+        y_eval: Any,
+        report: Report,
+        *,
+        ks: Optional[Sequence[int]] = None,
+        scoring: Any = None,
+        sample_weight: Any = None,
+        eval_sample_weight: Any = None,
+    ) -> Report:
+        """
+        A copy of a held-out report with an "ablation" block: for each k, the
+        report's voting models are refit on the columns of the top-k consensus
+        groups and scored on X_eval.
+
+        X and y must be the training data this ranker was fit on (checked
+        against the report's train_data_sha256 when it has one). ks defaults
+        to 1, 2, 3, 5, 10, 20, 50, ... up to the number of consensus groups,
+        plus that number. scoring is a scorer name or callable and defaults to
+        the report's scorer name. sample_weight and eval_sample_weight weight
+        the refits and the scores. Raises ValueError for an unfitted ranker, a
+        resampled report, an empty consensus, bad ks, or other training data.
+        The report is not modified. Costs len(ks) refits of every voting model.
+        """
+        from .ablation import ablate
+
+        return ablate(
+            self, X, y, X_eval, y_eval, report, ks=ks, scoring=scoring,
+            sample_weight=sample_weight, eval_sample_weight=eval_sample_weight,
+        )
+
     def _score_baseline(
         self,
         scorer: Any,

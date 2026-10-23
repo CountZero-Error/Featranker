@@ -172,6 +172,8 @@ With `scoring=["r2", "neg_mean_absolute_error"]` (a list; `--scoring a,b` on the
 
 With `shuffle="within_groups"` (labels passed as `shuffle_groups=`, or `groups=` in `rank_resampled()` and `ConsensusSelector`) or `shuffle="circular"` (rows in time order), permutations and shadows shuffle within groups or by a cyclic shift instead of freely, which respects grouped or time-ordered rows ([details](https://github.com/CountZero-Error/Featranker/blob/main/docs/usage.md#shuffling-dependent-rows)).
 
+With `ranker.ablate(X_train, y_train, X_eval, y_eval, report)`, the voting models are refit on the top-*k* consensus groups for several *k*, giving a curve of how well the top groups alone score; the CLI's `--ablate` adds it, and `--drop id,created_at` removes ID or timestamp columns from both CSVs ([details](https://github.com/CountZero-Error/Featranker/blob/main/docs/usage.md#ablation-curve)).
+
 Every report carries a `run` block (preset, data and split fingerprints, and the `auto_groups` threshold when grouping was automatic) so repeated runs can be compared, and `summarize()` reads resampled reports too ([details](https://github.com/CountZero-Error/Featranker/blob/main/docs/usage.md#comparing-runs)).
 
 > [!IMPORTANT]
@@ -181,7 +183,7 @@ Every report carries a `run` block (preset, data and split fingerprints, and the
 
 | Page | Contents |
 |---|---|
-| [**Usage**](https://github.com/CountZero-Error/Featranker/blob/main/docs/usage.md) | API and defaults, working with reports (`summary`, `to_frame`, `plot`), choosing a scorer, your own models, columns by name, missing values, categorical features, sample weights, parallel runs, the CLI, resampled ranking, shadow features, the shadow hits test, per-family evidence and `min_shadow_families`, mechanism evidence, pipeline feature selection, `summarize` (single-split and resampled), comparing runs, LLM interpretation (deprecated), labels, troubleshooting |
+| [**Usage**](https://github.com/CountZero-Error/Featranker/blob/main/docs/usage.md) | API and defaults, working with reports (`summary`, `to_frame`, `plot`), choosing a scorer, your own models, columns by name, missing values, categorical features, sample weights, parallel runs, the CLI, resampled ranking, ablation curve, shadow features, the shadow hits test, per-family evidence and `min_shadow_families`, mechanism evidence, pipeline feature selection, `summarize` (single-split and resampled), comparing runs, LLM interpretation (deprecated), labels, troubleshooting |
 | [**Report**](https://github.com/CountZero-Error/Featranker/blob/main/docs/report.md) | How to read the results, resampled (stability) reports, full report structure, ranking and failure rules |
 | [**Models**](https://github.com/CountZero-Error/Featranker/blob/main/docs/models.md) | All 40 built-in models, optional extras, known issues |
 | [**API**](https://github.com/CountZero-Error/Featranker/blob/main/docs/api.md) | Public API, stability policy, typing, releases |

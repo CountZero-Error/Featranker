@@ -8,7 +8,7 @@ import json
 import math
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 import numpy as np
 import yaml
@@ -71,12 +71,25 @@ def _infer_categorical(path: Path, target: str) -> List[str]:
     ]
 
 
+def _check_drop(
+    header: List[str], target: str, weight: Optional[str], drop: Sequence[str], path: Path
+) -> None:
+    for name in drop:
+        if name not in header:
+            raise ValueError(f"[!] --drop names unknown column '{name}' in '{path}'.")
+        if name == target:
+            raise ValueError(f"[!] --drop names the target column '{name}'.")
+        if name == weight:
+            raise ValueError(f"[!] --drop names the --sample-weight column '{name}'.")
+
+
 def _load_csv(
     path: Path,
     target: str,
     allow_nan: bool = False,
     categorical: Optional[List[str]] = None,
     weight: Optional[str] = None,
+    drop: Sequence[str] = (),
 ) -> tuple[np.ndarray, np.ndarray, List[str]]:
     """
     Load a numeric feature matrix and target column from a CSV file.
@@ -84,9 +97,10 @@ def _load_csv(
     With allow_nan, an empty feature cell is NaN (infinite values still raise).
     Columns named in categorical stay text (an empty cell is None, a missing
     level) and the matrix is then an object array. The weight column is not a
-    feature (see _load_weights).
+    feature (see _load_weights), and neither are the columns named in drop.
     """
     header, rows = _read_csv(path, target)
+    _check_drop(header, target, weight, drop, path)
     text = set(categorical or [])
     unknown = sorted(text - set(header))
     if unknown:
@@ -94,8 +108,10 @@ def _load_csv(
     target_index = header.index(target)
     feature_indices = [
         index for index in range(len(header))
-        if index != target_index and header[index] != weight
+        if index != target_index and header[index] != weight and header[index] not in drop
     ]
+    if drop and not feature_indices:
+        raise ValueError("[!] --drop removed every feature column.")
     features: List[List[Any]] = []
     targets: List[str] = []
     for row_number, row in rows:
@@ -168,6 +184,17 @@ def _max_samples(text: str) -> Any:
         return float(text) if "." in text else int(text)
     except ValueError:
         raise argparse.ArgumentTypeError(f"invalid max-samples value: {text!r}") from None
+
+
+def _ablate_ks(text: str) -> List[int]:
+    """'1,2,5' is [1, 2, 5]; every entry must be a positive int."""
+    try:
+        ks = [int(part) for part in text.split(",")]
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"invalid ablate-ks value: {text!r}") from None
+    if any(k < 1 for k in ks):
+        raise argparse.ArgumentTypeError(f"ablate-ks must be positive ints, got {text!r}")
+    return ks
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -301,6 +328,30 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--drop",
+        default=None,
+        metavar="COLUMNS",
+        help=(
+            "Comma-separated columns to remove from both CSV files before "
+            "features are read, such as an ID or timestamp column."
+        ),
+    )
+    parser.add_argument(
+        "--ablate",
+        action="store_true",
+        help=(
+            "Add an ablation curve to the report: refit the voting models on the "
+            "top-k consensus groups and score them on the evaluation data."
+        ),
+    )
+    parser.add_argument(
+        "--ablate-ks",
+        type=_ablate_ks,
+        default=None,
+        metavar="KS",
+        help="With --ablate, comma-separated k values, such as 1,2,5 (default: 1, 2, 3, 5, 10, ...).",
+    )
+    parser.add_argument(
         "--quiet",
         action="store_true",
         help="Hide progress bars (warnings and errors are still shown).",
@@ -328,15 +379,41 @@ def _load_feature_groups(path: Optional[str]) -> Optional[Dict[str, List[str]]]:
     return feature_groups
 
 
+def _drop_names(args: argparse.Namespace) -> List[str]:
+    if args.drop is None:
+        return []
+    names = [name.strip() for name in args.drop.split(",")]
+    if not all(names):
+        raise ValueError("[!] --drop needs comma-separated column names.")
+    return names
+
+
+def _check_groups_keep_dropped_out(
+    feature_groups: Optional[Dict[str, List[str]]], drop: Sequence[str]
+) -> None:
+    """A dropped column cannot be a member of a --feature-groups group."""
+    for members in (feature_groups or {}).values():
+        if not isinstance(members, list):
+            continue  # _resolve_feature_groups names the malformed group
+        clash = [name for name in members if name in drop]
+        if clash:
+            raise ValueError(f"[!] '{clash[0]}' is given to both --drop and --feature-groups.")
+
+
 def _categorical_names(args: argparse.Namespace) -> List[str]:
     """The --categorical column names; "auto" is read off the training CSV."""
+    dropped = _drop_names(args)
     if args.categorical is None:
         return []
     if args.categorical.strip() == "auto":
-        return _infer_categorical(args.train_data, args.target)
+        inferred = _infer_categorical(args.train_data, args.target)
+        return [name for name in inferred if name not in dropped]
     names = [name.strip() for name in args.categorical.split(",")]
     if not all(names):
         raise ValueError("[!] --categorical needs 'auto' or comma-separated column names.")
+    clash = [name for name in names if name in dropped]
+    if clash:
+        raise ValueError(f"[!] '{clash[0]}' is given to both --drop and --categorical.")
     return names
 
 
@@ -350,6 +427,9 @@ def _scoring_names(args: argparse.Namespace) -> List[str]:
 def _load_cli_inputs(args: argparse.Namespace) -> Dict[str, Any]:
     """Load the CSV files and validate options before any model is fit."""
     allow_nan = args.missing == "impute"
+    if args.ablate_ks is not None and not args.ablate:
+        raise ValueError("[!] --ablate-ks needs --ablate.")
+    drop = _drop_names(args)
     categorical = _categorical_names(args)
     if args.sample_weight == args.target:
         raise ValueError(
@@ -360,10 +440,10 @@ def _load_cli_inputs(args: argparse.Namespace) -> Dict[str, Any]:
             f"[!] '{args.sample_weight}' is given to both --sample-weight and --categorical."
         )
     X_train, y_train, feature_names = _load_csv(
-        args.train_data, args.target, allow_nan, categorical, args.sample_weight
+        args.train_data, args.target, allow_nan, categorical, args.sample_weight, drop
     )
     X_eval, y_eval, eval_names = _load_csv(
-        args.eval_data, args.target, allow_nan, categorical, args.sample_weight
+        args.eval_data, args.target, allow_nan, categorical, args.sample_weight, drop
     )
     # Only when given, so a ranker without the option still works here.
     train_weight: Dict[str, Any] = {}
@@ -390,6 +470,7 @@ def _load_cli_inputs(args: argparse.Namespace) -> Dict[str, Any]:
         )
     else:
         feature_groups = _load_feature_groups(args.feature_groups)
+        _check_groups_keep_dropped_out(feature_groups, drop)
     # Fail fast: rank_features repeats these checks, but only after
     # every model has been fit.
     _resolve_scorers(_scoring_names(args))
@@ -397,7 +478,12 @@ def _load_cli_inputs(args: argparse.Namespace) -> Dict[str, Any]:
         raise ValueError("[!] n_repeats must be a positive integer.")
     if args.max_samples is not None:
         _resolve_max_samples(args.max_samples, len(y_eval))
-    _resolve_feature_groups(feature_names, feature_groups)
+    n_groups = len(_resolve_feature_groups(feature_names, feature_groups))
+    if args.ablate_ks is not None and max(args.ablate_ks) > n_groups:
+        raise ValueError(
+            f"[!] --ablate-ks has {max(args.ablate_ks)}, but there are only "
+            f"{n_groups} feature groups."
+        )
     return {
         "train": (X_train, y_train, feature_names),
         "eval": (X_eval, y_eval),
@@ -438,6 +524,20 @@ def _run_ranking(args: argparse.Namespace) -> Dict[str, Any]:
     )
     if args.feature_groups == "auto":
         report["run"]["auto_groups"] = auto_groups_record(args.auto_groups_threshold)
+    if args.ablate and not report["consensus"]:
+        print(
+            "[!] No model beat the dummy baseline, so there is nothing to ablate; "
+            "the report is written without an ablation block.",
+            file=sys.stderr,
+        )
+    elif args.ablate:
+        X_train, y_train, _ = inputs["train"]
+        X_eval, y_eval = inputs["eval"]
+        report = ranker.ablate(
+            X_train, y_train, X_eval, y_eval, report, ks=args.ablate_ks,
+            sample_weight=inputs["train_weight"].get("sample_weight"),
+            eval_sample_weight=inputs["eval_weight"].get("sample_weight"),
+        )
     return report
 
 

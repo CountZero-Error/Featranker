@@ -4,7 +4,7 @@
 
 ## ▍ API
 
-The API is one class: `FeatureRanker(...)`, then `.fit(...)`, then `.rank_features(...)`, which returns a [`Report`](#working-with-reports). [`.rank_resampled(...)`](#resampled-ranking) repeats that over cross-validation splits, [`ConsensusSelector`](#feature-selection) turns the ranking into a scikit-learn pipeline step, [`summarize(report)`](#summarize) reads the result, and [`to_prompt` / `explain`](#llm-interpretation) hand it to an LLM with checked citations (deprecated since 1.1). `evidence=True` adds [mechanism evidence](#evidence) to the report.
+The API is one class: `FeatureRanker(...)`, then `.fit(...)`, then `.rank_features(...)`, which returns a [`Report`](#working-with-reports). [`.rank_resampled(...)`](#resampled-ranking) repeats that over cross-validation splits, [`.ablate(...)`](#ablation-curve) refits the voting models on the top-k groups to check the ranking, [`ConsensusSelector`](#feature-selection) turns the ranking into a scikit-learn pipeline step, [`summarize(report)`](#summarize) reads the result, and [`to_prompt` / `explain`](#llm-interpretation) hand it to an LLM with checked citations (deprecated since 1.1). `evidence=True` adds [mechanism evidence](#evidence) to the report.
 
 ### `FeatureRanker(task, group="all", models=None, n_jobs=None, verbose=True, shadows=False, shadow_seed=None, evidence=False, shadow_mode="joint", missing="error", categorical=None, model_input="array", shuffle="rows")`
 
@@ -51,6 +51,19 @@ Returns the ranker itself. Raises if no model fits.
 | `shuffle_groups` | `None` | One group label per evaluation row; required with `shuffle="within_groups"` (permutations and shadows are shuffled within groups), an error with another `shuffle`. See [Shuffling dependent rows](#shuffling-dependent-rows). |
 
 Returns the report dict described in [Report](report.md). Raises if every model fails ranking.
+
+### `.ablate(X, y, X_eval, y_eval, report, *, ks=None, scoring=None, sample_weight=None, eval_sample_weight=None)`
+
+| Parameter | Default | Meaning |
+|---|---|---|
+| `X`, `y` | required | The training data this ranker was fit on. They are checked against the report's `run["train_data_sha256"]` (skipped when that is `null`, as for a ranker pickled before 1.12); other data raises `ValueError`. |
+| `X_eval`, `y_eval` | required | Data to score the refit models on, with the same columns as `fit()`. Usually the evaluation data of `report`; see the caveat in [Ablation curve](#ablation-curve). Every row is scored: the report's `max_samples` is ignored. |
+| `report` | required | A held-out report from this ranker's `rank_features()`. A resampled report, or one with an empty consensus, raises `ValueError`. |
+| `ks` | `None` | How many top consensus groups to keep: a non-empty list of ints from 1 to the number of consensus groups, de-duplicated and sorted; anything else raises `ValueError`. The default is 1, 2, 3, 5, 10, 20, 50, 100, 200, 500, ... up to that number, plus that number. |
+| `scoring` | `None` | A scorer name or callable. `None` uses the report's `scoring` name, which a report ranked with a callable cannot resolve; pass `scoring=` then. |
+| `sample_weight`, `eval_sample_weight` | `None` | Training and evaluation weights for the refits and the scores, as in `fit()` and `rank_features()`. The ranker does not remember them, so pass the ones used for the ranking again: the training weights are checked against the report's `run["train_weights_sha256"]` (none given when the key is absent; skipped with the training-data check when `train_data_sha256` is `null`), and the evaluation weights against `run["weights_sha256"]` when `X_eval` and `y_eval` are the report's own evaluation data (a third data set takes any weights). A mismatch raises `ValueError`. A report without a `run` block is not checked. |
+
+Returns a new `Report`: a deep copy of `report` plus an [`ablation` block](report.md#ablation). `report` is not modified. An unfitted ranker also raises `ValueError`.
 
 <a id="working-with-reports"></a>
 
@@ -473,6 +486,43 @@ weighted {'train': True, 'eval': True} {'x1': 1.44, 'x2': 0.02}
 
 **Selector and pipelines.** `ConsensusSelector.fit(X, y, groups=None, sample_weight=None)` passes the weights to its resampled ranking. Inside a `Pipeline`, use scikit-learn metadata routing: `sklearn.set_config(enable_metadata_routing=True)`, `ConsensusSelector(...).set_fit_request(sample_weight=True)`, then `pipeline.fit(X, y, sample_weight=w)`. Without routing enabled, scikit-learn raises its usual error for `sample_weight` on a pipeline. **The command line** takes `--sample-weight COLUMN`: the column must exist in both CSV files, is read as the weights (training and evaluation), and is not ranked as a feature.
 
+<a id="ablation-curve"></a>
+
+## ▍ Ablation curve
+
+Permutation importance shows how much a fitted model loses when a group becomes noise. It does not show whether the top groups are enough: correlated groups share credit, so each can look small while removing both hurts. `ablate()` checks the ranking by refitting: for each `k`, every model that voted in the consensus is fit again on the columns of the top-`k` consensus groups and scored on the evaluation data. The curve answers "how many groups do I need": where it flattens, the later groups add little.
+
+```python
+curve = ranker.ablate(X_train, y_train, X_eval, y_eval, report, ks=[1, 2, 3, 5, 10])
+
+for row in curve["ablation"]["curve"]:
+    print(f"k={row['k']:>2}  median r2 {row['median_score']:.2f}  added {row['feature_groups'][-1]}")
+```
+
+```text
+k= 1  median r2 0.13  added s5
+k= 2  median r2 0.24  added bmi
+k= 3  median r2 0.24  added bp
+k= 5  median r2 0.27  added s6
+k=10  median r2 0.29  added s3
+```
+
+Same data and split as the quick start (`ranker` fit with `group="fast"`, ranked with `scoring="r2"` and `random_state=42`); output shown with the `xgboost` and `catboost` extras installed. Two groups reach a median r2 of 0.24 against 0.29 for all ten, and `s5` alone reaches 0.13.
+
+How it works:
+
+- **Groups and columns.** The top `k` rows of `report["consensus"]` are kept, in list order; their columns are the union of their `feature_groups` entries, in training column order. Groups are never split.
+- **Models.** Only the voting models (`in_consensus: true`) are refit; models that lost to the dummy are skipped. An empty consensus raises `ValueError`.
+- **Same preprocessing.** Each `k` builds a fresh `FeatureRanker` with the ranker's `task`, `group` or `models`, `n_jobs`, `missing`, `model_input`, and `categorical` columns (those among the kept ones), without shadows or evidence, and fits and scores it with the normal code path. Imputation, categorical coding, named model input, and sample weights therefore behave as in the ranking run. That ranker also takes one permutation per model, which is unused; its cost is small next to a refit.
+- **Cost.** `len(ks)` refits of every voting model. A shorter `ks` list is the way to save time.
+- **Failures.** A model that fails to fit or score at some `k` gets `null` there and an entry in `ablation["failures"]`; other models and ks continue. A model that cannot fit few columns (the built-in `pls_regression` with one column, for example) fails at small `k` this way. `median_score` is the median over the models that did not fail, and `null` if all did.
+- **Summary.** `summarize()` adds an `ablation_curve` finding, see [Summarize a report](#summarize).
+
+> [!WARNING]
+> By default the curve is scored on the evaluation data that also produced the ranking, so it is optimistic: the top groups were chosen because they scored well there. For an unbiased curve pass a third, untouched data set as `X_eval` and `y_eval`. The block's `baseline_score` is the dummy's score from the refits themselves (same training rows and weights, every `X_eval` row, the scorer used), so it is comparable to the curve, also with another `scoring`; it can differ from the report's `baseline_score`, which used the report's own rows and scorer and `max_samples`. It is `null` only if no refit scored.
+
+The curve is descriptive. FeatRanker does not choose `k` for you, and it does not drop one group at a time (leave-one-group-out). For a resampled report there is no ablation; ablate a held-out report.
+
 ## ▍ Command line
 
 The CLI takes separate training and evaluation CSV files; the features are numeric unless named by `--categorical`. `--scoring` takes one scorer name or several separated by commas (`--scoring accuracy,neg_log_loss`; the first is primary, see [Several metrics](#several-metrics)).
@@ -492,7 +542,7 @@ featranker \
   --output report.json
 ```
 
-Both CSV files need headers, the same feature columns in the same order, and the target column. Feature values must be numeric; targets may be numeric or strings. With `--missing impute`, empty feature cells are read as missing values and imputed per training split (see [Missing values](#missing-values)); by default they are rejected. Only empty cells and the text `nan` (any case) are read as missing; `NA`, `N/A`, and `null` are not, and raise the numeric-values error. Add `--quiet` to hide progress bars and `--evidence` to add [evidence](#evidence) to the report. `--feature-groups` takes a YAML file, or the word `auto` to group correlated columns of the training CSV with [`auto_groups()`](#auto-groups) (a file literally named `auto` must be written `./auto`); `--auto-groups-threshold 0.5` changes its default 0.7 cut. `--categorical auto` reads the training-CSV columns that have a non-numeric cell as text (so a stray `NA` makes its whole column categorical; a column literally named `auto` cannot be listed, since `auto` always means detection), and `--categorical city,segment` reads the named columns as text (see [Categorical features](#categorical-features)); levels are learned from the training CSV only, and an empty cell in such a column is a missing level. `--sample-weight w` reads column `w` of both files as [sample weights](#sample-weights) and leaves it out of the features. `--max-samples 5000` (rows) or `--max-samples 0.25` (a share; a decimal point makes it a float) scores on a [subsample](#speed) of the evaluation rows. Run `featranker --help` for every flag.
+Both CSV files need headers, the same feature columns in the same order, and the target column. Feature values must be numeric; targets may be numeric or strings. With `--missing impute`, empty feature cells are read as missing values and imputed per training split (see [Missing values](#missing-values)); by default they are rejected. Only empty cells and the text `nan` (any case) are read as missing; `NA`, `N/A`, and `null` are not, and raise the numeric-values error. Add `--quiet` to hide progress bars and `--evidence` to add [evidence](#evidence) to the report. `--feature-groups` takes a YAML file, or the word `auto` to group correlated columns of the training CSV with [`auto_groups()`](#auto-groups) (a file literally named `auto` must be written `./auto`); `--auto-groups-threshold 0.5` changes its default 0.7 cut. `--categorical auto` reads the training-CSV columns that have a non-numeric cell as text (so a stray `NA` makes its whole column categorical; a column literally named `auto` cannot be listed, since `auto` always means detection), and `--categorical city,segment` reads the named columns as text (see [Categorical features](#categorical-features)); levels are learned from the training CSV only, and an empty cell in such a column is a missing level. `--sample-weight w` reads column `w` of both files as [sample weights](#sample-weights) and leaves it out of the features. `--max-samples 5000` (rows) or `--max-samples 0.25` (a share; a decimal point makes it a float) scores on a [subsample](#speed) of the evaluation rows. `--drop id,created_at` removes those columns from both CSV files before any feature is read, so an ID or timestamp column never becomes a feature (and a dropped text column is not read as categorical); an unknown name, the target, the `--sample-weight` column, or a `--categorical` column raises an error, and so does dropping every feature. `--ablate` adds the [`ablation` block](#ablation-curve) to the written report (it refits the voting models for each `k`, so the run takes longer); `--ablate-ks 1,2,5` sets the ks (comma-separated positive ints, and it needs `--ablate`), and a `k` above the number of feature groups raises an error before any model is fit. The CLI curve is scored on the evaluation CSV that chose the groups, so it is optimistic; see the warning in [Ablation curve](#ablation-curve). If no model beats the dummy, there is no consensus: `--ablate` prints a warning to stderr and the report is written without an `ablation` block. Run `featranker --help` for every flag.
 
 <details>
 <summary><b>Example input files</b></summary>
@@ -1142,6 +1192,7 @@ Each finding is a dict with `code`, `severity` (`"info"` or `"warning"`), `messa
 | `below_shadow` | info | With [shadows](#shadow-features) on, groups whose `above_shadow_share` is below 0.5. Descriptive, not a significance test. |
 | `overfit` | info | With [evidence](#evidence) on: models that lost at least half of their training advantage over the dummy on the evaluation data, that is `(train_score - evaluation_score) / (train_score - baseline_score) >= 0.5`. Each is listed with its scores and that share. Skipped when `baseline_score` is `None`. |
 | `correlated_groups` | info | With [evidence](#evidence) on: feature groups correlated on the training data (absolute Spearman rho of at least 0.5), whose permutation importance may be split between them. |
+| `ablation_curve` | info | The report has an [`ablation`](#ablation-curve) block with a `median_score` that is not `null`: the `k` with the highest `median_score` (the smallest on ties) and the `median_score` at the largest `k` with one. Evidence: `best_k`, `best_median_score`, `max_k`, `max_k_median_score`. |
 
 An empty list means nothing stood out, not that the ranking is proven. The checks cover one evaluation set.
 

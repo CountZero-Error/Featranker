@@ -57,6 +57,7 @@ context: |
     1.13 eval-subsampling: max_samples
     1.14 multiple-scorers: secondary scorers on the same permuted copies
     1.15 dependent-shuffling: shuffle="within_groups" | "circular"
+    1.16 ablation-curve: ablate() top-k refit curve, CLI --drop/--ablate
   Known limitations (found 2026-10-19/20 in reviews and the benchmark,
   updated 2026-10-22 after 1.6-1.15; maintainer decides):
     Method and statistics
@@ -126,7 +127,7 @@ context: |
     L17 n_jobs tests and mypy with types-PyYAML are verified only in CI,
         not in the local sandbox
     Release
-    L18 1.0-1.15 unreleased (PyPI has 0.4.1); local main is ahead of
+    L18 1.0-1.16 unreleased (PyPI has 0.4.1); local main is ahead of
         origin; six older commits carry Claude-Session lines
 
 rules:

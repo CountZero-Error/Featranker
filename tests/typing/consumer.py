@@ -69,3 +69,8 @@ shuffled_resampled: Report = grouped_ranker.rank_resampled(
     np.ones((4, 1)), np.ones(4), scoring="r2", cv=2, groups=patients
 )
 shuffled_selector = ConsensusSelector("reg", "r2", k=2, shuffle="within_groups")
+ablated: Report = ranker.ablate(
+    np.ones((4, 1)), np.ones(4), np.ones((4, 1)), np.ones(4), single, ks=[1], scoring="r2",
+    sample_weight=weights, eval_sample_weight=weights,
+)
+ablated.summary()

@@ -496,3 +496,52 @@ def test_evidence_stage_failures_are_info():
     assert codes(findings) == ["failures"]
     assert findings[0]["severity"] == "info"
     assert findings[0]["evidence"] == {"stage": "evidence", "models": ["m1"]}
+
+
+def _ablation_report(medians):
+    """A clean report plus an ablation block whose curve has these median scores."""
+    report = clean_report()
+    report["ablation"] = {
+        "scoring": "r2",
+        "models": ["m1", "m2", "m3"],
+        "baseline_score": 0.1,
+        "n_groups": 2,
+        "curve": [
+            {"k": k, "feature_groups": [], "n_features": k, "scores": {}, "median_score": m}
+            for k, m in medians.items()
+        ],
+        "failures": [],
+    }
+    return report
+
+
+def test_ablation_curve_finding_names_the_best_k_and_the_largest_k():
+    findings = summarize(_ablation_report({1: 0.5, 2: 0.9, 3: 0.8}))
+
+    assert codes(findings) == ["ablation_curve"]
+    assert findings[0]["severity"] == "info"
+    assert findings[0]["evidence"] == {
+        "best_k": 2, "best_median_score": 0.9, "max_k": 3, "max_k_median_score": 0.8,
+    }
+    assert "k=2" in findings[0]["message"]
+    assert "0.8 at the largest scored k, 3" in findings[0]["message"]
+    json.dumps(findings, allow_nan=False)
+
+
+def test_ablation_curve_finding_prefers_the_smallest_k_on_ties():
+    findings = summarize(_ablation_report({1: 0.9, 2: 0.9, 3: 0.9}))
+
+    assert findings[0]["evidence"]["best_k"] == 1
+
+
+def test_ablation_curve_skips_null_medians():
+    findings = summarize(_ablation_report({1: 0.5, 2: None, 3: 0.4}))
+
+    assert findings[0]["evidence"]["best_k"] == 1
+    assert findings[0]["evidence"]["max_k"] == 3
+    assert "the largest scored k" in findings[0]["message"]
+
+
+def test_no_ablation_curve_finding_without_a_usable_block():
+    assert "ablation_curve" not in codes(summarize(clean_report()))
+    assert "ablation_curve" not in codes(summarize(_ablation_report({1: None, 2: None})))

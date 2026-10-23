@@ -174,9 +174,34 @@ def _correlated_groups(report: Dict[str, Any]) -> List[Dict[str, Any]]:
     )]
 
 
+def _ablation_curve(report: Dict[str, Any]) -> List[Dict[str, Any]]:
+    rows = [row for row in report.get("ablation", {}).get("curve", [])
+            if row["median_score"] is not None]
+    if not rows:
+        return []
+    # max keeps the first of equal scores, and the curve is in ascending k.
+    best = max(rows, key=lambda row: row["median_score"])
+    last = rows[-1]
+    at_last = (
+        "the largest scored k" if best is last
+        else f"{last['median_score']:.3g} at the largest scored k, {last['k']}"
+    )
+    return [_finding(
+        "ablation_curve", "info",
+        f"Refit on the top-k groups, the median score was highest at k={best['k']} "
+        f"({best['median_score']:.3g}), {at_last}. "
+        "The curve is descriptive; it is scored on the evaluation data unless another "
+        "set was passed to ablate().",
+        {
+            "best_k": best["k"], "best_median_score": best["median_score"],
+            "max_k": last["k"], "max_k_median_score": last["median_score"],
+        },
+    )]
+
+
 RULES = (
     _gate_off, _empty_consensus, _failures, _few_families, _tied_groups,
-    _within_noise, _below_shadow, _overfit, _correlated_groups,
+    _within_noise, _below_shadow, _overfit, _correlated_groups, _ablation_curve,
 )
 
 

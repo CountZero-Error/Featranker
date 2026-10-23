@@ -33,7 +33,7 @@ Before something public is removed, it is deprecated with a `DeprecationWarning`
 
 ## ▍ Typing
 
-The package ships a `py.typed` marker, so type checkers such as mypy and Pyright read FeatRanker's annotations. `rank_features()` and `rank_resampled()` are annotated to return `Report`, so its helpers type-check. CI runs mypy on the package and on a small consumer file that uses the public API, on every push.
+The package ships a `py.typed` marker, so type checkers such as mypy and Pyright read FeatRanker's annotations. `rank_features()`, `rank_resampled()`, and `ablate()` are annotated to return `Report`, so its helpers type-check. CI runs mypy on the package and on a small consumer file that uses the public API, on every push.
 
 ## ▍ Releasing
 

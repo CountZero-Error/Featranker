@@ -130,6 +130,31 @@ With [`max_samples`](usage.md#fewer-evaluation-rows-max_samples), the report has
 
 With `shuffle="within_groups"` or `"circular"` (see [Shuffling dependent rows](usage.md#shuffling-dependent-rows)), the report (and each resampled split report) has top-level `"shuffle"` with that value; with the default `"rows"` the key is absent.
 
+<a id="ablation"></a>
+
+A report returned by [`FeatureRanker.ablate()`](usage.md#ablation-curve) (or written by the CLI with `--ablate`) has one more top-level key, `ablation`; every other key is a copy of the report it was made from, and without `ablate()` the key is absent.
+
+```python
+"ablation": {
+    "scoring": "r2",                  # scorer used for the curve
+    "models": ["ridge", "random_forest"],   # the voting models that were refit
+    "baseline_score": -0.01,          # the refits' dummy score; null only if no refit scored
+    "n_groups": 10,                   # consensus groups; the largest possible k
+    "curve": [
+        {
+            "k": 2,
+            "feature_groups": ["s5", "bmi"],   # the top-k consensus groups, in order
+            "n_features": 2,                   # columns they hold
+            "scores": {"ridge": 0.31, "random_forest": 0.17},   # null where the model failed
+            "median_score": 0.24,              # median of the non-null scores; null if none
+        }
+    ],
+    "failures": [{"model": "pls_regression", "stage": "fit", "message": "...", "k": 1}],
+}
+```
+
+Scores are the models' scores on the data passed as `X_eval`, higher is better. `baseline_score` is the dummy's score from the refits themselves, on every row of `X_eval` with the scorer named in `scoring`, so it can differ from the report's own `baseline_score`; it is `null` only if no refit scored. Ablation `failures` entries have `model`, `stage` (`"fit"` or `"ranking"`), `message`, and `k`, and no `error_type`; they are separate from the report's own `failures`. All numbers are finite or `null`.
+
 <a id="several-scorers"></a>
 
 With [several scorers](usage.md#several-metrics) (`scoring=["r2", "neg_mean_absolute_error"]`), `scoring` names the primary scorer, and the report adds `secondary_scoring` (the other names, in order) and `secondary_baseline_scores` (name to the fitted dummy's score, or `null` if it could not be scored). Each model gains `secondary`: per secondary scorer, `{"evaluation_score": ..., "importance": {group: {"mean": ..., "std": ...}}}` computed on the same permuted copies as the primary `importance`, or `null` if that scorer failed for the model (the model stays ranked, with a `failures` entry at stage `"evidence"` naming the scorer). `consensus`, `stability`, shadows, and everything else use the primary scorer only. Resampled reports have `secondary_scoring` at the top and `secondary` in each split's models. With one scorer none of these keys appear.

@@ -589,3 +589,225 @@ def test_cli_dot_slash_auto_reads_a_file_named_auto(monkeypatch, tmp_path):
     groups = run_cli_with_pair(monkeypatch, tmp_path, "./auto")
 
     assert groups == {"pair": ["f", "g"], "e": ["e"]}
+
+
+def write_drop_csvs(tmp_path, flip_eval=False):
+    """Train and eval CSVs with a text id column, a weight column and one signal column."""
+    rng = np.random.default_rng(0)
+
+    def write_csv(path, n_rows, sign=1.0):
+        lines = ["id,signal,noise,weight,target"]
+        for index in range(n_rows):
+            signal, noise = rng.normal(size=2)
+            lines.append(f"row{index},{signal},{noise},1.5,{sign * 3 * signal}")
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    write_csv(tmp_path / "train.csv", 60)
+    # A flipped target makes every model lose to the dummy: an empty consensus.
+    write_csv(tmp_path / "eval.csv", 30, -1.0 if flip_eval else 1.0)
+
+
+def run_drop_cli(monkeypatch, tmp_path, *extra):
+    """The written report; the CSVs must come from write_drop_csvs()."""
+    output = tmp_path / "report.json"
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "featranker", "--task", "reg", "--group", "linear", "--quiet",
+            "--train-data", "train.csv", "--eval-data", "eval.csv",
+            "--target", "target", "--scoring", "r2", "--n-repeats", "2",
+            "--random-state", "0", "--output", str(output), *extra,
+        ],
+    )
+    assert cli_module.main() == 0
+    return json.loads(output.read_text(encoding="utf-8"))
+
+
+def rejected_drop_cli(monkeypatch, tmp_path, capsys, *extra):
+    with pytest.raises(SystemExit, match="2"):
+        run_drop_cli(monkeypatch, tmp_path, *extra)
+    return capsys.readouterr().err
+
+
+def test_load_csv_drop_leaves_the_column_out(tmp_path):
+    path = tmp_path / "train.csv"
+    path.write_text("id,a,target\nx,1,2\ny,3,4\n", encoding="utf-8")
+
+    X, _, names = cli_module._load_csv(path, "target", drop=["id"])
+
+    assert names == ["a"]
+    assert np.array_equal(X, [[1.0], [3.0]])
+
+
+def test_cli_drop_removes_columns_before_features_are_read(monkeypatch, tmp_path):
+    write_drop_csvs(tmp_path)
+
+    report = run_drop_cli(monkeypatch, tmp_path, "--drop", "id,weight")
+
+    assert sorted(report["feature_groups"]) == ["noise", "signal"]
+
+
+def test_cli_drop_a_text_column_is_not_inferred_as_categorical(monkeypatch, tmp_path):
+    write_drop_csvs(tmp_path)
+
+    report = run_drop_cli(
+        monkeypatch, tmp_path, "--drop", "id,weight", "--categorical", "auto"
+    )
+
+    assert "categorical" not in report
+    assert sorted(report["feature_groups"]) == ["noise", "signal"]
+
+
+def test_cli_without_drop_a_text_column_is_an_error(monkeypatch, tmp_path, capsys):
+    write_drop_csvs(tmp_path)
+
+    error = rejected_drop_cli(monkeypatch, tmp_path, capsys, "--drop", "weight")
+
+    assert "numeric" in error
+
+
+@pytest.mark.parametrize(
+    ("drop", "message"),
+    [
+        ("id,ghost", "ghost"),
+        ("target", "target"),
+        ("weight", "sample-weight"),
+        ("id,signal,noise", "every feature"),
+        ("id,,noise", "--drop"),
+    ],
+)
+def test_cli_drop_rejects_bad_names(monkeypatch, tmp_path, capsys, drop, message):
+    write_drop_csvs(tmp_path)
+
+    error = rejected_drop_cli(
+        monkeypatch, tmp_path, capsys, "--drop", drop, "--sample-weight", "weight"
+    )
+
+    assert message in error
+
+
+def test_cli_drop_a_categorical_column_is_an_error(monkeypatch, tmp_path, capsys):
+    write_drop_csvs(tmp_path)
+
+    error = rejected_drop_cli(
+        monkeypatch, tmp_path, capsys, "--drop", "id,weight", "--categorical", "id"
+    )
+
+    assert "--drop" in error and "--categorical" in error
+
+
+def test_cli_report_has_no_ablation_without_the_flag(monkeypatch, tmp_path):
+    write_drop_csvs(tmp_path)
+
+    report = run_drop_cli(monkeypatch, tmp_path, "--drop", "id,weight")
+
+    assert "ablation" not in report
+
+
+def test_cli_ablate_adds_the_curve_with_the_given_ks(monkeypatch, tmp_path):
+    write_drop_csvs(tmp_path)
+
+    report = run_drop_cli(
+        monkeypatch, tmp_path, "--drop", "id,weight", "--ablate", "--ablate-ks", "1,2"
+    )
+
+    assert [row["k"] for row in report["ablation"]["curve"]] == [1, 2]
+    assert report["ablation"]["curve"][0]["feature_groups"] == ["signal"]
+    # PLS cannot fit one column; every other refit works.
+    failures = report["ablation"]["failures"]
+    assert [(f["model"], f["stage"], f["k"]) for f in failures] == [("pls_regression", "fit", 1)]
+
+
+def test_cli_ablate_defaults_to_every_k(monkeypatch, tmp_path):
+    write_drop_csvs(tmp_path)
+
+    report = run_drop_cli(monkeypatch, tmp_path, "--drop", "id,weight", "--ablate")
+
+    assert [row["k"] for row in report["ablation"]["curve"]] == [1, 2]
+
+
+def test_cli_ablate_with_sample_weights(monkeypatch, tmp_path):
+    write_drop_csvs(tmp_path)
+
+    report = run_drop_cli(
+        monkeypatch, tmp_path, "--drop", "id", "--sample-weight", "weight", "--ablate"
+    )
+
+    assert report["ablation"]["failures"] == []
+    assert report["ablation"]["curve"][0]["median_score"] is not None
+
+
+def test_cli_ablate_ks_needs_ablate(monkeypatch, tmp_path, capsys):
+    write_drop_csvs(tmp_path)
+
+    error = rejected_drop_cli(
+        monkeypatch, tmp_path, capsys, "--drop", "id,weight", "--ablate-ks", "1,2"
+    )
+
+    assert "--ablate-ks" in error and "--ablate" in error
+
+
+@pytest.mark.parametrize("ks", ["0", "1,a", "1,,2", "-2", "1.5"])
+def test_cli_ablate_ks_must_be_positive_ints(monkeypatch, tmp_path, capsys, ks):
+    write_drop_csvs(tmp_path)
+
+    error = rejected_drop_cli(
+        monkeypatch, tmp_path, capsys, "--drop", "id,weight", "--ablate", "--ablate-ks", ks
+    )
+
+    assert "ablate-ks" in error
+
+
+def test_cli_ablate_ks_above_the_group_count_is_an_error(monkeypatch, tmp_path, capsys):
+    write_drop_csvs(tmp_path)
+
+    error = rejected_drop_cli(
+        monkeypatch, tmp_path, capsys, "--drop", "id,weight", "--ablate", "--ablate-ks", "9"
+    )
+
+    assert "ks" in error
+
+
+def test_cli_ablate_ks_above_the_group_count_fails_before_any_fit(monkeypatch, tmp_path, capsys):
+    write_drop_csvs(tmp_path)
+
+    def fail_fit(*args, **kwargs):
+        raise AssertionError("fit() was called")
+
+    monkeypatch.setattr(cli_module.FeatureRanker, "fit", fail_fit)
+
+    with pytest.raises(SystemExit, match="2"):
+        run_drop_cli(
+            monkeypatch, tmp_path, "--drop", "id,weight", "--ablate", "--ablate-ks", "1,9"
+        )
+    error = capsys.readouterr().err
+
+    assert "--ablate-ks" in error and "9" in error
+    assert "fit() was called" not in error
+
+
+def test_cli_ablate_with_an_empty_consensus_still_writes_the_report(
+    monkeypatch, tmp_path, capsys
+):
+    write_drop_csvs(tmp_path, flip_eval=True)
+
+    report = run_drop_cli(monkeypatch, tmp_path, "--drop", "id,weight", "--ablate")
+
+    assert report["consensus"] == []
+    assert "ablation" not in report
+    assert "ablat" in capsys.readouterr().err
+
+
+def test_cli_feature_groups_naming_a_dropped_column_names_both_flags(
+    monkeypatch, tmp_path, capsys
+):
+    write_drop_csvs(tmp_path)
+    (tmp_path / "groups.yaml").write_text("pair: [signal, id]\n", encoding="utf-8")
+
+    error = rejected_drop_cli(
+        monkeypatch, tmp_path, capsys, "--drop", "id,weight", "--feature-groups", "groups.yaml"
+    )
+
+    assert "'id' is given to both --drop and --feature-groups" in error
