@@ -37,11 +37,13 @@ The package ships a `py.typed` marker, so type checkers such as mypy and Pyright
 
 ## ▍ Releasing
 
-Releases are published by `.github/workflows/release.yml` when a version tag is pushed. Its actions are pinned to full commit SHAs (with the version in a comment); update a pin only to a reviewed upstream release. It runs the tests and mypy, checks that the tag equals `v` plus the version in `pyproject.toml`, builds and checks the package, and uploads it with PyPI [trusted publishing](https://docs.pypi.org/trusted-publishers/), so no API token is stored anywhere.
+Releases are published by `.github/workflows/release.yml` when a version tag is pushed. Its actions are pinned to full commit SHAs (with the version in a comment); update a pin only to a reviewed upstream release. It runs the tests and mypy, checks that the tag equals `v` plus the version in `pyproject.toml`, builds and checks the package, installs the built wheel in a fresh virtualenv outside the checkout and runs `tests/smoke_installed.py` on it (core-only, then with `[all,shap,plot]`), and uploads it with PyPI [trusted publishing](https://docs.pypi.org/trusted-publishers/), so no API token is stored anywhere.
 
 One-time setup:
 
 1. On pypi.org, open the `featranker` project → **Publishing** → add a GitHub publisher with owner `CountZero-Error`, repository `Featranker`, workflow `release.yml`, and environment `pypi`.
 2. On GitHub, create the environment `pypi` under **Settings → Environments** (optionally require a reviewer, so every upload waits for approval).
+
+The `wheel` job in `tests.yml` runs the same smoke test on every push (Python 3.10 with the oldest supported scikit-learn, Python 3.13 with the newest). To run it by hand: build a wheel, install it in a fresh virtualenv, and run `python tests/smoke_installed.py --expect-version X.Y.Z [--extras]` with a virtualenv located outside the checkout (the working directory does not matter); `X.Y.Z` is the `pyproject.toml` version, which the installed metadata must match. It refuses to run against the source tree, and without `--extras` it requires a core-only environment.
 
 Each release: bump `version` in `pyproject.toml`, update the changelog, commit, then `git tag vX.Y.Z && git push origin vX.Y.Z`.
