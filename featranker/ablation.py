@@ -13,6 +13,7 @@ from .importance import (
     FINGERPRINT_SCHEME,
     FeatureRanker,
     _fingerprint,
+    _labels_fingerprint,
     _resolve_scorer,
     _validate_X,
     _validate_weights,
@@ -124,6 +125,12 @@ def _prepare(
             raise ValueError("[!] X and y are not the training data this report was ranked from.")
         # The run block leaves the weights key out when there were none.
         _check_weights(weights[0], len(X_values), run.get("train_weights_sha256"), "sample_weight")
+    expected_rows = run.get("train_rows_sha256")
+    if expected_rows is not None and _labels_fingerprint(ranker.train_rows_) != expected_rows:
+        raise ValueError(
+            "[!] This ranker was not fit on the training rows this report was ranked from "
+            "(fit it with the same max_samples and random_state)."
+        )
     eval_values, _ = _validate_X(X_eval, **options)
     y_eval_values = _validate_y(y_eval, len(eval_values))
     same_data = _fingerprint(names, eval_values, y_eval_values, scheme) == run.get("data_sha256")
@@ -157,6 +164,7 @@ def _sub_ranker(ranker: FeatureRanker, voters: List[str], kept: List[str]) -> Fe
         "missing": ranker.missing,
         "model_input": ranker.model_input,
         "categorical": [n for n in ranker.categorical_features_ if n in kept] or None,
+        "max_categories": ranker.max_categories,
         "verbose": False,
     }
     if ranker.user_models is not None:
@@ -272,10 +280,18 @@ def ablate(
     X_values, y_values, eval_values, y_eval_values, same_holdout = _prepare(
         ranker, (X, y, X_eval, y_eval), report, (sample_weight, eval_sample_weight)
     )
+    train_weight = sample_weight
+    if ranker.train_rows_ is not None:
+        # The ranker fit on a training subsample (checked above against all rows):
+        # refit on the same rows, so the curve compares like with like.
+        rows = ranker.train_rows_
+        train_weight = _validate_weights(sample_weight, len(X_values))
+        train_weight = None if train_weight is None else train_weight[rows]
+        X_values, y_values = X_values[rows], y_values[rows]
     settings = {
         "scoring": scoring,
         "random_state": report.get("random_state"),
-        "sample_weight": sample_weight,
+        "sample_weight": train_weight,
         "eval_sample_weight": eval_sample_weight,
     }
     curve: List[Dict[str, Any]] = []

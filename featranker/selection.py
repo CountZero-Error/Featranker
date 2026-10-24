@@ -68,8 +68,11 @@ class ConsensusSelector(SelectorMixin, BaseEstimator):
             imputer after it in a Pipeline for the final model. With
             categorical, selected raw columns come back as given (use an
             encoder after it in a Pipeline for the final model).
+        max_categories: As in FeatureRanker.
         feature_groups, cv, n_repeats, random_state, max_samples: As in
             rank_resampled().
+        max_train_samples: As rank_resampled()'s max_train_samples: fit each
+            split's models on a random subsample of its training rows.
             feature_groups="auto" groups correlated columns with auto_groups()
             on the X given to fit(), so inside a Pipeline from the training
             fold only; the groups used are in report_["feature_groups"] and
@@ -105,6 +108,8 @@ class ConsensusSelector(SelectorMixin, BaseEstimator):
         model_input: Literal["array", "dataframe"] = "array",
         shuffle: Literal["rows", "within_groups", "circular"] = "rows",
         families: Optional[Mapping[str, str]] = None,
+        max_categories: Optional[int] = None,
+        max_train_samples: Any = None,
         n_jobs: Optional[int] = None,
         verbose: bool = False,
     ) -> None:
@@ -130,18 +135,20 @@ class ConsensusSelector(SelectorMixin, BaseEstimator):
         self.model_input = model_input
         self.shuffle = shuffle
         self.families = families
+        self.max_categories = max_categories
+        self.max_train_samples = max_train_samples
         self.n_jobs = n_jobs
         self.verbose = verbose
 
     def __setstate__(self, state: Dict[str, Any]) -> None:
         # Selectors pickled by 1.3 lack the 1.4 max_shadow_q parameter, and
         # those pickled before 1.6 lack min_shadow_families and shadow_mode, and
-        # those pickled before 1.7 lack missing, those before 1.9 lack categorical, those before 1.10 lack model_input, those before 1.12 lack auto_groups_threshold, those before 1.13 lack max_samples, and those before 1.15 lack shuffle, and those before 1.18 lack families.
+        # those pickled before 1.7 lack missing, those before 1.9 lack categorical, those before 1.10 lack model_input, those before 1.12 lack auto_groups_threshold, those before 1.13 lack max_samples, and those before 1.15 lack shuffle, those before 1.18 lack families, and those before 1.21 lack max_categories and max_train_samples.
         defaults = {
             "max_shadow_q": None, "min_shadow_families": None, "shadow_mode": "joint",
             "missing": "error", "categorical": None, "model_input": "array",
             "auto_groups_threshold": 0.7, "max_samples": None, "shuffle": "rows",
-            "families": None,
+            "families": None, "max_categories": None, "max_train_samples": None,
         }
         super().__setstate__({**defaults, **state})
 
@@ -234,6 +241,7 @@ class ConsensusSelector(SelectorMixin, BaseEstimator):
             model_input=self.model_input,
             shuffle=self.shuffle,
             families=self.families,
+            max_categories=self.max_categories,
         )
         report = ranker.rank_resampled(
             X,
@@ -249,6 +257,7 @@ class ConsensusSelector(SelectorMixin, BaseEstimator):
             top_k=int(self.k) if self.k is not None else 5,
             sample_weight=sample_weight,
             max_samples=self.max_samples,
+            max_train_samples=self.max_train_samples,
         )
 
         if is_auto:

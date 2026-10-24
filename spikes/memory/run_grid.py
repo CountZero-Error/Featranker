@@ -96,6 +96,10 @@ def name(cfg):
             parts.append(tag)
     if cfg["max_samples"]:
         parts.append(f"ms{cfg['max_samples']}")
+    if cfg.get("max_categories"):
+        parts.append(f"cap{cfg['max_categories']}")
+    if cfg.get("max_train_samples"):
+        parts.append(f"train{cfg['max_train_samples']}")
     return "-".join(parts)
 
 

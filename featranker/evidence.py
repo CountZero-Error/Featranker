@@ -23,11 +23,19 @@ CUT_TOLERANCE = 1e-12
 # At most this many evaluation rows are explained, and as many training rows
 # serve as the linear background.
 SHAP_ROWS = 1000
+# Cells (rows x columns) ranked and squared at a time by _spearman_matrix.
+SPEARMAN_BLOCK_CELLS = 1 << 18
 # Longest error message kept in an "unsupported" reason.
 REASON_CHARS = 200
 # A column pair needs at least this many rows present in both to be correlated;
 # with fewer, independent columns look strongly correlated by chance.
 MIN_PAIR_ROWS = 30
+
+
+def _column_blocks(width: int, n_rows: int) -> List[Tuple[int, int]]:
+    """Column ranges holding at most SPEARMAN_BLOCK_CELLS cells (one column at least)."""
+    step = max(1, SPEARMAN_BLOCK_CELLS // max(1, n_rows))
+    return [(start, min(start + step, width)) for start in range(0, width, step)]
 
 
 def _spearman_matrix(X: np.ndarray) -> np.ndarray:
@@ -41,8 +49,22 @@ def _spearman_matrix(X: np.ndarray) -> np.ndarray:
     if np.isnan(X).any():
         return _pairwise_spearman_matrix(X)
     # Not scipy's spearmanr: with a constant column it returns one NaN for all.
-    centered = rankdata(X, axis=0) - (X.shape[0] + 1) / 2
-    norm = np.sqrt((centered**2).sum(axis=0))
+    # Ranked and squared a block of columns at a time, so beyond the ranks
+    # themselves only a block is extra. rankdata(axis=0) returns Fortran order,
+    # and so does the preallocated array: the column sums then run in the same
+    # order as on a whole matrix, which keeps the values identical to ranking at once.
+    blocks = _column_blocks(X.shape[1], X.shape[0])
+    if len(blocks) == 1:
+        centered = rankdata(X, axis=0)
+    else:
+        centered = np.empty(X.shape, order="F")
+        for start, stop in blocks:
+            centered[:, start:stop] = rankdata(X[:, start:stop], axis=0)
+    centered -= (X.shape[0] + 1) / 2
+    norm = np.empty(X.shape[1])
+    for start, stop in blocks:
+        norm[start:stop] = (centered[:, start:stop] ** 2).sum(axis=0)
+    norm = np.sqrt(norm)
     with np.errstate(invalid="ignore", divide="ignore"):
         return np.clip(centered.T @ centered / np.outer(norm, norm), -1.0, 1.0)
 
@@ -110,7 +132,7 @@ def auto_groups(
     members = names
     if skipped:
         kept = [index for index in range(len(names)) if index not in skipped]
-        values, members = values[:, kept].astype(float), [names[index] for index in kept]
+        values, members = values[:, kept].astype(float, copy=False), [names[index] for index in kept]
     if values.shape[1] < 2:
         return {}
 

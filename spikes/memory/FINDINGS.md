@@ -123,3 +123,29 @@ No evidence here that general large-data infrastructure (out-of-core, chunked es
 
 `measure.py`, `run_grid.py`, `table.py`, `results.jsonl` (all rows), `results_full_partial.jsonl` (first-pass copy), `table.md` (same table as below).
 Reproduce: `MPLCONFIGDIR=... MEM_PYTHONPATH=<frozen copy> python run_grid.py [numeric- | mixed- | probeA | probeB | overhead]`.
+
+## After 1.21 (memory-limits, 2026-10-24)
+
+Re-measured with the study's harness (`measure.py`, now accepting `max_categories` and `max_train_samples`; driver `run_after.py`; raw rows in `results_after_1_21.jsonl`). One fresh subprocess per row, `ru_maxrss`, same machine and Python/NumPy/scikit-learn as above. "Before" is a `git archive HEAD` copy (v1.20.0, identical memory behaviour to the 1.16 copy of the study for these paths), "after" is the 1.21.0 working tree. Probes score one group x one repeat, as in the study; group="fast" real models unless "NB only". Wall times are single runs and indicative only.
+
+| case (peak RSS MB) | before | after | note |
+|---|---:|---:|---|
+| 100k x 500, NB only, no options | 2705 | 2736 | unchanged (noise) |
+| same, shadows: peak while `fit()` builds shadows | 2521 | 2140 | -381 MB = 1X of the 381 MB matrix (gather + hstack -> preallocated) |
+| same, shadows: peak after `fit()` | 3284, 3282, 3285 | 2905, 2906, 2902 | three runs each |
+| same, shadows: whole run | 4435, 5134, 4803 | 4744, 4661, 4782 | not improved: the peak is in `rank_features()`, where GaussianNB's predict on 1000 columns allocates its own full-size temporaries (inferred, not separately measured); run-to-run spread (about 0.7 GB) is larger than the fit-side saving |
+| same, evidence (`correlation_evidence` step) | 4793 (+1545 over its start) | 3244 | whole-run peak; the Spearman step no longer exceeds the rest of the run (re-measured after the block-size fix) |
+| `auto_groups`, 100k x 500 | 4091 | 1810 | X validated copy is 1X of the rest |
+| 50 num + 10 cat x card 1000, 4k rows, built-in linear models, no cap | 3130 (fit 46 s) | n/a | dense one-hot, 4k x 10 x 1000 floats per copy; run on the 1.21 copy without the option, whose uncapped path is unchanged |
+| same, `max_categories=20` | n/a | 370 (fit 2.7 s) | 8.5x lower |
+| same, 10k rows, `max_categories=20` | n/a | 471 (fit 6.1 s) | the study's uncapped 10k run passed 6.1 GB before fit finished (lower bound, v1.16); not re-run (it would approach the 8 GB guard) |
+| same, 10k rows, shadows, `max_categories=20` | n/a | 685 (fit 9.2 s) | uncapped shadows: >= 7.4 GB in the study |
+| 100k x 500, real fast models, `fit(max_samples=5000)` | not finished in 120 s (>= 3.6 GB) | 3305 (fit 11.1 s, rank 4.3 s) | the peak is the evaluation side (all 100k rows scored by the real models); after fit 1777 |
+| same plus `rank_features(max_samples=5000)` | not finished in 180 s (>= 3.9 GB) | 1870 (fit 10.8 s, rank 0.8 s) | both caps |
+
+What 1.21 does and does not change:
+
+- Shadow construction peaks 1X lower (3X -> 2X of the matrix). The Spearman step ranks blocks of at most 2^18 cells and its values are identical to 1.20 (tested bit for bit, including 1M x 3 and 400k x 65); its peak, by tracemalloc at 20000 rows as a multiple of the matrix (old -> new), is 10 columns 7.3 -> 7.3 (one block, unchanged, under 15 MB), 64 columns 7.2 -> 2.5, 100: 7.1 -> 1.9, 200: 7.1 -> 1.5, 500: 7.1 -> 1.2. Narrow matrices gain nothing, which is harmless at their size. The validation copies (1X per `fit()`/`rank_features()` call) remain.
+- `max_categories` bounds the dense one-hot width per categorical column, so peak memory no longer grows with cardinality; cardinality-10000 columns are now feasible when capped. The model sees the infrequent levels as one level, so linear models' scores can differ from the uncapped ones.
+- `fit(max_samples=)` is the only option that bounds tree fit time and the training-side shadow/evidence copies; it still reads and validates every row once.
+- Not done (non-goals): sparse model input, float32, out-of-core, row-sampled correlation evidence.

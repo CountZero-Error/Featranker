@@ -339,12 +339,36 @@ def _encode_categorical(
     return coded, unseen
 
 
-def _with_one_hot(pipeline: Any, columns: List[int]) -> Any:
-    """A built-in linear pipeline whose numeric steps skip `columns`, which are one-hot coded."""
+def _validate_max_categories(max_categories: Any) -> Optional[int]:
+    """None, or an int of at least 2 (a plain int, so the report stays JSON-safe)."""
+    if max_categories is None:
+        return None
+    if (
+        not isinstance(max_categories, numbers.Integral)
+        or isinstance(max_categories, bool)
+        or max_categories < 2
+    ):
+        raise ValueError("[!] max_categories must be None or an int of at least 2.")
+    return int(max_categories)
+
+
+def _with_one_hot(pipeline: Any, columns: List[int], max_categories: Optional[int] = None) -> Any:
+    """
+    A built-in linear pipeline whose numeric steps skip `columns`, which are one-hot coded.
+
+    With `max_categories`, each column keeps at most that many one-hot columns
+    (the infrequent levels share one). Unseen levels join it only for a column
+    with more than `max_categories` levels; otherwise they are all zeros.
+    """
     *numeric_steps, (_, estimator) = pipeline.steps
+    capped = (
+        {}
+        if max_categories is None
+        else {"max_categories": max_categories, "handle_unknown": "infrequent_if_exist"}
+    )
     return make_pipeline(
         ColumnTransformer(
-            [("cat", OneHotEncoder(handle_unknown="ignore"), columns)],
+            [("cat", OneHotEncoder(**{"handle_unknown": "ignore", **capped}), columns)],
             remainder=make_pipeline(*(step for _, step in numeric_steps)),
             # Dense output: several linear models reject sparse input.
             sparse_threshold=0,
@@ -973,6 +997,10 @@ def _shuffle_index(
     return rng.permutation(n)
 
 
+# Cells gathered at a time when building shadows (2 MB of float64).
+SHADOW_CHUNK_CELLS = 1 << 18
+
+
 def _with_shadows(
     X_values: np.ndarray,
     seed: Any,
@@ -988,17 +1016,19 @@ def _with_shadows(
     `shuffle` and `labels` choose how rows are shuffled (_shuffle_index).
     """
     rng = np.random.default_rng(seed)
-    n_rows = len(X_values)
+    n_rows, n_cols = X_values.shape
+    # One preallocated output: the gather goes in row chunks, not a full copy.
+    out = np.empty((n_rows, 2 * n_cols), dtype=X_values.dtype)
+    out[:, :n_cols] = X_values
     if mode == "independent":
-        shadow = np.column_stack(
-            [
-                X_values[_shuffle_index(rng, n_rows, shuffle, labels), j]
-                for j in range(X_values.shape[1])
-            ]
-        )
-    else:
-        shadow = X_values[_shuffle_index(rng, n_rows, shuffle, labels)]
-    return np.hstack([X_values, shadow])
+        for j in range(n_cols):
+            out[:, n_cols + j] = X_values[_shuffle_index(rng, n_rows, shuffle, labels), j]
+        return out
+    index = _shuffle_index(rng, n_rows, shuffle, labels)
+    step = max(1, SHADOW_CHUNK_CELLS // max(1, n_cols))
+    for start in range(0, n_rows, step):
+        out[start : start + step, n_cols:] = X_values[index[start : start + step]]
+    return out
 
 
 class ShadowColumnsDropped(Exception):
@@ -1481,6 +1511,7 @@ class FeatureRanker:
         model_input: Literal["array", "dataframe"] = "array",
         shuffle: Literal["rows", "within_groups", "circular"] = "rows",
         families: Optional[Mapping[str, str]] = None,
+        max_categories: Optional[int] = None,
     ) -> None:
         """
         Initialize configured models without loading or fitting data.
@@ -1531,6 +1562,15 @@ class FeatureRanker:
                 so map near-identical custom models to one family; unmapped
                 custom models are separate families. A name that is not a
                 configured model raises ValueError in fit().
+            max_categories: None (default) or an int of at least 2. Built-in
+                linear models one-hot encode at most this many levels per
+                categorical column: the most frequent levels, with the rest
+                sharing one infrequent column. A level unseen in training
+                joins that column only when the column has more than
+                max_categories levels; otherwise it is all zeros, as without
+                the cap.
+                Bounds the dense one-hot matrix, which grows with the number
+                of levels; trees and custom models are unaffected.
         """
         if task not in {"clf", "reg"}:
             raise ValueError("[!] task must be 'clf' or 'reg'.")
@@ -1573,6 +1613,7 @@ class FeatureRanker:
         self.model_input = model_input
         self.shuffle = shuffle
         self.families = _validate_families(families)
+        self.max_categories = _validate_max_categories(max_categories)
         self.categorical = _validate_categorical(categorical)
         self.categorical_features_: List[str] = []
         self.categorical_levels_: Dict[str, List[Optional[str]]] = {}
@@ -1617,6 +1658,11 @@ class FeatureRanker:
         self.__dict__.setdefault("shuffle", "rows")
         # ... and those pickled by 1.17 lack the 1.18 family mapping.
         self.__dict__.setdefault("families", None)
+        # ... and those pickled by 1.20 lack the 1.21 category cap and training subsample.
+        self.__dict__.setdefault("max_categories", None)
+        self.__dict__.setdefault("train_n_rows_", None)
+        self.__dict__.setdefault("train_rows_", None)
+        self.__dict__.setdefault("train_subsample_", {})
         # ... and those pickled by 1.16 were fingerprinted with scheme 1.
         self.__dict__.setdefault("fingerprint_scheme_", 1)
         if "model_families_" not in self.__dict__:
@@ -1653,9 +1699,18 @@ class FeatureRanker:
         feature_names: Optional[List[str]] = None,
         sample_weight: Any = None,
         shuffle_groups: Any = None,
+        max_samples: Any = None,
+        random_state: Optional[int] = None,
     ) -> "FeatureRanker":
         """
         Fit configured models using training data only.
+
+        max_samples: optional int (rows) or float in (0, 1] (share of rows).
+        Fit on one random subsample of the training rows, drawn with
+        random_state (None draws fresh entropy), which also bounds the
+        shadows and the evidence copy; whole groups are drawn under
+        shuffle="within_groups" and row order is kept. The run record's
+        train_data_sha256 still fingerprints every row passed here.
 
         shuffle_groups: with shuffle="within_groups", one group label per
         training row; shadow columns are shuffled within each group. Not
@@ -1686,7 +1741,51 @@ class FeatureRanker:
         shuffle_labels = _shuffle_labels(
             self.shuffle, shuffle_groups, len(X_values), singletons_ok=not self.shadows
         )
+        # Fingerprints cover every row passed, not only the rows fitted on.
         train_data_sha256 = _fingerprint(names, X_values, y_values)
+        train_weights_sha256 = _weights_fingerprint(weights)
+        train_shuffle_groups_sha256 = _labels_fingerprint(shuffle_labels)
+
+        # Encode every classification target to 0..n-1 (XGBoost requires it).
+        # Done on every row, so the subsample can be checked for a missing class.
+        label_encoder = None
+        if self.task == "clf":
+            label_encoder = LabelEncoder()
+            y_values = label_encoder.fit_transform(y_values)
+        else:
+            y_values = _float_target(y_values)
+
+        train_rows: Optional[np.ndarray] = None
+        if max_samples is not None:
+            size = _resolve_max_samples(max_samples, len(X_values))
+            sampler = np.random.default_rng(None if random_state is None else [random_state, 3])
+            # Within groups, sample whole groups: a lone sampled row could never move.
+            train_rows = (
+                _sample_whole_groups(sampler, shuffle_labels, size)
+                if shuffle_labels is not None
+                else np.sort(sampler.choice(len(X_values), size, replace=False))
+            )
+            if weights is not None and weights[train_rows].sum() == 0:
+                raise ValueError(
+                    "[!] The rows drawn by max_samples all have zero sample_weight, "
+                    "so nothing can be fitted; raise max_samples or give those rows weight."
+                )
+            if label_encoder is not None:
+                absent = np.setdiff1d(np.arange(len(label_encoder.classes_)), y_values[train_rows])
+                if len(absent):
+                    raise ValueError(
+                        f"[!] The rows drawn by max_samples miss the classes "
+                        f"{label_encoder.classes_[absent].tolist()}, which no model could "
+                        "learn; raise max_samples."
+                    )
+            X_values, y_values = X_values[train_rows], y_values[train_rows]
+            weights = None if weights is None else weights[train_rows]
+            if shuffle_labels is not None:
+                shuffle_labels = shuffle_labels[train_rows]
+            # Re-checked on the sample (a circular shift needs two rows).
+            _shuffle_labels(
+                self.shuffle, shuffle_labels, len(X_values), singletons_ok=not self.shadows
+            )
         levels: Dict[str, List[Optional[str]]] = {}
         categorical_missing: Dict[str, int] = {}
         if categorical:
@@ -1696,14 +1795,6 @@ class FeatureRanker:
             }
             levels = _learn_levels(X_values, categorical, names)
             X_values, _ = _encode_categorical(X_values, categorical, names, levels)
-
-        # Encode every classification target to 0..n-1 (XGBoost requires it).
-        label_encoder = None
-        if self.task == "clf":
-            label_encoder = LabelEncoder()
-            y_values = label_encoder.fit_transform(y_values)
-        else:
-            y_values = _float_target(y_values)
 
         candidates: Dict[str, Any] = {}
         if self.user_models is not None:
@@ -1720,7 +1811,8 @@ class FeatureRanker:
                 built = self.models.get(self.task, {}).get(group, {})
                 if one_hot and group == "linear":
                     built = {
-                        name: _with_one_hot(model, one_hot) for name, model in built.items()
+                        name: _with_one_hot(model, one_hot, self.max_categories)
+                        for name, model in built.items()
                     }
                 candidates.update(built)
 
@@ -1771,8 +1863,19 @@ class FeatureRanker:
         self.train_weighted_ = weights is not None
         self.train_data_sha256_ = train_data_sha256
         self.fingerprint_scheme_ = FINGERPRINT_SCHEME
-        self.train_weights_sha256_ = _weights_fingerprint(weights)
-        self.train_shuffle_groups_sha256_ = _labels_fingerprint(shuffle_labels)
+        self.train_weights_sha256_ = train_weights_sha256
+        self.train_shuffle_groups_sha256_ = train_shuffle_groups_sha256
+        self.train_rows_ = train_rows
+        self.train_n_rows_ = None if train_rows is None else len(train_rows)
+        self.train_subsample_ = (
+            {}
+            if train_rows is None
+            else {
+                "train_rows_sha256": _labels_fingerprint(train_rows),
+                "train_max_samples": _plain_number(max_samples),
+                **({} if random_state is None else {"train_random_state": int(random_state)}),
+            }
+        )
         self.label_encoder = label_encoder
         self.feature_names_ = names
         self.categorical_features_ = [names[index] for index in categorical]
@@ -1875,9 +1978,12 @@ class FeatureRanker:
             ("weights_sha256", _weights_fingerprint(weights)),
             ("train_shuffle_groups_sha256", self.train_shuffle_groups_sha256_),
             ("shuffle_groups_sha256", _labels_fingerprint(shuffle_labels)),
+            ("max_categories", self.max_categories),
+            ("n_train_rows", self.train_n_rows_),
         ):
             if value is not None:
                 run[key] = value
+        run.update(self.train_subsample_)
         if self.label_encoder is not None:
             y_values = _encode_labels(self.label_encoder, y_values)
         else:
@@ -2061,6 +2167,7 @@ class FeatureRanker:
         top_k: int = 5,
         sample_weight: Any = None,
         max_samples: Any = None,
+        max_train_samples: Any = None,
     ) -> Report:
         """
         Fit and rank on every cv split of X/y and report rank stability.
@@ -2070,6 +2177,9 @@ class FeatureRanker:
 
         max_samples: as in rank_features(), applied to each split's evaluation
         rows.
+
+        max_train_samples: as fit()'s max_samples, applied to each split's
+        training rows and drawn with the split's random state.
 
         sample_weight: optional 1-D non-negative weights, one per row; each
         split trains with its training rows' weights and scores with its
@@ -2095,6 +2205,8 @@ class FeatureRanker:
             raise ValueError("[!] top_k must be a positive integer.")
         if max_samples is not None:
             _resolve_max_samples(max_samples, len(X_values))
+        if max_train_samples is not None:
+            _resolve_max_samples(max_train_samples, len(X_values))
         _resolve_scorers(scoring)
         _resolve_feature_groups(names, feature_groups)
         # Each split builds its own ranker; check the names once, up front.
@@ -2142,6 +2254,7 @@ class FeatureRanker:
                     model_input=self.model_input,
                     shuffle=self.shuffle,
                     families=self.families,
+                    max_categories=self.max_categories,
                     # Names, so "auto" survives the loss of the DataFrame dtypes.
                     categorical=[names[column] for column in categorical] or None,
                 )
@@ -2151,6 +2264,8 @@ class FeatureRanker:
                     feature_names=names,
                     sample_weight=None if weights is None else weights[train],
                     shuffle_groups=None if shuffle_labels is None else shuffle_labels[train],
+                    max_samples=max_train_samples,
+                    random_state=None if random_state is None else random_state + index,
                 )
                 report = ranker.rank_features(
                     X_values[evaluation],
@@ -2195,6 +2310,8 @@ class FeatureRanker:
             run["weights_sha256"] = _weights_fingerprint(weights)
         if shuffle_labels is not None:
             run["shuffle_groups_sha256"] = _labels_fingerprint(shuffle_labels)
+        if self.max_categories is not None:
+            run["max_categories"] = self.max_categories
         result = {
             "evaluation_mode": "resampled",
             "scoring": first["scoring"],
@@ -2215,6 +2332,8 @@ class FeatureRanker:
             result["model_input"] = "dataframe"
         if max_samples is not None:
             result["max_samples"] = _plain_number(max_samples)
+        if max_train_samples is not None:
+            result["max_train_samples"] = _plain_number(max_train_samples)
         if self.shadows:
             result["shadows"] = True
             result["shadow_seed"] = self.shadow_seed

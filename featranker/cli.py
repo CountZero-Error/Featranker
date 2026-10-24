@@ -186,6 +186,14 @@ def _max_samples(text: str) -> Any:
         raise argparse.ArgumentTypeError(f"invalid max-samples value: {text!r}") from None
 
 
+def _max_train_samples(text: str) -> Any:
+    """As --max-samples, for the training rows."""
+    try:
+        return _max_samples(text)
+    except argparse.ArgumentTypeError:
+        raise argparse.ArgumentTypeError(f"invalid max-train-samples value: {text!r}") from None
+
+
 def _ablate_ks(text: str) -> List[int]:
     """'1,2,5' is [1, 2, 5]; every entry must be a positive int."""
     try:
@@ -272,6 +280,25 @@ def _build_parser() -> argparse.ArgumentParser:
         help=(
             "Score on a random subsample of the evaluation rows: an int (rows) "
             "or a float with a decimal point in (0, 1] (share of rows)."
+        ),
+    )
+    parser.add_argument(
+        "--max-train-samples",
+        type=_max_train_samples,
+        default=None,
+        help=(
+            "Fit the models on a random subsample of the training rows: an int "
+            "(rows) or a float with a decimal point in (0, 1] (share of rows). "
+            "Drawn with --random-state."
+        ),
+    )
+    parser.add_argument(
+        "--max-categories",
+        type=int,
+        default=None,
+        help=(
+            "Keep at most this many one-hot columns (at least 2) per categorical "
+            "column in the linear models; rarer levels share one column."
         ),
     )
     parser.add_argument(
@@ -478,6 +505,8 @@ def _load_cli_inputs(args: argparse.Namespace) -> Dict[str, Any]:
         raise ValueError("[!] n_repeats must be a positive integer.")
     if args.max_samples is not None:
         _resolve_max_samples(args.max_samples, len(y_eval))
+    if args.max_train_samples is not None:
+        _resolve_max_samples(args.max_train_samples, len(y_train))
     n_groups = len(_resolve_feature_groups(feature_names, feature_groups))
     if args.ablate_ks is not None and max(args.ablate_ks) > n_groups:
         raise ValueError(
@@ -506,8 +535,17 @@ def _run_ranking(args: argparse.Namespace) -> Dict[str, Any]:
         missing=args.missing,
         # Only when given, so a ranker without the option still works here.
         **({"categorical": inputs["categorical"]} if inputs["categorical"] else {}),
+        **({} if args.max_categories is None else {"max_categories": args.max_categories}),
     )
-    ranker.fit(*inputs["train"], **inputs["train_weight"])
+    train_sample: Dict[str, Any] = (
+        {}
+        if args.max_train_samples is None
+        else {"max_samples": args.max_train_samples, "random_state": args.random_state}
+    )
+    X_train, y_train, feature_names = inputs["train"]
+    ranker.fit(
+        X_train, y_train, feature_names=feature_names, **inputs["train_weight"], **train_sample
+    )
     # Only when given, so a ranker without the option still works here.
     max_samples: Dict[str, Any] = (
         {} if inputs["max_samples"] is None else {"max_samples": inputs["max_samples"]}

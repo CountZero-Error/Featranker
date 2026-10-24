@@ -168,6 +168,8 @@ With `sample_weight=` on `fit()`, `rank_features()`, and `rank_resampled()` (and
 
 With `max_samples=` on `rank_features()` and `rank_resampled()` (`ConsensusSelector(max_samples=...)`, `--max-samples` on the CLI), permutation scores use one random subsample of the evaluation rows, the same for the dummy gate and every score ([details](https://github.com/CountZero-Error/Featranker/blob/main/docs/usage.md#fewer-evaluation-rows-max_samples)).
 
+For large data, `fit(max_samples=)` fits on a subsample of the training rows (`ConsensusSelector(max_train_samples=)`, `--max-train-samples`), and `max_categories=` caps the one-hot columns per categorical column in the built-in linear models (`--max-categories`) ([details](https://github.com/CountZero-Error/Featranker/blob/main/docs/usage.md#large-data)).
+
 With `scoring=["r2", "neg_mean_absolute_error"]` (a list; `--scoring a,b` on the CLI), the first scorer ranks and the others are scored on the same permuted copies, reported per model as `secondary` ([details](https://github.com/CountZero-Error/Featranker/blob/main/docs/usage.md#several-metrics)).
 
 With `shuffle="within_groups"` (labels passed as `shuffle_groups=`, or `groups=` in `rank_resampled()` and `ConsensusSelector`) or `shuffle="circular"` (rows in time order), permutations and shadows shuffle within groups or by a cyclic shift instead of freely, which respects grouped or time-ordered rows ([details](https://github.com/CountZero-Error/Featranker/blob/main/docs/usage.md#shuffling-dependent-rows)).

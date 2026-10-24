@@ -1,7 +1,7 @@
 """One configuration, one process: python measure.py '<config json>' <progress_path> <result_path>.
 
 Config keys: kind (numeric|mixed|autogroups), rows, cols, ncat, card, shadows,
-evidence, max_samples. Package code is untouched; a few internals are wrapped
+evidence, max_samples (and, for 1.21+, max_categories, max_train_samples). Package code is untouched; a few internals are wrapped
 only to log time and current RSS around them.
 """
 import json
@@ -150,13 +150,19 @@ else:
     if cfg.get("nb_only"):  # framework overhead: one cheap estimator, so fit/score time is negligible
         from sklearn.naive_bayes import GaussianNB
         extra = {"models": {"naive_bayes": GaussianNB()}}
+    # 1.21 options, passed only when set so the same script measures older copies.
+    cap = {"max_categories": cfg["max_categories"]} if cfg.get("max_categories") else {}
+    train_sample = (
+        {"max_samples": cfg["max_train_samples"], "random_state": 0}
+        if cfg.get("max_train_samples") else {}
+    )
     ranker = featranker.FeatureRanker(
         "clf", **({"group": "fast"} if not extra else {}), **extra, verbose=False, shadows=cfg["shadows"], shadow_seed=0,
-        evidence=cfg["evidence"], categorical=categorical)
+        evidence=cfg["evidence"], categorical=categorical, **cap)
     state["phase"] = "fit"
     log("fit_start")
     began = time.perf_counter()
-    ranker.fit(X, y, feature_names=None if kind == "mixed" else names)
+    ranker.fit(X, y, feature_names=None if kind == "mixed" else names, **train_sample)
     result["fit_seconds"] = round(time.perf_counter() - began, 2)
     result["rss_after_fit_mb"] = round(proc.memory_info().rss / MB)
     result["peak_after_fit_mb"] = round(maxrss() / MB)

@@ -62,6 +62,7 @@ context: |
     1.18 statistical-contracts: families=, constant_within_groups, within-group/weights/ablation contracts documented
     1.19 scorer-cache: shared predictions across scorers
     1.20 release-ci: installed-wheel smoke test in CI and release
+    1.21 memory-limits: max_categories, fit max_samples, lower-peak shadows and Spearman
   Known limitations (found 2026-10-19/20 in reviews and the benchmark,
   updated 2026-10-22 after 1.6-1.15; maintainer decides):
     Method and statistics
@@ -111,9 +112,17 @@ context: |
     Performance
     L11 slower than single-model selectors (benchmark means 3-19 s vs
         0.3-5 s); SVR in "fast" is quadratic in rows; models that lose to
-        the dummy are still permuted; max_samples (1.13) caps scoring rows
-    L12 correlation evidence and auto_groups are O(columns^2) (a faster
-        pairwise Spearman was considered and deferred; no measured need)
+        the dummy are still permuted; max_samples (1.13) caps scoring rows;
+        since 1.21 fit(max_samples=) caps the rows models are fit on and
+        max_categories caps the one-hot width of built-in linear models
+        (measured in spikes/memory/FINDINGS.md); still not bounded: the
+        validated copy of all rows, sparse input; tree fit time on large n
+        is unbounded without fit(max_samples=)
+    L12 correlation evidence and auto_groups are O(columns^2) in time (a
+        faster pairwise Spearman was considered and deferred); since 1.21 the
+        Spearman step ranks column blocks: its peak (tracemalloc, 20000 rows)
+        fell from about 7.1X of the data to 2.5X at 64 columns and 1.2X at
+        500, and is unchanged for matrices under 2^18 cells
     Traceability
     L13 (fixed in 1.12) the run block records group, auto_groups threshold
         and method
