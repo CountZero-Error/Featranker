@@ -50,7 +50,7 @@ FeatRanker trains a set of estimators on explicit training data, measures permut
     </td>
     <td width="33%" valign="top">
       <h4>▣ Rank consensus</h4>
-      Aggregate <i>ranks</i>, not incomparable raw importance magnitudes. Each model family gets one vote, so near-duplicate models cannot outvote the rest.
+      Aggregate <i>ranks</i>, not incomparable raw importance magnitudes. Each model family gets one vote, so near-duplicate built-in models cannot outvote the rest (your own models are separate families unless you map them with <code>families=</code>).
     </td>
   </tr>
   <tr>

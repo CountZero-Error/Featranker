@@ -6,7 +6,7 @@
 
 The API is one class: `FeatureRanker(...)`, then `.fit(...)`, then `.rank_features(...)`, which returns a [`Report`](#working-with-reports). [`.rank_resampled(...)`](#resampled-ranking) repeats that over cross-validation splits, [`.ablate(...)`](#ablation-curve) refits the voting models on the top-k groups to check the ranking, [`ConsensusSelector`](#feature-selection) turns the ranking into a scikit-learn pipeline step, [`summarize(report)`](#summarize) reads the result, and [`to_prompt` / `explain`](#llm-interpretation) hand it to an LLM with checked citations (deprecated since 1.1). `evidence=True` adds [mechanism evidence](#evidence) to the report.
 
-### `FeatureRanker(task, group="all", models=None, n_jobs=None, verbose=True, shadows=False, shadow_seed=None, evidence=False, shadow_mode="joint", missing="error", categorical=None, model_input="array", shuffle="rows")`
+### `FeatureRanker(task, group="all", models=None, n_jobs=None, verbose=True, shadows=False, shadow_seed=None, evidence=False, shadow_mode="joint", missing="error", categorical=None, model_input="array", shuffle="rows", families=None)`
 
 | Parameter | Default | Meaning |
 |---|---|---|
@@ -23,6 +23,7 @@ The API is one class: `FeatureRanker(...)`, then `.fit(...)`, then `.rank_featur
 | `categorical` | `None` | `None` accepts numeric features only. `"auto"` treats DataFrame columns of object, string, or category dtype as categorical; a list of feature names marks those columns. Levels are learned in each `fit()` from the training rows only and each column stays one feature. See [Categorical features](#categorical-features). |
 | `model_input` | `"array"` | `"array"` gives models a float NumPy array. `"dataframe"` gives every model a pandas DataFrame with the feature names (and `shadow__<name>` columns with shadows), so custom pipelines can select columns by name. Needs pandas. See [Columns by name](#columns-by-name). |
 | `shuffle` | `"rows"` | How permutations and shadows shuffle rows: `"rows"` (free), `"within_groups"` (only among rows with the same label in `shuffle_groups`), or `"circular"` (cyclic shift, for rows in time order). Anything else raises `ValueError`. See [Shuffling dependent rows](#shuffling-dependent-rows). |
+| `families` | `None` | Dict of `{model_name: family}` (non-empty strings) that sets the consensus family of custom or built-in models; models mapped to one family cast one vote. Unmapped custom models stay separate families. A name that is not a configured model raises `ValueError` in `fit()` (and in `rank_resampled()` and `ConsensusSelector.fit()`, before any split); the name of a built-in model that failed to initialise is accepted, a built-in name outside the chosen `group` or `task` raises. See [Your own models](#your-own-models). |
 
 ### `.fit(X, y, feature_names=None, sample_weight=None, shuffle_groups=None)`
 
@@ -237,6 +238,20 @@ ranker = FeatureRanker(
 )
 ```
 
+**Families.** Each custom model is its own family by default, and each family casts one vote in the consensus. Several near-identical custom models (three ridge variants, say) therefore count as three votes and can outvote a different kind of model, so the claim that near-duplicates cannot outvote the rest holds only for the built-in families. Say which of your models belong together with `families={model_name: family}`; every model mapped to the same string votes once, as the median of its members, and the report's `family` field shows the mapping. A name that is not one of the configured models raises `ValueError` in `fit()` (and in `rank_resampled()` and `ConsensusSelector.fit()`, before any split), and an empty or non-string name or family, or a value that is not a mapping, raises `ValueError` in the constructor; any mapping is accepted and copied to a dict. `families` also accepts built-in model names, to regroup them (the name of a built-in model that failed to initialise is still accepted, while a built-in name outside the chosen `group` or `task` raises), and `ConsensusSelector(families=...)` passes it on.
+
+```python
+ranker = FeatureRanker(
+    task="reg",
+    models={
+        "ridge_small": Ridge(alpha=0.1),
+        "ridge_large": Ridge(alpha=10.0),
+        "forest": RandomForestRegressor(n_estimators=200, random_state=0),
+    },
+    families={"ridge_small": "ridge", "ridge_large": "ridge"},  # forest stays its own
+)
+```
+
 > [!IMPORTANT]
 > By default your estimators receive a float NumPy array, even when you pass a DataFrame. Inside a pipeline, select columns by position (for example `ColumnTransformer([("scale", StandardScaler(), [0, 1])])`), or pass `model_input="dataframe"` to select by name (see [Columns by name](#columns-by-name)). Categorical values must be numbers by then: either encode them yourself, or pass `categorical=` and your estimators receive the integer codes (see [Categorical features](#categorical-features)). With `missing="impute"` your estimators receive NaN unchanged; see [Missing values](#missing-values).
 
@@ -441,6 +456,8 @@ Survey data, imbalanced classes, and aggregated rows come with sample weights. P
 
 **Models that cannot take weights.** A model whose final estimator has no `sample_weight` in `fit()` is not fit unweighted, because its importances would answer a different question than the others'. It is recorded in `failures` with stage `"fit"` and `error_type` `"SampleWeightNotSupported"`. Among the built-in models these are `lda` and `qda` (classification) and `pls_regression`, so under weights the other built-in models vote without them. The same holds for your own models, bare or as the last step of a `Pipeline`; wrap or replace them with a weight-aware estimator if they must vote. An estimator whose `fit` takes `**kwargs` counts as weight-capable (a real error is then an ordinary fit failure), and a nested `Pipeline` is followed to its last step. FeatureRanker runs its own fits and scorers with scikit-learn metadata routing off, since it passes weights explicitly.
 
+**Shuffle donors are not weighted.** The donors are the scored rows, that is, the evaluation rows after [`max_samples`](#fewer-evaluation-rows-max_samples), zero-weight rows included, and weights play no part in who donates. With `shuffle="rows"` each permutation is a random reordering of the scored rows, so every row donates exactly once whatever its weight; `"within_groups"` reorders rows only among rows with the same label; `"circular"` shifts the rows by a random offset instead of drawing. Shadow columns are shuffled copies of every row, also unweighted: the evaluation shadows are made from all evaluation rows before `max_samples`, and the training shadows from all training rows, zero-weight ones included. Only the scores are weighted. The permuted data therefore follows the unweighted distribution of the evaluation rows, while the baseline it is compared with is weighted. That suits cost or importance weights ("a mistake on these rows costs more"). For survey or frequency weights, where the weighted rows are meant to stand for a population, the permuted distribution is not the weighted population: a row with a large weight is no more likely to donate its value than a row with a small one. If the population is your target, drop zero-weight rows, or resample the evaluation rows by weight before ranking (then pass no `sample_weight` for them), and compare the results. FeatRanker has no option that draws donors by weight.
+
 **Unweighted evidence.** Correlation evidence and the SHAP summary describe the data and the fitted models' behaviour, not the weighted objective, and stay unweighted. Custom scorers must accept a `sample_weight=` keyword when weights are given; scikit-learn scorer names do.
 
 ```python
@@ -493,21 +510,43 @@ weighted {'train': True, 'eval': True} {'x1': 1.44, 'x2': 0.02}
 Permutation importance shows how much a fitted model loses when a group becomes noise. It does not show whether the top groups are enough: correlated groups share credit, so each can look small while removing both hurts. `ablate()` checks the ranking by refitting: for each `k`, every model that voted in the consensus is fit again on the columns of the top-`k` consensus groups and scored on the evaluation data. The curve answers "how many groups do I need": where it flattens, the later groups add little.
 
 ```python
-curve = ranker.ablate(X_train, y_train, X_eval, y_eval, report, ks=[1, 2, 3, 5, 10])
+from sklearn.datasets import load_diabetes
+from sklearn.model_selection import train_test_split
 
-for row in curve["ablation"]["curve"]:
-    print(f"k={row['k']:>2}  median r2 {row['median_score']:.2f}  added {row['feature_groups'][-1]}")
+from featranker import FeatureRanker
+
+data = load_diabetes()
+names = list(data.feature_names)
+X_dev, X_test, y_dev, y_test = train_test_split(
+    data.data, data.target, test_size=0.3, random_state=0
+)
+X_train, X_val, y_train, y_val = train_test_split(
+    X_dev, y_dev, test_size=0.4, random_state=0
+)
+
+ranker = FeatureRanker(task="reg", group="fast", verbose=False)
+ranker.fit(X_train, y_train, feature_names=names)
+report = ranker.rank_features(X_val, y_val, scoring="r2", random_state=42)
+
+# The same refits scored on the validation rows that produced the ranking
+# and on the untouched test rows, for every k.
+ks = [1, 2, 3, 5, 10]
+validation = ranker.ablate(X_train, y_train, X_val, y_val, report, ks=ks)
+test = ranker.ablate(X_train, y_train, X_test, y_test, report, ks=ks)
+for on_val, on_test in zip(validation["ablation"]["curve"], test["ablation"]["curve"]):
+    print(f"k={on_val['k']:>2}  validation {on_val['median_score']:.2f}  "
+          f"test {on_test['median_score']:.2f}  added {on_val['feature_groups'][-1]}")
 ```
 
 ```text
-k= 1  median r2 0.13  added s5
-k= 2  median r2 0.24  added bmi
-k= 3  median r2 0.24  added bp
-k= 5  median r2 0.27  added s6
-k=10  median r2 0.29  added s3
+k= 1  validation 0.26  test 0.04  added bmi
+k= 2  validation 0.43  test 0.16  added s5
+k= 3  validation 0.41  test 0.17  added bp
+k= 5  validation 0.46  test 0.13  added s3
+k=10  validation 0.44  test 0.15  added sex
 ```
 
-Same data and split as the quick start (`ranker` fit with `group="fast"`, ranked with `scoring="r2"` and `random_state=42`); output shown with the `xgboost` and `catboost` extras installed. Two groups reach a median r2 of 0.24 against 0.29 for all ten, and `s5` alone reaches 0.13.
+The example is self-contained and uses only scikit-learn models (`group="fast"`), so the output does not depend on optional extras. Both curves refit the same models on the same training rows and the same top-`k` groups; only the scored rows differ. The validation curve rises from 0.26 at `k=1` to 0.43 at `k=2` and then stays within 0.41 to 0.46, so the first two or three groups carry most of it. The test rows score lower at every `k`, including `k=10`, where no groups were left out and nothing was selected: 0.15 against 0.44. So most of the gap between the validation and test scores is the difference between two small splits, not selection. Suppose you pick `k=3` from the validation curve: the validation rows chose `k`, so 0.41 is a validation score, and the untouched test rows (0.17 for the same groups) are the number to report. The validation score is still not that number.
 
 How it works:
 
@@ -521,7 +560,7 @@ How it works:
 - **Summary.** `summarize()` adds an `ablation_curve` finding and, when the set of models with a score differs between rows, an `ablation_cohort_changed` warning; see [Summarize a report](#summarize).
 
 > [!WARNING]
-> By default the curve is scored on the evaluation data that also produced the ranking, so it is optimistic: the top groups were chosen because they scored well there. For an unbiased curve pass a third, untouched data set as `X_eval` and `y_eval`. The block's `baseline_score` is the dummy's score from the refits themselves (same training rows and weights, every `X_eval` row, the scorer used), so it is comparable to the curve, also with another `scoring`; it can differ from the report's `baseline_score`, which used the report's own rows and scorer and `max_samples`. It is `null` only if no refit scored.
+> By default the curve is scored on the evaluation data that also produced the ranking, so it is optimistic: the top groups were chosen because they scored well there. Passing a third data set as `X_eval` and `y_eval` removes that optimism for a `k` you fixed in advance. Once you use the curve to choose `k` (the highest score, or where it flattens), that data set has been used for selection and its best score is a validation score, which is still optimistic as an estimate of final performance. Report final performance on another untouched test set, or with outer cross-validation around the whole procedure (a `ConsensusSelector` in a `Pipeline` under `cross_val_score`; see [Feature selection in a pipeline](#feature-selection)). Choose `k` inside that outer loop, for example `GridSearchCV(pipe, {"select__k": [2, 3, 5]})` as the estimator passed to `cross_val_score` (nested cross-validation); a fixed `k` picked from the curve and then cross-validated is still optimistic, because the same rows chose it. The block's `baseline_score` is the dummy's score from the refits themselves (same training rows and weights, every `X_eval` row, the scorer used), so it is comparable to the curve, also with another `scoring`; it can differ from the report's `baseline_score`, which used the report's own rows and scorer and `max_samples`. It is `null` only if no refit scored.
 
 The curve is descriptive. FeatRanker does not choose `k` for you, and it does not drop one group at a time (leave-one-group-out). For a resampled report there is no ablation; ablate a held-out report.
 
@@ -697,6 +736,8 @@ patient: ['strong', 'weak', 'noise_2', 'noise_1']
 pipeline R2 per outer fold: [0.98 0.98 0.98]
 ```
 
+**Within-group shuffling answers a narrower question.** `shuffle="within_groups"` measures how much the model relies on variation within groups only. A predictor that varies only between groups (a patient-level value repeated on each of the patient's rows) gets an importance of about 0 by construction, even if it drives the target. To measure group-level effects use `shuffle="rows"` (free shuffles, with `GroupKFold` or another grouped splitter for the splits). Such predictors are listed in the report's `constant_within_groups`, with a `UserWarning`; see [Shuffling dependent rows](#shuffling-dependent-rows).
+
 The splitter only controls how rows are divided. By default, shadow features shuffle rows within each training and evaluation set, and permutation importance shuffles rows within the evaluation set, which ignores any dependence between neighbouring rows (autocorrelation) or between rows of one group. The `shuffle` option, used for `ordered` and `grouped` above, makes both shuffles respect that structure; see [Shuffling dependent rows](#shuffling-dependent-rows). Without it, treat shadows and the hits test as less reliable on such data.
 
 ### Shuffling dependent rows
@@ -708,6 +749,10 @@ The splitter only controls how rows are divided. By default, shadow features shu
 | `"rows"` (default) | Rows are shuffled freely, as in earlier versions; reports are unchanged. |
 | `"within_groups"` | A column's values move only among rows with the same group label. Pass one label per row as `shuffle_groups` to `fit()` (shadows) and to `rank_features()` (permutations); `rank_resampled()` and `ConsensusSelector.fit()` use their `groups` and slice them per split. A row in a group of one keeps its value; if every group has one row the call raises `ValueError`. With few rows per group there are few distinct shuffles, so importances are noisier. Labels must be sortable: `None`, NaN and mixed types raise `ValueError`. |
 | `"circular"` | Each shuffle is a cyclic shift of the rows by a random offset from 1 to n-1, which keeps a series' autocorrelation. It assumes the rows are in time order (as `TimeSeriesSplit` does); on unordered rows it is just a shift and means nothing. `rank_resampled()` sorts each split's train and evaluation rows into their original order first. |
+
+**What `"within_groups"` measures.** Moving values only among rows of the same group tests how much the model relies on variation *within* groups. It cannot test reliance on variation *between* groups: a predictor that is constant within each group (a patient-level measurement repeated on every row of the patient) is not changed by the shuffle, so its importance is 0 by construction, however strongly it drives the target. In a check with 40 patients of 4 rows, a linear model, and a patient-level `x` that sets `y` (`y = 3x` plus small noise), the importance of `x` was about 2 under free shuffling (1.7 to 2.1 across seeds and fit/evaluation splits) and exactly 0.0 under `shuffle="within_groups"`. To measure group-level effects use `shuffle="rows"` with a grouped splitter (`GroupKFold`) for the data split, so that the shuffle is free but rows of one group still never sit on both sides of a split. After `rank_features()` the report lists such feature groups in `constant_within_groups` (see below), and `summarize()` warns.
+
+**`constant_within_groups`.** With `shuffle="within_groups"`, `rank_features()` records the feature groups whose every column has one value (a missing value counts as a value) within every shuffle group on the scored rows, that is, after `max_samples`. The key is a sorted list placed after `shuffle` (empty when no group qualifies) and is absent with the other modes. A non-empty list also raises a `UserWarning`. Each split report of `rank_resampled()` carries its own list, and the resampled report has a top-level `constant_within_groups` with the sorted union of the split lists (`[]` when none). `summarize()` of a held-out or a resampled report adds a `constant_within_groups` warning. A group that is constant on the scored rows but varies elsewhere is also listed; the list describes the scored rows. A group with a column that varies is not listed even if other columns are constant, so constant columns inside a multi-column group are not flagged. Near-constant predictors, which vary in only a few groups, are not flagged either. The list only catches the exact case; the shuffle still barely moves such columns, and their between-group effect is still not measured.
 
 Joint shadows share one offset (or one within-group order); `shadow_mode="independent"` draws one per column. With `max_samples`, permutations shuffle the sampled rows only (their labels, or a shift within the sample). Under `"within_groups"` the subsample is made of whole groups, drawn in random order until the target row count is reached, so it can slightly exceed it (`n_eval_rows` records the actual count). Under `"circular"` the sampled rows keep their order, but subsampling thins the series, so a shift no longer moves values by whole time steps. Correlation and SHAP evidence do not shuffle and are unchanged. `shuffle_groups` is required with `"within_groups"` (also when `shadows=False`, in both `fit()` and `rank_features()`, though `fit()` then ignores it and accepts all-singleton labels) and is an error with another mode. A report records `shuffle` when it is not `"rows"`. The CLI has no group column and always uses `"rows"`.
 
@@ -912,7 +957,7 @@ Output from scikit-learn models only (`group="fast"`, seven classification famil
 
 - **When to use it.** When you suspect interactions or effects that only some model types capture, and a majority of families cannot be expected to find them.
 - **Choosing `N`.** `N=1` keeps a group any single family finds, so one family fitting noise (for example a single decision tree) can pass noise on its own; in the table above `x4`, a noise column, already has `shadow_families` of 1. Requiring two families means two kinds of model have to agree. A family that passes the dummy baseline in only a few splits is counted as 0 in the others, so it cannot reach a majority from those few splits. The [calibration study](calibration.md) measured this on synthetic data. Its preregistered rule recommends `N=1` for regression and classification: `N=1` and `N=2` each selected at most 1% of noise groups on null data, and with `group="fast"` both found the `c·d` interaction in every seed. Post hoc, `N=1` kept some noise in the signal study (up to 0.4 of 4 noise features per run) and `N=2` at most 0.1, with no loss of `c·d` recall; the regression null cannot separate them. Practical guidance: use `N=1` if recall matters more, `N=2` if false selections matter more, and avoid `N=3` with `group="fast"` in classification (it found `c·d` in only 0 to 15% of seeds). One synthetic design with built-in models; treat `min_shadow_families` as a heuristic filter, like `max_shadow_q`.
-- **Which families count.** Every voting family counts equally, including families that cannot represent the effect you care about. FeatRanker does not choose "suitable" families for you; restrict them with `group` if you want to. With your own `models=`, each model is its own family, so `N` counts models. With the built-in `group="tree"`, regression and classification each have three families (bagging, boosting, single tree), so `N=2` is a majority there; `"fast"` has seven classification and five regression families.
+- **Which families count.** Every voting family counts equally, including families that cannot represent the effect you care about. FeatRanker does not choose "suitable" families for you; restrict them with `group` if you want to. With your own `models=`, each model is its own family unless `families=` maps it, so `N` counts models (or the families you defined). With the built-in `group="tree"`, regression and classification each have three families (bagging, boosting, single tree), so `N=2` is a majority there; `"fast"` has seven classification and five regression families.
 
 <a id="shadow-mode"></a>
 
@@ -1125,13 +1170,13 @@ Output shown with the `xgboost` and `catboost` extras installed. The score is ho
 | `min_shadow_share` | `None` | Keep groups whose stability `above_shadow_share` is at least this (0 to 1). Turns on [shadow features](#shadow-features). |
 | `max_shadow_q` | `None` | Keep groups whose stability `shadow_q_value` (the [shadow hits test](#shadow-test)) is at most this (greater than 0, at most 1); a heuristic filter, since the values are [uncalibrated](#shadow-test). Turns on shadow features. Use `cv` with 10 or more splits, such as `RepeatedKFold`; with 5 the test has little power. |
 | `min_shadow_families` | `None` | Keep groups whose stability `shadow_families` (see [family evidence](#family-evidence)) is at least this (a positive integer). Turns on shadow features. `1` and `2` both selected at most 1% of noise groups on null data; `1` kept more noise than `2` in the signal study (see the [calibration study](calibration.md) for how to choose); a heuristic. |
-| `group`, `models`, `n_jobs`, `shadow_seed`, `shadow_mode`, `missing`, `categorical`, `model_input`, `shuffle` | as `FeatureRanker` | Passed to the ranker built in `fit()`. |
+| `group`, `models`, `families`, `n_jobs`, `shadow_seed`, `shadow_mode`, `missing`, `categorical`, `model_input`, `shuffle` | as `FeatureRanker` | Passed to the ranker built in `fit()`. |
 | `feature_groups`, `cv`, `n_repeats`, `random_state`, `max_samples` | as `rank_resampled()` | Passed to `rank_resampled()` on the data given to `fit()`. |
 | `feature_groups="auto"` | | Groups correlated columns with [`auto_groups()`](#auto-groups) on the data given to `fit()`, so inside a pipeline from the training fold only. The groups used are in `report_["feature_groups"]`. Any other string raises `ValueError` in `fit()`. |
 | `auto_groups_threshold` | `0.7` | The |rho| cut of `feature_groups="auto"`, as `auto_groups(threshold=...)` (`0 < threshold <= 1`, else `ValueError` in `fit()`). Recorded in `report_["run"]["auto_groups"]`; ignored for other `feature_groups`. |
 | `verbose` | `False` | Progress bars; off by default because pipelines fit many times. |
 
-Set at least one of `k`, `min_shadow_share`, `max_shadow_q`, and `min_shadow_families`; the shadow filters apply first, then the first `k` that pass. Invalid rules raise `ValueError` in `fit()`, before any ranking, following scikit-learn's convention that `__init__` only stores parameters (so `clone`, `set_params`, and `GridSearchCV` over `select__k` work).
+Set at least one of `k`, `min_shadow_share`, `max_shadow_q`, and `min_shadow_families`; the shadow filters apply first, then the first `k` that pass. Invalid rules raise `ValueError` in `fit()`, before any ranking, following scikit-learn's convention that `__init__` only stores parameters (so `clone`, `set_params`, and `GridSearchCV` over `select__k` work). To choose `k` honestly, put that `GridSearchCV` inside `cross_val_score` (nested cross-validation); see the warning in [Ablation curve](#ablation-curve).
 
 ```python
 import numpy as np
@@ -1194,6 +1239,7 @@ Each finding is a dict with `code`, `severity` (`"info"` or `"warning"`), `messa
 | `below_shadow` | info | With [shadows](#shadow-features) on, groups whose `above_shadow_share` is below 0.5. Descriptive, not a significance test. |
 | `overfit` | info | With [evidence](#evidence) on: models that lost at least half of their training advantage over the dummy on the evaluation data, that is `(train_score - evaluation_score) / (train_score - baseline_score) >= 0.5`. Each is listed with its scores and that share. Skipped when `baseline_score` is `None`. |
 | `correlated_groups` | info | With [evidence](#evidence) on: feature groups correlated on the training data (absolute Spearman rho of at least 0.5), whose permutation importance may be split between them. |
+| `constant_within_groups` | warning | Held-out or resampled report ranked with `shuffle="within_groups"`: feature groups constant within every shuffle group; their importance is zero by construction. Evidence: `groups`. |
 | `ablation_curve` | info | The report has an [`ablation`](#ablation-curve) block with a score that is not `null`: the `k` with the highest `paired_median_score` (the smallest on ties) and its score at the largest `k` with one; when `paired_models` is empty, the same on the unpaired `median_score`, and the message says so. Evidence: `best_k`, `best_median_score`, `max_k`, `max_k_median_score`. |
 | `ablation_cohort_changed` | warning | The `ablation` curve's rows have different sets of scored models, so the unpaired `median_score` compares different model sets. Evidence: `rows`, a list of `k`, `n_models_scored` and `models`. |
 

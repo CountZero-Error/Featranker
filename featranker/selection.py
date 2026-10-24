@@ -5,6 +5,7 @@ scikit-learn feature selector built on FeatureRanker.rank_resampled().
 import math
 import numbers
 import warnings
+from collections.abc import Mapping
 from typing import Any, Dict, List, Literal, Optional, Union
 
 import numpy as np
@@ -60,7 +61,8 @@ class ConsensusSelector(SelectorMixin, BaseEstimator):
             fitting noise can pass alone. Its false-selection rate is not
             yet measured (see the calibration study). Turns shadow features
             on; combines with the other rules.
-        group, models, n_jobs, shadow_seed, shadow_mode, missing, categorical, model_input:
+        group, models, families, n_jobs, shadow_seed, shadow_mode, missing, categorical,
+        model_input:
             As in FeatureRanker. With missing="impute", NaN is accepted in
             fit() and transform() (the selector only picks columns), so put an
             imputer after it in a Pipeline for the final model. With
@@ -102,6 +104,7 @@ class ConsensusSelector(SelectorMixin, BaseEstimator):
         categorical: Union[List[str], Literal["auto"], None] = None,
         model_input: Literal["array", "dataframe"] = "array",
         shuffle: Literal["rows", "within_groups", "circular"] = "rows",
+        families: Optional[Mapping[str, str]] = None,
         n_jobs: Optional[int] = None,
         verbose: bool = False,
     ) -> None:
@@ -126,17 +129,19 @@ class ConsensusSelector(SelectorMixin, BaseEstimator):
         self.categorical = categorical
         self.model_input = model_input
         self.shuffle = shuffle
+        self.families = families
         self.n_jobs = n_jobs
         self.verbose = verbose
 
     def __setstate__(self, state: Dict[str, Any]) -> None:
         # Selectors pickled by 1.3 lack the 1.4 max_shadow_q parameter, and
         # those pickled before 1.6 lack min_shadow_families and shadow_mode, and
-        # those pickled before 1.7 lack missing, those before 1.9 lack categorical, those before 1.10 lack model_input, those before 1.12 lack auto_groups_threshold, those before 1.13 lack max_samples, and those before 1.15 lack shuffle.
+        # those pickled before 1.7 lack missing, those before 1.9 lack categorical, those before 1.10 lack model_input, those before 1.12 lack auto_groups_threshold, those before 1.13 lack max_samples, and those before 1.15 lack shuffle, and those before 1.18 lack families.
         defaults = {
             "max_shadow_q": None, "min_shadow_families": None, "shadow_mode": "joint",
             "missing": "error", "categorical": None, "model_input": "array",
             "auto_groups_threshold": 0.7, "max_samples": None, "shuffle": "rows",
+            "families": None,
         }
         super().__setstate__({**defaults, **state})
 
@@ -228,6 +233,7 @@ class ConsensusSelector(SelectorMixin, BaseEstimator):
             categorical=self.categorical,
             model_input=self.model_input,
             shuffle=self.shuffle,
+            families=self.families,
         )
         report = ranker.rank_resampled(
             X,

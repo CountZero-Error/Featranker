@@ -174,6 +174,20 @@ def _correlated_groups(report: Dict[str, Any]) -> List[Dict[str, Any]]:
     )]
 
 
+def _constant_within_groups(report: Dict[str, Any]) -> List[Dict[str, Any]]:
+    groups = report.get("constant_within_groups")
+    if not groups:
+        return []
+    return [_finding(
+        "constant_within_groups", "warning",
+        f"{', '.join(groups)} are constant within every shuffle group, so "
+        "shuffle='within_groups' cannot move them and their importance is zero by "
+        "construction; it says nothing about their effect. Use shuffle='rows' to "
+        "measure group-level effects.",
+        {"groups": list(groups)},
+    )]
+
+
 def _ablation_curve(report: Dict[str, Any]) -> List[Dict[str, Any]]:
     block = report.get("ablation", {})
     # The paired median compares one set of models at every k.
@@ -232,7 +246,8 @@ def _ablation_cohort_changed(report: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 RULES = (
     _gate_off, _empty_consensus, _failures, _few_families, _tied_groups,
-    _within_noise, _below_shadow, _overfit, _correlated_groups, _ablation_curve,
+    _within_noise, _below_shadow, _overfit, _correlated_groups, _constant_within_groups,
+    _ablation_curve,
     _ablation_cohort_changed,
 )
 
@@ -325,6 +340,7 @@ def _insufficient_splits(report: Dict[str, Any]) -> List[Dict[str, Any]]:
 RESAMPLED_RULES = (
     _split_failures, _resampled_failures, _resampled_gate_off,
     _resampled_empty_consensus, _resampled_below_shadow, _insufficient_splits,
+    _constant_within_groups,
 )
 
 

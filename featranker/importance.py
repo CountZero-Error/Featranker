@@ -13,6 +13,7 @@ import numbers
 import platform
 import re
 import warnings
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterator, List, Literal, Optional, Sequence, Union
 
@@ -115,6 +116,35 @@ def _validate_models(models: Any) -> Dict[str, Any]:
         if not callable(getattr(estimator, "fit", None)):
             raise TypeError(f"[!] Model '{name}' must have a callable fit().")
     return dict(models)
+
+
+def _validate_families(families: Any) -> Optional[Dict[str, str]]:
+    """None or a dict copy of a non-empty-string model name -> family mapping."""
+    if families is None:
+        return None
+    if not isinstance(families, Mapping) or not all(
+        isinstance(name, str) and name and isinstance(family, str) and family
+        for name, family in families.items()
+    ):
+        raise ValueError(
+            "[!] families must be None or a mapping of model name -> non-empty family string."
+        )
+    return dict(families)
+
+
+def _constant_within_groups(
+    X_values: np.ndarray, labels: np.ndarray, groups: Dict[str, List[int]]
+) -> List[str]:
+    """Sorted names of the groups whose every column is constant within every label."""
+    _, first_rows, inverse = np.unique(labels, return_index=True, return_inverse=True)
+    constant = []
+    for name, indices in groups.items():
+        block = np.asarray(X_values[:, indices], dtype=float)
+        reference = block[first_rows][inverse]
+        same = (block == reference) | (np.isnan(block) & np.isnan(reference))
+        if same.all():
+            constant.append(name)
+    return sorted(constant)
 
 
 def _validate_categorical(categorical: Any) -> Any:
@@ -1337,6 +1367,7 @@ class FeatureRanker:
         categorical: Union[List[str], Literal["auto"], None] = None,
         model_input: Literal["array", "dataframe"] = "array",
         shuffle: Literal["rows", "within_groups", "circular"] = "rows",
+        families: Optional[Mapping[str, str]] = None,
     ) -> None:
         """
         Initialize configured models without loading or fitting data.
@@ -1382,6 +1413,11 @@ class FeatureRanker:
                 fit() for shadows and to rank_features() for permutations).
                 "circular" shifts the rows cyclically by a random offset,
                 which keeps autocorrelation and assumes rows in time order.
+            families: Optional model name -> family mapping, for custom or
+                built-in models. Each family casts one vote in the consensus,
+                so map near-identical custom models to one family; unmapped
+                custom models are separate families. A name that is not a
+                configured model raises ValueError in fit().
         """
         if task not in {"clf", "reg"}:
             raise ValueError("[!] task must be 'clf' or 'reg'.")
@@ -1423,6 +1459,7 @@ class FeatureRanker:
         self.missing = missing
         self.model_input = model_input
         self.shuffle = shuffle
+        self.families = _validate_families(families)
         self.categorical = _validate_categorical(categorical)
         self.categorical_features_: List[str] = []
         self.categorical_levels_: Dict[str, List[Optional[str]]] = {}
@@ -1465,6 +1502,8 @@ class FeatureRanker:
         self.__dict__.setdefault("train_shuffle_groups_sha256_", None)
         # ... and those pickled by 1.14 lack the 1.15 shuffle mode.
         self.__dict__.setdefault("shuffle", "rows")
+        # ... and those pickled by 1.17 lack the 1.18 family mapping.
+        self.__dict__.setdefault("families", None)
         # ... and those pickled by 1.16 were fingerprinted with scheme 1.
         self.__dict__.setdefault("fingerprint_scheme_", 1)
         if "model_families_" not in self.__dict__:
@@ -1477,6 +1516,22 @@ class FeatureRanker:
         if self.model_input != "dataframe":
             return None
         return names + [f"shadow__{name}" for name in names] if self.shadows else names
+
+    def _check_family_names(self, configured: Any) -> None:
+        """ValueError if `families` names a model that is not configured.
+
+        Built-in models that failed to initialise still count as configured.
+        """
+        unknown = sorted(
+            set(self.families or {})
+            - set(configured)
+            - {failure["model"] for failure in self.initialization_failures_}
+        )
+        if unknown:
+            raise ValueError(
+                f"[!] families names models that are not configured: {unknown}. "
+                f"Configured: {sorted(configured)}."
+            )
 
     def fit(
         self,
@@ -1555,6 +1610,8 @@ class FeatureRanker:
                         name: _with_one_hot(model, one_hot) for name, model in built.items()
                     }
                 candidates.update(built)
+
+        self._check_family_names(candidates)
 
         self.trained_models = {}
         self.fit_failures_ = []
@@ -1769,9 +1826,11 @@ class FeatureRanker:
                 shadow_failures.append(
                     _failure(name, "shadows", ShadowColumnsDropped(reason))
                 )
+        # Mapped families override the registry's; anything else is its own family.
+        family_of = {**self.model_families_, **(self.families or {})}
         jobs = [
             (name, model, scorer, X_models[rows], y_scored, groups, n_repeats,
-             random_state, baseline_score, self.model_families_.get(name, name),
+             random_state, baseline_score, family_of.get(name, name),
              None if name in no_shadows else shadow_groups, train_data, columns,
              weights_scored, secondary_scorers, (self.shuffle, scored_labels))
             for name, model in self.trained_models.items()
@@ -1828,6 +1887,18 @@ class FeatureRanker:
             report["shadow_mode"] = self.shadow_mode
         if self.shuffle != "rows":
             report["shuffle"] = self.shuffle
+        if scored_labels is not None:
+            constant = _constant_within_groups(X_values[rows], scored_labels, groups)
+            report["constant_within_groups"] = constant
+            if constant:
+                warnings.warn(
+                    f"Feature groups {constant} are constant within every shuffle "
+                    "group, so shuffle='within_groups' cannot move them and their "
+                    "importance is zero by construction. Use shuffle='rows' to "
+                    "measure group-level effects.",
+                    UserWarning,
+                    stacklevel=2,
+                )
         if self.missing == "impute":
             report["missing"] = {
                 "policy": "impute",
@@ -1913,6 +1984,18 @@ class FeatureRanker:
             _resolve_max_samples(max_samples, len(X_values))
         _resolve_scorers(scoring)
         _resolve_feature_groups(names, feature_groups)
+        # Each split builds its own ranker; check the names once, up front.
+        self._check_family_names(
+            self.user_models
+            if self.user_models is not None
+            else {
+                name
+                for group in (
+                    ["linear", "tree"] if self.group in {"all", "fast"} else [self.group]
+                )
+                for name in self.models.get(self.task, {}).get(group, {})
+            }
+        )
         shuffle_labels = _shuffle_labels(
             self.shuffle,
             groups if self.shuffle == "within_groups" else None,
@@ -1945,6 +2028,7 @@ class FeatureRanker:
                     missing=self.missing,
                     model_input=self.model_input,
                     shuffle=self.shuffle,
+                    families=self.families,
                     # Names, so "auto" survives the loss of the DataFrame dtypes.
                     categorical=[names[column] for column in categorical] or None,
                 )
@@ -2034,6 +2118,14 @@ class FeatureRanker:
             }
         if self.shuffle != "rows":
             result["shuffle"] = self.shuffle
+        if self.shuffle == "within_groups":
+            result["constant_within_groups"] = sorted(
+                {
+                    group
+                    for entry in split_reports
+                    for group in entry["report"]["constant_within_groups"]
+                }
+            )
         return Report(result)
 
     def ablate(

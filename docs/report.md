@@ -18,7 +18,7 @@ Check these in order. `featranker.summarize(report)` runs the same checks and re
 
 **4. Read the consensus.** `consensus` is sorted from most to least important. Rank 1 is the most important.
 
-Each model family casts one vote. Voting models are grouped by `family` (for example, the four logistic regressions form one family). A family's rank for a group is the median of its members' ranks, and the consensus combines those family ranks. A family with five members therefore counts as much as a family with one. Your own models are each their own family.
+Each model family casts one vote. Voting models are grouped by `family` (for example, the four logistic regressions form one family). A family's rank for a group is the median of its members' ranks, and the consensus combines those family ranks. A family with five members therefore counts as much as a family with one. Your own models are each their own family unless `FeatureRanker(families=...)` maps them (see [Your own models](usage.md#your-own-models)); near-identical custom models left unmapped therefore outvote other model types.
 
 | Field | How to read it |
 |---|---|
@@ -130,6 +130,8 @@ When any [sample weights](usage.md#sample-weights) are used, the report (and eac
 With [`max_samples`](usage.md#fewer-evaluation-rows-max_samples), the report has top-level `max_samples` (as given) and, for `rank_features()` (and each resampled split report), `n_eval_rows`, the number of evaluation rows actually scored; without it neither key appears. `run["data_sha256"]` still covers all the evaluation rows passed.
 
 With `shuffle="within_groups"` or `"circular"` (see [Shuffling dependent rows](usage.md#shuffling-dependent-rows)), the report (and each resampled split report) has top-level `"shuffle"` with that value; with the default `"rows"` the key is absent.
+
+With `shuffle="within_groups"`, `rank_features()` also records `constant_within_groups`, placed after `shuffle`: the sorted names of the feature groups whose every column is constant (a missing value counts as a value) within every shuffle group on the scored rows, after `max_samples`. Their importance is 0 by construction under that shuffle. The list is empty when none qualify, and a non-empty list also raises a `UserWarning`. The key is absent with the other modes. Each split report of a resampled run carries its own list, and the resampled report itself has a top-level `constant_within_groups` after `shuffle` (with `shuffle="within_groups"` only): the sorted union of the split lists, `[]` when none. `summarize()` adds a `constant_within_groups` warning for a held-out or a resampled report whose list is non-empty. See [Shuffling dependent rows](usage.md#shuffling-dependent-rows).
 
 <a id="ablation"></a>
 
@@ -263,7 +265,7 @@ With `evidence=True`, each model also has `train_score` and `overfit_gap` (`null
 - Raw importance values stay model-specific and are never averaged into the primary consensus.
 - Exactly equal mean importances share the minimum rank. Group names give a deterministic output order.
 - Each voting model's rank is first combined within its family (median), then across families: `median_rank`, `mean_rank`, and `rank_std` are the median, mean, and population standard deviation of the family ranks.
-- Built-in families are listed in [Models](models.md). Each model passed through `models=` is its own family, so with your own models every model votes separately.
+- Built-in families are listed in [Models](models.md). Each model passed through `models=` is its own family unless `families={model_name: family}` maps it, so with your own models every unmapped model votes separately and several near-identical ones can outvote other model types. The `family` field of each model in the report holds the family used.
 - The consensus sorts by `median_rank`, then `mean_rank`, then group name.
 
 ## ▍ Dummy baseline
