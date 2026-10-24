@@ -60,6 +60,7 @@ context: |
     1.16 ablation-curve: ablate() top-k refit curve, CLI --drop/--ablate
     1.17 trust-fixes: nested shadow-drop check, sklearn>=1.5, fingerprint scheme 2, ablation provenance and paired curve, zero-weight subsample error
     1.18 statistical-contracts: families=, constant_within_groups, within-group/weights/ablation contracts documented
+    1.19 scorer-cache: shared predictions across scorers
   Known limitations (found 2026-10-19/20 in reviews and the benchmark,
   updated 2026-10-22 after 1.6-1.15; maintainer decides):
     Method and statistics

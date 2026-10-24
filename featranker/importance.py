@@ -22,7 +22,7 @@ import sklearn
 import yaml
 from joblib import Parallel, delayed
 from scipy.stats import binom
-from sklearn.base import clone
+from sklearn.base import clone, is_regressor
 from sklearn.compose import ColumnTransformer
 from sklearn.dummy import DummyClassifier, DummyRegressor
 from sklearn.feature_selection import SelectorMixin
@@ -40,6 +40,13 @@ from sklearn.preprocessing import (
 )
 from sklearn.utils.fixes import parse_version
 from tqdm import tqdm
+
+try:
+    # Private scikit-learn API (permutation_importance uses it too). If it
+    # moves, _MultimetricScorer is None and scorers are called one by one.
+    from sklearn.metrics._scorer import _BaseScorer, _MultimetricScorer
+except ImportError:  # pragma: no cover
+    _BaseScorer = _MultimetricScorer = None
 
 from .evidence import _model_X, correlation_evidence, shap_evidence
 from .report import Report
@@ -1133,6 +1140,114 @@ def _fit_model(
         return name, None, _failure(name, "fit", error)
 
 
+def _call_scorer(scorer: Any, model: Any, X: Any, y: np.ndarray, kwargs: Dict[str, Any]) -> Any:
+    """The score, or the exception the scorer raised."""
+    try:
+        return scorer(model, X, y, **kwargs)
+    except Exception as error:
+        return error
+
+
+_DIRECT = object()  # share key of a scorer that must be called on its own
+
+
+def _share_key(scorer: Any, is_regression: bool, weighted: bool) -> Any:
+    """
+    What scorers must agree on to share one prediction: the positive label they
+    resolve (it picks the probability column or flips a decision function), or
+    _DIRECT for a scorer scikit-learn's multi-metric scorer cannot be trusted
+    with. Under weights it passes sample_weight only to score functions that
+    name the parameter, so others are called directly.
+    """
+    if _BaseScorer is None or not isinstance(scorer, _BaseScorer):
+        return _DIRECT
+    try:
+        if weighted and "sample_weight" not in inspect.signature(scorer._score_func).parameters:
+            return _DIRECT
+        if is_regression or getattr(scorer, "_response_method", None) == "predict":
+            return None
+        label = scorer._get_pos_label()
+        hash(label)
+        return label
+    except Exception:
+        return _DIRECT
+
+
+def _shared_group_scores(
+    group: Dict[int, Any], model: Any, X: Any, y: np.ndarray, kwargs: Dict[str, Any]
+) -> Dict[int, Any]:
+    try:
+        scores = _MultimetricScorer(
+            scorers={str(i): scorer for i, scorer in group.items()}, raise_exc=False
+        )(model, X, y, **kwargs)
+        return {int(key): value for key, value in scores.items() if not isinstance(value, str)}
+    except Exception:
+        return {}  # e.g. a response method is missing or the result is odd: score one by one
+
+
+def _shared_scores(
+    scorers: Sequence[Any], model: Any, X: Any, y: np.ndarray, kwargs: Dict[str, Any]
+) -> Dict[int, Any]:
+    """
+    {position: score} for the scorers that scikit-learn can serve from one shared
+    prediction per response method (one group per resolved positive label);
+    {} if there is no gain or it is unavailable. A scorer that failed there is
+    absent, so the caller re-calls it directly.
+    """
+    if _MultimetricScorer is None:
+        return {}
+    try:
+        is_regression = is_regressor(model)
+    except Exception:
+        is_regression = False
+    groups: Dict[Any, Dict[int, Any]] = {}
+    for i, scorer in enumerate(scorers):
+        key = _share_key(scorer, is_regression, "sample_weight" in kwargs)
+        if key is not _DIRECT:
+            groups.setdefault(key, {})[i] = scorer
+    shared: Dict[int, Any] = {}
+    for group in groups.values():
+        if len(group) >= 2:
+            shared.update(_shared_group_scores(group, model, X, y, kwargs))
+    return shared
+
+
+def _score_all(
+    scorers: Sequence[Any],
+    model: Any,
+    X: Any,
+    y: np.ndarray,
+    weights: Optional[np.ndarray],
+    share: bool = True,
+) -> List[Any]:
+    """
+    One entry per scorer: its score, or the exception it raised (the same one
+    a direct call raises, since failures are re-run directly). With share, scorers
+    that agree on response method and positive label share one prediction.
+    """
+    kwargs = _score_weights(weights)
+    shared = _shared_scores(scorers, model, X, y, kwargs) if share else {}
+    return [
+        shared[i] if i in shared else _call_scorer(scorer, model, X, y, kwargs)
+        for i, scorer in enumerate(scorers)
+    ]
+
+
+def _shared_matches(direct: Sequence[Any], shared: Dict[int, Any]) -> bool:
+    """True if every shared score equals the directly computed one (no failure there)."""
+    return all(
+        not isinstance(direct[i], Exception) and direct[i] == value
+        for i, value in shared.items()
+    )
+
+
+def _unwrap(result: Any) -> Any:
+    """A score, or raise the exception _score_all returned in its place."""
+    if isinstance(result, Exception):
+        raise result
+    return result
+
+
 def _group_importances(
     model: Any,
     scorer: Any,
@@ -1146,6 +1261,7 @@ def _group_importances(
     weights: Optional[np.ndarray] = None,
     secondary: Optional[Dict[str, tuple[Any, float]]] = None,
     shuffle: tuple[str, Optional[np.ndarray]] = ("rows", None),
+    share: bool = True,
 ) -> tuple[Dict[str, Dict[str, Any]], Dict[str, Any]]:
     """
     Importances per group, and per secondary scorer ({name: (scorer, baseline)})
@@ -1156,9 +1272,8 @@ def _group_importances(
     # rewritten per repeat and restored after the group.
     X_permuted = X_values.copy()
     importances: Dict[str, Dict[str, Any]] = {}
-    secondary_drops: Dict[str, Dict[str, List[float]]] = {
-        name: {} for name in secondary or {}
-    }
+    secondary = secondary or {}
+    secondary_drops: Dict[str, Dict[str, List[float]]] = {name: {} for name in secondary}
     errors: Dict[str, Exception] = {}
     for group_name, column_indices in groups.items():
         columns = np.asarray(column_indices, dtype=np.intp)
@@ -1169,23 +1284,20 @@ def _group_importances(
             row_order = _shuffle_index(rng, len(X_values), *shuffle)
             X_permuted[:, columns] = X_values[np.ix_(row_order, columns)]
             X_model = _model_X(X_permuted, names)
-            permuted_score = _finite_float(
-                scorer(model, X_model, y_values, **_score_weights(weights)),
-                "permuted score",
+            live = [name for name in secondary_drops if name not in errors]
+            scored = _score_all(
+                [scorer, *(secondary[name][0] for name in live)],
+                model, X_model, y_values, weights, share,
             )
+            permuted_score = _finite_float(_unwrap(scored[0]), "permuted score")
             values.append(
                 _finite_float(baseline - permuted_score, "permutation importance")
             )
-            for name, (other, other_baseline) in (secondary or {}).items():
-                if name in errors:
-                    continue
+            for name, result in zip(live, scored[1:]):
                 try:
-                    score = _finite_float(
-                        other(model, X_model, y_values, **_score_weights(weights)),
-                        "permuted score",
-                    )
+                    score = _finite_float(_unwrap(result), "permuted score")
                     secondary_drops[name][group_name].append(
-                        _finite_float(other_baseline - score, "permutation importance")
+                        _finite_float(secondary[name][1] - score, "permutation importance")
                     )
                 except Exception as error:
                     errors[name] = error
@@ -1227,13 +1339,14 @@ def _permutation_importances(
     weights: Optional[np.ndarray] = None,
     secondary: Optional[Dict[str, tuple[Any, float]]] = None,
     shuffle: tuple[str, Optional[np.ndarray]] = ("rows", None),
+    share: bool = True,
 ) -> tuple[
     Dict[str, Dict[str, Any]], Optional[Dict[str, Dict[str, Any]]], Dict[str, Any]
 ]:
     rng = np.random.default_rng(random_state)
     importances, secondary_results = _group_importances(
         model, scorer, X_values, y_values, groups, n_repeats, rng, baseline, names,
-        weights, secondary, shuffle,
+        weights, secondary, shuffle, share,
     )
     # Real groups are ranked among themselves only; shadows are compared, not ranked.
     ranks = _assign_ranks(
@@ -1275,27 +1388,27 @@ def _rank_model(
     """Returns (name, report, ranking failure, evidence failures)."""
     try:
         X_model = _model_X(X_values, names)
-        baseline = _finite_float(
-            scorer(model, X_model, y_values, **_score_weights(weights)),
-            "baseline score",
+        scorers = [scorer, *(other for other, _ in secondary_scorers)]
+        scored = _score_all(scorers, model, X_model, y_values, weights, share=False)
+        # Share predictions for this model only if the shared path reproduces
+        # these direct baseline scores exactly (scikit-learn's private code may differ).
+        share = _shared_matches(
+            scored, _shared_scores(scorers, model, X_model, y_values, _score_weights(weights))
         )
+        baseline = _finite_float(_unwrap(scored[0]), "baseline score")
         # A secondary scorer that fails is dropped (null) and reported as evidence.
         secondary: Dict[str, tuple[Any, float]] = {}
         secondary_errors: Dict[str, Exception] = {}
-        for other, other_name in secondary_scorers:
+        for (other, other_name), result in zip(secondary_scorers, scored[1:]):
             try:
                 secondary[other_name] = (
-                    other,
-                    _finite_float(
-                        other(model, X_model, y_values, **_score_weights(weights)),
-                        "baseline score",
-                    ),
+                    other, _finite_float(_unwrap(result), "baseline score")
                 )
             except Exception as error:
                 secondary_errors[other_name] = error
         importances, shadow, secondary_results = _permutation_importances(
             model, scorer, X_values, y_values, groups, n_repeats, random_state,
-            baseline, shadow_groups, names, weights, secondary, shuffle,
+            baseline, shadow_groups, names, weights, secondary, shuffle, share,
         )
         report = {
             "family": family,
