@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional, Sequence
 import numpy as np
 
 from .importance import (
+    FINGERPRINT_SCHEME,
     FeatureRanker,
     _fingerprint,
     _resolve_scorer,
@@ -79,9 +80,14 @@ def _voters(ranker: FeatureRanker, report: Dict[str, Any]) -> List[str]:
     return voters
 
 
+def _weights_match(weights: Any, n_rows: int, recorded: Optional[str]) -> bool:
+    """Whether the weights fingerprint to the report's record (None: no weights)."""
+    return _weights_fingerprint(_validate_weights(weights, n_rows)) == recorded
+
+
 def _check_weights(weights: Any, n_rows: int, recorded: Optional[str], name: str) -> None:
-    """Raise when the weights do not fingerprint to the report's record (None: no weights)."""
-    if _weights_fingerprint(_validate_weights(weights, n_rows)) != recorded:
+    """Raise when the weights do not fingerprint to the report's record."""
+    if not _weights_match(weights, n_rows, recorded):
         raise ValueError(
             f"[!] {name} is not what this report was ranked with "
             "(pass the same weights, or none if the ranking used none)."
@@ -93,8 +99,12 @@ def _prepare(
     data: tuple[Any, Any, Any, Any],
     report: Dict[str, Any],
     weights: tuple[Any, Any],
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Validated training and evaluation arrays, with the inputs checked against the report."""
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, bool]:
+    """
+    Validated training and evaluation arrays, with the inputs checked against the report.
+
+    The last value is whether the evaluation data is the report's ranking holdout.
+    """
     X, y, X_eval, y_eval = data
     names = ranker.feature_names_
     categorical = [i for i, name in enumerate(names) if name in ranker.categorical_features_]
@@ -106,19 +116,25 @@ def _prepare(
     X_values, _ = _validate_X(X, **options)
     y_values = _validate_y(y, len(X_values))
     run = report.get("run", {})
+    # Reports from before scheme 2 carry no key and were fingerprinted with scheme 1.
+    scheme = run.get("fingerprint_scheme", 1)
     expected = run.get("train_data_sha256")
     if expected is not None:
-        if _fingerprint(names, X_values, y_values) != expected:
+        if _fingerprint(names, X_values, y_values, scheme) != expected:
             raise ValueError("[!] X and y are not the training data this report was ranked from.")
         # The run block leaves the weights key out when there were none.
         _check_weights(weights[0], len(X_values), run.get("train_weights_sha256"), "sample_weight")
     eval_values, _ = _validate_X(X_eval, **options)
     y_eval_values = _validate_y(y_eval, len(eval_values))
-    if _fingerprint(names, eval_values, y_eval_values) == run.get("data_sha256"):
+    same_data = _fingerprint(names, eval_values, y_eval_values, scheme) == run.get("data_sha256")
+    if same_data:  # the report's rows with other weights are refused, not recorded
         _check_weights(
             weights[1], len(eval_values), run.get("weights_sha256"), "eval_sample_weight"
         )
-    return X_values, y_values, eval_values, y_eval_values
+    same_holdout = same_data and _weights_match(
+        weights[1], len(eval_values), run.get("weights_sha256")
+    )
+    return X_values, y_values, eval_values, y_eval_values, same_holdout
 
 
 def _kept_columns(
@@ -229,6 +245,11 @@ def _median(scores: Dict[str, Optional[float]]) -> Optional[float]:
     return float(np.median(present)) if present else None
 
 
+def _paired_models(voters: List[str], curve: List[Dict[str, Any]]) -> List[str]:
+    """The voters with a score at every k, in report order."""
+    return [name for name in voters if all(row["scores"][name] is not None for row in curve)]
+
+
 def ablate(
     ranker: FeatureRanker,
     X: Any,
@@ -248,7 +269,7 @@ def ablate(
     ks = _validate_ks(ks, n_groups)
     scoring = report["scoring"] if scoring is None else scoring
     scoring_name = _resolve_scorer(scoring)[1]
-    X_values, y_values, eval_values, y_eval_values = _prepare(
+    X_values, y_values, eval_values, y_eval_values, same_holdout = _prepare(
         ranker, (X, y, X_eval, y_eval), report, (sample_weight, eval_sample_weight)
     )
     settings = {
@@ -273,16 +294,28 @@ def ablate(
             "n_features": len(positions),
             "scores": scores,
             "median_score": _median(scores),
+            "n_models_scored": sum(score is not None for score in scores.values()),
         })
         failures.extend(k_failures)
         if baseline_score is None:  # the dummy ignores the features, so any k will do
             baseline_score = k_baseline
+    paired = _paired_models(voters, curve)
+    for row in curve:
+        row["paired_median_score"] = _median({name: row["scores"][name] for name in paired})
     result = copy.deepcopy(report)
     result["ablation"] = {
         "scoring": scoring_name,
         "models": voters,
         "baseline_score": baseline_score,
         "n_groups": n_groups,
+        "fingerprint_scheme": FINGERPRINT_SCHEME,
+        "data_sha256": _fingerprint(ranker.feature_names_, eval_values, y_eval_values),
+        "weights_sha256": _weights_fingerprint(
+            _validate_weights(eval_sample_weight, len(eval_values))
+        ),
+        "n_eval_rows": len(eval_values),
+        "same_holdout": same_holdout,
+        "paired_models": paired,
         "curve": curve,
         "failures": failures,
     }

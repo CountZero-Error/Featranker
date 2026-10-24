@@ -60,6 +60,7 @@ Each model family casts one vote. Voting models are grouped by `family` (for exa
     "run": {
         "task": "reg",
         "group": "all",
+        "fingerprint_scheme": 2,
         "data_sha256": "9f2c...",
         "cv": 5,                      # or the splitter's repr
         "splits_sha256": "41ab...",
@@ -114,7 +115,7 @@ Within each split, `rank_std` still measures disagreement between model families
 
 `evaluation_mode` is always `"held_out"`. It names the workflow (scoring on data passed to `rank_features()`); FeatRanker cannot check that this data is really separate from the training data.
 
-Every report has a `run` block (after `provenance`): `task`, `group`, `data_sha256`, and, for `rank_features()`, `train_data_sha256` (`null` for a ranker pickled before 1.12); for `rank_resampled()`, `cv` and `splits_sha256` instead, with each split's report carrying its own `run`. When `feature_groups="auto"` chose the groups (`ConsensusSelector`, `--feature-groups auto`), `run["auto_groups"]` is `{"threshold": ..., "method": "spearman-complete-linkage"}`; otherwise the key is absent. See [Comparing runs](usage.md#comparing-runs).
+Every report has a `run` block (after `provenance`): `task`, `group`, `fingerprint_scheme` (`2`; integer and boolean columns are hashed exactly, and `ablate()` treats a report without the key as scheme 1), `data_sha256`, and, for `rank_features()`, `train_data_sha256` (`null` for a ranker pickled before 1.12); for `rank_resampled()`, `cv` and `splits_sha256` instead, with each split's report carrying its own `run`. When `feature_groups="auto"` chose the groups (`ConsensusSelector`, `--feature-groups auto`), `run["auto_groups"]` is `{"threshold": ..., "method": "spearman-complete-linkage"}`; otherwise the key is absent. See [Comparing runs](usage.md#comparing-runs).
 
 With `shadows=True`, the report also has top-level `shadows: true`, `shadow_seed`, and `shadow_mode` (`"joint"` or `"independent"`; resampled reports add the `shadow_test` block, and their stability rows gain `shadow_hits`, `shadow_p_value`, `shadow_q_value`, `family_above_shadow_share`, and `shadow_families`); each model gains `shadow_importance` and `shadow_max`; each importance entry gains `above_shadow`; and each consensus row gains `above_shadow_share` and `family_above_shadow`. Without shadows, none of these keys appear.
 
@@ -140,6 +141,12 @@ A report returned by [`FeatureRanker.ablate()`](usage.md#ablation-curve) (or wri
     "models": ["ridge", "random_forest"],   # the voting models that were refit
     "baseline_score": -0.01,          # the refits' dummy score; null only if no refit scored
     "n_groups": 10,                   # consensus groups; the largest possible k
+    "fingerprint_scheme": 2,          # scheme of data_sha256 and weights_sha256
+    "data_sha256": "9f2c...",         # fingerprint of X_eval and y_eval
+    "weights_sha256": None,           # of eval_sample_weight; null without
+    "n_eval_rows": 133,
+    "same_holdout": True,             # X_eval, y_eval (and weights) are the ranking's own
+    "paired_models": ["ridge", "random_forest"],   # scored at every k, in report order
     "curve": [
         {
             "k": 2,
@@ -147,13 +154,15 @@ A report returned by [`FeatureRanker.ablate()`](usage.md#ablation-curve) (or wri
             "n_features": 2,                   # columns they hold
             "scores": {"ridge": 0.31, "random_forest": 0.17},   # null where the model failed
             "median_score": 0.24,              # median of the non-null scores; null if none
+            "n_models_scored": 2,              # non-null scores in this row
+            "paired_median_score": 0.24,       # median over paired_models; null if none
         }
     ],
     "failures": [{"model": "pls_regression", "stage": "fit", "message": "...", "k": 1}],
 }
 ```
 
-Scores are the models' scores on the data passed as `X_eval`, higher is better. `baseline_score` is the dummy's score from the refits themselves, on every row of `X_eval` with the scorer named in `scoring`, so it can differ from the report's own `baseline_score`; it is `null` only if no refit scored. Ablation `failures` entries have `model`, `stage` (`"fit"` or `"ranking"`), `message`, and `k`, and no `error_type`; they are separate from the report's own `failures`. All numbers are finite or `null`.
+Scores are the models' scores on the data passed as `X_eval`, higher is better. `fingerprint_scheme` is the scheme of `data_sha256` and `weights_sha256` (always the current one, whatever scheme the report was ranked with). `baseline_score` is the dummy's score from the refits themselves, on every row of `X_eval` with the scorer named in `scoring`, so it can differ from the report's own `baseline_score`; it is `null` only if no refit scored. `paired_median_score` compares the same models at every `k`; `median_score` does not when `n_models_scored` varies. Ablation `failures` entries have `model`, `stage` (`"fit"` or `"ranking"`), `message`, and `k`, and no `error_type`; they are separate from the report's own `failures`. All numbers are finite or `null`.
 
 <a id="several-scorers"></a>
 
@@ -214,6 +223,7 @@ With `evidence=True`, each model also has `train_score` and `overfit_gap` (`null
     "run": {
         "task": "reg",
         "group": "tree",
+        "fingerprint_scheme": 2,
         "data_sha256": "9f2c...",         # evaluation data
         "train_data_sha256": "c07e...",   # data passed to fit()
     },
@@ -265,7 +275,7 @@ With `evidence=True`, each model also has `train_score` and `overfit_gap` (`null
 
 ## ▍ Failures
 
-- Failures contain `model`, `stage`, `error_type`, and `message`. The stages are `initialization`, `fit`, `ranking`, (with `evidence=True`) `evidence`, and (with `shadows=True`) `shadows`. An `evidence` failure leaves the model's ranking untouched. A `shadows` failure (`error_type` `ShadowColumnsDropped`) means a `ColumnTransformer` in a custom model ignores some shadow columns: the model keeps its importances and ranking vote but has no shadow evidence in that report (see [Columns by name](usage.md#columns-by-name)).
+- Failures contain `model`, `stage`, `error_type`, and `message`. The stages are `initialization`, `fit`, `ranking`, (with `evidence=True`) `evidence`, and (with `shadows=True`) `shadows`. An `evidence` failure leaves the model's ranking untouched. A `shadows` failure (`error_type` `ShadowColumnsDropped`) means a `ColumnTransformer` in a custom model (also nested in a `Pipeline` or another `ColumnTransformer`) ignores some shadow columns, or which columns the model uses could not be verified: the model keeps its importances and ranking vote but has no shadow evidence in that report (see [Columns by name](usage.md#columns-by-name)).
 - Failed models get no zero placeholder and do not enter the consensus.
 - `fit()` raises if no model fits; `rank_features()` raises if every model fails ranking.
 

@@ -77,7 +77,7 @@ Ships with **40 built-in models** (22 classification, 18 regression), or bring y
 pip install featranker
 ```
 
-Requires **Python ≥ 3.10**. Optional extras: `featranker[xgboost]`, `[catboost]`, `[all]` (both), `[plot]` (matplotlib, for `report.plot()`), or `[shap]` (SHAP summaries for `evidence=True`; not part of `[all]`). The `lightgbm` extra was removed in 1.0; install `lightgbm` directly for custom LightGBM estimators. `[all]` now installs only XGBoost and CatBoost.
+Requires **Python ≥ 3.10** and scikit-learn ≥ 1.5. Optional extras: `featranker[xgboost]`, `[catboost]`, `[all]` (both), `[plot]` (matplotlib, for `report.plot()`), or `[shap]` (SHAP summaries for `evidence=True`; not part of `[all]`). The `lightgbm` extra was removed in 1.0; install `lightgbm` directly for custom LightGBM estimators. `[all]` now installs only XGBoost and CatBoost.
 
 ## ▍ 02 · Quick start
 

@@ -115,6 +115,8 @@ def test_block_shape_and_report_unchanged():
     block = result["ablation"]
     assert set(block) == {
         "scoring", "models", "baseline_score", "n_groups", "curve", "failures",
+        "fingerprint_scheme", "data_sha256", "weights_sha256", "n_eval_rows", "same_holdout",
+        "paired_models",
     }
     assert block["scoring"] == "r2"
     assert block["models"] == ["lr", "tree"]
@@ -123,6 +125,7 @@ def test_block_shape_and_report_unchanged():
     assert block["failures"] == []
     assert set(block["curve"][0]) == {
         "k", "feature_groups", "n_features", "scores", "median_score",
+        "n_models_scored", "paired_median_score",
     }
     assert set(block["curve"][0]["scores"]) == {"lr", "tree"}
 

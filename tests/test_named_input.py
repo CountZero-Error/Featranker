@@ -259,11 +259,10 @@ def test_selector_covering_the_shadows_is_compatible():
     assert not shadow_failures(report)
 
 
-def test_unresolvable_selector_warns_and_does_not_fail():
+def test_unresolvable_selector_cannot_be_verified_and_counts_as_dropped():
     model = by_name_pipeline("drop", [0, 1, 2]).fit(np.ones((10, 6)), np.arange(10))
     del model[0]._transformer_to_input_indices
-    with pytest.warns(UserWarning, match="shadow"):
-        assert not importance_module._drops_shadows("m", model, 3, 6)
+    assert importance_module._shadow_status(model, 3, 6) == "unverified"
 
 
 def test_shadows_off_has_no_check():

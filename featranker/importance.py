@@ -24,11 +24,19 @@ from scipy.stats import binom
 from sklearn.base import clone
 from sklearn.compose import ColumnTransformer
 from sklearn.dummy import DummyClassifier, DummyRegressor
+from sklearn.feature_selection import SelectorMixin
 from sklearn.impute import SimpleImputer
 from sklearn.metrics import get_scorer
 from sklearn.model_selection import KFold, StratifiedKFold
-from sklearn.pipeline import Pipeline, make_pipeline
-from sklearn.preprocessing import LabelEncoder, OneHotEncoder, StandardScaler
+from sklearn.pipeline import FeatureUnion, Pipeline, make_pipeline
+from sklearn.preprocessing import (
+    LabelEncoder,
+    MaxAbsScaler,
+    MinMaxScaler,
+    OneHotEncoder,
+    RobustScaler,
+    StandardScaler,
+)
 from sklearn.utils.fixes import parse_version
 from tqdm import tqdm
 
@@ -525,10 +533,29 @@ def _resolve_feature_groups(
 HASH_CHUNK_ROWS = 65536
 
 
-def _hash_column(digest: Any, column: np.ndarray) -> None:
-    """Feed one column: numbers as float64 bytes, anything else as chunked reprs."""
-    digest.update(f"{column.dtype.kind in 'biuf'}{len(column)}".encode())
-    if column.dtype.kind in "biuf":
+FINGERPRINT_SCHEME = 2
+# Integer and boolean columns hash as int64, unsigned ones as uint64, never as float.
+EXACT_INTEGER_TYPES = {"b": "<i8", "i": "<i8", "u": "<u8"}
+# Booleans hash as the integers 0 and 1, so they share the integer tag.
+INTEGER_TAGS = {"b": "i", "i": "i", "u": "u"}
+
+
+def _hash_column(digest: Any, column: np.ndarray, scheme: int = FINGERPRINT_SCHEME) -> None:
+    """
+    Feed one column: numbers as bytes, anything else as chunked reprs.
+
+    Scheme 1 hashed every number as float64, so integers above 2**53 collided.
+    Scheme 2 hashes b/i/u columns losslessly, tagged with the dtype kind (not
+    its size: int32 and int64 with equal values agree); float columns keep the
+    scheme 1 bytes, so their fingerprints do not change.
+    """
+    kind = column.dtype.kind
+    if scheme >= 2 and kind in EXACT_INTEGER_TYPES:
+        digest.update(f"{INTEGER_TAGS[kind]}:{len(column)}".encode())
+        digest.update(np.ascontiguousarray(column.astype(EXACT_INTEGER_TYPES[kind])).tobytes())
+        return
+    digest.update(f"{kind in 'biuf'}{len(column)}".encode())
+    if kind in "biuf":
         numbers = column.astype(np.float64)
         # one bit pattern for every NaN
         digest.update(np.where(np.isnan(numbers), np.nan, numbers).tobytes())
@@ -537,11 +564,16 @@ def _hash_column(digest: Any, column: np.ndarray) -> None:
         digest.update(repr(column[start : start + HASH_CHUNK_ROWS].tolist()).encode())
 
 
-def _fingerprint(names: List[str], X_values: np.ndarray, y_values: np.ndarray) -> str:
+def _fingerprint(
+    names: List[str],
+    X_values: np.ndarray,
+    y_values: np.ndarray,
+    scheme: int = FINGERPRINT_SCHEME,
+) -> str:
     """SHA-256 hex digest of the feature names, feature values, and target values."""
     digest = hashlib.sha256(json.dumps(names).encode())
     for column in (*X_values.T, y_values):
-        _hash_column(digest, column)
+        _hash_column(digest, column, scheme)
     return digest.hexdigest()
 
 
@@ -937,6 +969,7 @@ class ShadowColumnsDropped(Exception):
 
 
 def _column_transformers(model: Any) -> Iterator[Any]:
+    """Fitted ColumnTransformers reached through Pipeline steps."""
     if isinstance(model, Pipeline):
         for _, step in model.steps:
             yield from _column_transformers(step)
@@ -944,31 +977,104 @@ def _column_transformers(model: Any) -> Iterator[Any]:
         yield model
 
 
-def _drops_shadows(name: str, model: Any, n_real: int, n_total: int) -> bool:
-    """True if a fitted ColumnTransformer inside `model` leaves a shadow column unused."""
-    shadows = set(range(n_real, n_total))
-    for transformer in _column_transformers(model):
-        # One that sees other columns than the model input is not about the shadows.
-        if getattr(transformer, "n_features_in_", None) != n_total:
-            continue
-        try:
-            indices = transformer._transformer_to_input_indices
-            used: set = set()
-            for step_name, step, _ in transformer.transformers:
-                if not (isinstance(step, str) and step == "drop"):
-                    used.update(indices[step_name])
-            if not (isinstance(transformer.remainder, str) and transformer.remainder == "drop"):
-                used.update(indices["remainder"])
-        except Exception:  # private scikit-learn attributes; cannot verify
-            warnings.warn(
-                f"Cannot verify that model '{name}' keeps the shadow columns.",
-                UserWarning,
-                stacklevel=2,
-            )
-            continue
-        if not shadows <= used:
-            return True
+def _is_string(value: Any, text: str) -> bool:
+    return isinstance(value, str) and value == text
+
+
+# Steps that return the columns they receive, one for one, in the same order.
+ONE_TO_ONE_SCALERS = (StandardScaler, MinMaxScaler, MaxAbsScaler, RobustScaler)
+
+
+def _keeps_columns(step: Any) -> bool:
+    """Whether a fitted Pipeline step is known to return its input columns one for one."""
+    if step is None or _is_string(step, "passthrough") or isinstance(step, ONE_TO_ONE_SCALERS):
+        return True
+    if isinstance(step, SimpleImputer):  # an all-NaN column may be dropped
+        return not step.add_indicator and len(step.get_feature_names_out()) == step.n_features_in_
     return False
+
+
+def _contains_column_transformer(estimator: Any) -> bool:
+    """Whether a ColumnTransformer sits among the estimator's parameters, at any depth."""
+    params = estimator.get_params(deep=True) if hasattr(estimator, "get_params") else {}
+    return any(isinstance(value, ColumnTransformer) for value in params.values())
+
+
+def _step_used(step: Any, columns: List[int]) -> set:
+    """The columns of `columns` a ColumnTransformer or FeatureUnion part uses."""
+    if _is_string(step, "drop"):
+        return set()
+    if _is_string(step, "passthrough"):
+        return set(columns)
+    return _kept_inputs(step, columns)
+
+
+def _pipeline_kept(pipeline: Pipeline, columns: List[int]) -> set:
+    """
+    The columns of a Pipeline's first step, narrowed by later steps that still see them.
+
+    A later step that is or contains a ColumnTransformer is mapped only while
+    every earlier step is known to keep the columns one for one; after any
+    other step it cannot be mapped, so the result is unknown (raises).
+    """
+    steps = [
+        step for _, step in pipeline.steps
+        if step is not None and not _is_string(step, "passthrough")
+    ]
+    if not steps:
+        return set(columns)
+    kept = _kept_inputs(steps[0], columns)
+    preserved = _keeps_columns(steps[0])
+    for later in steps[1:]:
+        if preserved:
+            kept &= _kept_inputs(later, columns)
+        elif any(_column_transformers(later)):
+            raise ValueError("a ColumnTransformer follows a step that may change the columns")
+        preserved = preserved and _keeps_columns(later)
+    return kept
+
+
+def _kept_inputs(estimator: Any, columns: List[int]) -> set:
+    """
+    The model-input columns `estimator` uses, given that it receives `columns`.
+
+    Looks into ColumnTransformer branches, FeatureUnion parts, fitted feature
+    selectors, and a Pipeline's steps (see _pipeline_kept). Any other estimator
+    is assumed to use every column, unless it wraps a ColumnTransformer
+    (a meta-estimator), which cannot be followed. Raises when the columns
+    cannot be determined; the caller treats that as unverifiable.
+    """
+    if isinstance(estimator, Pipeline):
+        return _pipeline_kept(estimator, columns)
+    if isinstance(estimator, FeatureUnion):
+        return set().union(*(_step_used(part, columns) for _, part in estimator.transformer_list))
+    if isinstance(estimator, SelectorMixin):
+        return {columns[i] for i in estimator.get_support(indices=True)}
+    if not isinstance(estimator, ColumnTransformer):
+        if _contains_column_transformer(estimator):
+            raise ValueError("a meta-estimator wraps a ColumnTransformer")
+        return set(columns)
+    if estimator.n_features_in_ != len(columns):
+        raise ValueError("transformer width differs from its input")
+    indices = estimator._transformer_to_input_indices
+    used: set = set()
+    for name, step, _ in estimator.transformers_:
+        branch = [columns[i] for i in indices[name]]
+        if branch:
+            used |= _step_used(step, branch)
+    return used
+
+
+SHADOWS_KEPT, SHADOWS_DROPPED, SHADOWS_UNVERIFIED = "kept", "dropped", "unverified"
+
+
+def _shadow_status(model: Any, n_real: int, n_total: int) -> str:
+    """Whether the fitted model provably uses every shadow column."""
+    try:
+        used = _kept_inputs(model, list(range(n_total)))
+    except Exception:  # private scikit-learn attributes; cannot verify
+        return SHADOWS_UNVERIFIED
+    return SHADOWS_KEPT if set(range(n_real, n_total)) <= used else SHADOWS_DROPPED
 
 
 def _fit_model(
@@ -1359,6 +1465,8 @@ class FeatureRanker:
         self.__dict__.setdefault("train_shuffle_groups_sha256_", None)
         # ... and those pickled by 1.14 lack the 1.15 shuffle mode.
         self.__dict__.setdefault("shuffle", "rows")
+        # ... and those pickled by 1.16 were fingerprinted with scheme 1.
+        self.__dict__.setdefault("fingerprint_scheme_", 1)
         if "model_families_" not in self.__dict__:
             self.model_families_ = (
                 _registry_families() if self.user_models is None else {}
@@ -1492,6 +1600,7 @@ class FeatureRanker:
             self.train_weight_ = weights
         self.train_weighted_ = weights is not None
         self.train_data_sha256_ = train_data_sha256
+        self.fingerprint_scheme_ = FINGERPRINT_SCHEME
         self.train_weights_sha256_ = _weights_fingerprint(weights)
         self.train_shuffle_groups_sha256_ = _labels_fingerprint(shuffle_labels)
         self.label_encoder = label_encoder
@@ -1572,6 +1681,11 @@ class FeatureRanker:
                 if shuffle_labels is not None
                 else np.sort(sampler.choice(len(X_values), size, replace=False))
             )
+            if weights is not None and weights[rows].sum() == 0:
+                raise ValueError(
+                    "[!] The rows drawn by max_samples all have zero sample_weight, "
+                    "so nothing can be scored; raise max_samples or give those rows weight."
+                )
         scored_labels = _shuffle_labels(
             self.shuffle,
             None if shuffle_labels is None else shuffle_labels[rows],
@@ -1580,7 +1694,10 @@ class FeatureRanker:
         run = {
             "task": self.task,
             "group": self.group,
-            "data_sha256": _fingerprint(self.feature_names_, raw_values, y_values),
+            "fingerprint_scheme": self.fingerprint_scheme_,
+            "data_sha256": _fingerprint(
+                self.feature_names_, raw_values, y_values, self.fingerprint_scheme_
+            ),
             "train_data_sha256": self.train_data_sha256_,
         }
         for key, value in (
@@ -1638,18 +1755,20 @@ class FeatureRanker:
         if self.shadows:
             n_real = len(self.feature_names_)
             for name, model in self.trained_models.items():
-                if _drops_shadows(name, model, n_real, 2 * n_real):
-                    no_shadows.add(name)
-                    shadow_failures.append(
-                        _failure(
-                            name,
-                            "shadows",
-                            ShadowColumnsDropped(
-                                "A ColumnTransformer in the model does not use every "
-                                "shadow column, so it is left out of the shadow evidence."
-                            ),
-                        )
-                    )
+                status = _shadow_status(model, n_real, 2 * n_real)
+                if status == SHADOWS_KEPT:
+                    continue
+                no_shadows.add(name)
+                reason = (
+                    "A ColumnTransformer in the model does not use every shadow "
+                    "column, so it is left out of the shadow evidence."
+                    if status == SHADOWS_DROPPED
+                    else "Which columns the model uses could not be verified, so "
+                    "it is left out of the shadow evidence."
+                )
+                shadow_failures.append(
+                    _failure(name, "shadows", ShadowColumnsDropped(reason))
+                )
         jobs = [
             (name, model, scorer, X_models[rows], y_scored, groups, n_repeats,
              random_state, baseline_score, self.model_families_.get(name, name),
@@ -1870,6 +1989,7 @@ class FeatureRanker:
         run: Dict[str, Any] = {
             "task": self.task,
             "group": self.group,
+            "fingerprint_scheme": FINGERPRINT_SCHEME,
             "data_sha256": _fingerprint(names, X_values, y_values),
             "cv": _cv_record(cv),
             "splits_sha256": _splits_fingerprint(splits),

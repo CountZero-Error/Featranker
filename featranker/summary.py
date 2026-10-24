@@ -175,33 +175,65 @@ def _correlated_groups(report: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 
 def _ablation_curve(report: Dict[str, Any]) -> List[Dict[str, Any]]:
-    rows = [row for row in report.get("ablation", {}).get("curve", [])
-            if row["median_score"] is not None]
+    block = report.get("ablation", {})
+    # The paired median compares one set of models at every k.
+    paired = bool(block.get("paired_models"))
+    # Blocks from 1.16 have no paired_models key at all.
+    predates = "paired_models" not in block
+    key = "paired_median_score" if paired else "median_score"
+    rows = [row for row in block.get("curve", []) if row.get(key) is not None]
     if not rows:
         return []
     # max keeps the first of equal scores, and the curve is in ascending k.
-    best = max(rows, key=lambda row: row["median_score"])
+    best = max(rows, key=lambda row: row[key])
     last = rows[-1]
     at_last = (
         "the largest scored k" if best is last
-        else f"{last['median_score']:.3g} at the largest scored k, {last['k']}"
+        else f"{last[key]:.3g} at the largest scored k, {last['k']}"
     )
+    if paired:
+        basis = f"median over the {len(block['paired_models'])} model(s) scored at every k (paired)"
+    elif predates:
+        basis = "median score (this ablation block predates the paired curve)"
+    else:
+        basis = "unpaired median over the models scored at each k (no model scored at every k)"
     return [_finding(
         "ablation_curve", "info",
-        f"Refit on the top-k groups, the median score was highest at k={best['k']} "
-        f"({best['median_score']:.3g}), {at_last}. "
+        f"Refit on the top-k groups, the {basis} was highest at k={best['k']} "
+        f"({best[key]:.3g}), {at_last}. "
         "The curve is descriptive; it is scored on the evaluation data unless another "
         "set was passed to ablate().",
         {
-            "best_k": best["k"], "best_median_score": best["median_score"],
-            "max_k": last["k"], "max_k_median_score": last["median_score"],
+            "best_k": best["k"], "best_median_score": best[key],
+            "max_k": last["k"], "max_k_median_score": last[key],
         },
+    )]
+
+
+def _ablation_cohort_changed(report: Dict[str, Any]) -> List[Dict[str, Any]]:
+    rows = [
+        {
+            "k": row["k"],
+            "n_models_scored": sum(score is not None for score in row["scores"].values()),
+            "models": [name for name, score in row["scores"].items() if score is not None],
+        }
+        for row in report.get("ablation", {}).get("curve", [])
+        if "scores" in row
+    ]
+    if len({frozenset(row["models"]) for row in rows}) < 2:
+        return []
+    return [_finding(
+        "ablation_cohort_changed", "warning",
+        "The set of scored models changes across k in the ablation curve, so the "
+        "unpaired median_score compares different model sets; read paired_median_score.",
+        {"rows": rows},
     )]
 
 
 RULES = (
     _gate_off, _empty_consensus, _failures, _few_families, _tied_groups,
     _within_noise, _below_shadow, _overfit, _correlated_groups, _ablation_curve,
+    _ablation_cohort_changed,
 )
 
 

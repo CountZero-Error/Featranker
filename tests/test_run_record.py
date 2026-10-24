@@ -55,7 +55,7 @@ def test_single_split_run_block():
     run = single()["run"]
 
     assert run["task"] == "reg" and run["group"] == "all"
-    assert list(run) == ["task", "group", "data_sha256", "train_data_sha256"]
+    assert list(run) == ["task", "group", "fingerprint_scheme", "data_sha256", "train_data_sha256"]
     assert run["data_sha256"] != run["train_data_sha256"]
     for key in ("data_sha256", "train_data_sha256"):
         assert len(run[key]) == 64 and set(run[key]) <= set("0123456789abcdef")
@@ -66,7 +66,7 @@ def test_resampled_run_block_and_per_split_run():
     report = resampled()
 
     run = report["run"]
-    assert list(run) == ["task", "group", "data_sha256", "cv", "splits_sha256"]
+    assert list(run) == ["task", "group", "fingerprint_scheme", "data_sha256", "cv", "splits_sha256"]
     assert run["cv"] == 3
     assert "train_data_sha256" not in run
     assert len(run["splits_sha256"]) == 64

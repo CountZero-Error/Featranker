@@ -58,6 +58,7 @@ context: |
     1.14 multiple-scorers: secondary scorers on the same permuted copies
     1.15 dependent-shuffling: shuffle="within_groups" | "circular"
     1.16 ablation-curve: ablate() top-k refit curve, CLI --drop/--ablate
+    1.17 trust-fixes: nested shadow-drop check, sklearn>=1.5, fingerprint scheme 2, ablation provenance and paired curve, zero-weight subsample error
   Known limitations (found 2026-10-19/20 in reviews and the benchmark,
   updated 2026-10-22 after 1.6-1.15; maintainer decides):
     Method and statistics
