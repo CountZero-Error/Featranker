@@ -178,13 +178,29 @@ def _constant_within_groups(report: Dict[str, Any]) -> List[Dict[str, Any]]:
     groups = report.get("constant_within_groups")
     if not groups:
         return []
+    advice = "Use shuffle='rows' to measure group-level effects."
+    if report.get("evaluation_mode") != "resampled":
+        return [_finding(
+            "constant_within_groups", "warning",
+            f"{', '.join(groups)} are constant within every shuffle group, so "
+            "shuffle='within_groups' cannot move them and their importance is zero by "
+            f"construction; it says nothing about their effect. {advice}",
+            {"groups": list(groups)},
+        )]
+    # A group in the union may vary in other splits, where its importance is not zero.
+    splits = {
+        group: [e["split"] for e in report["splits"]
+                if group in e["report"].get("constant_within_groups", [])]
+        for group in groups
+    }
+    listed = "; ".join(f"{group} in split(s) {', '.join(map(str, at))}"
+                       for group, at in splits.items())
     return [_finding(
         "constant_within_groups", "warning",
-        f"{', '.join(groups)} are constant within every shuffle group, so "
-        "shuffle='within_groups' cannot move them and their importance is zero by "
-        "construction; it says nothing about their effect. Use shuffle='rows' to "
-        "measure group-level effects.",
-        {"groups": list(groups)},
+        f"Constant within shuffle groups in at least one split: {listed}. "
+        "shuffle='within_groups' cannot move them there, so their importance was zero "
+        f"by construction in those splits; it says nothing about their effect. {advice}",
+        {"groups": list(groups), "splits": splits},
     )]
 
 

@@ -464,7 +464,9 @@ def test_summary_of_a_resampled_report_warns_about_constant_groups():
 
     assert len(findings) == 1
     assert findings[0]["severity"] == "warning"
-    assert findings[0]["evidence"] == {"groups": ["patient_x"]}
+    assert findings[0]["evidence"] == {
+        "groups": ["patient_x"], "splits": {"patient_x": [0, 1, 2]},
+    }
 
 
 # --- documented ablation example -------------------------------------------

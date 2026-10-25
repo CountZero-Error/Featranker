@@ -3,7 +3,7 @@ import inspect
 import numpy as np
 import pytest
 from sklearn.linear_model import LogisticRegression, Ridge
-from sklearn.metrics import average_precision_score, make_scorer, mean_absolute_error
+from sklearn.metrics import average_precision_score, make_scorer, max_error, mean_absolute_error
 
 import featranker.importance as importance_module
 from featranker import FeatureRanker
@@ -239,7 +239,11 @@ class DropsUnnamedWeights:
 
 
 def test_weights_skip_scorers_whose_function_takes_no_weights(monkeypatch, trust_sharing):
-    scoring = ("r2", "max_error", make_scorer(kw_error), "neg_mean_absolute_error")
+    # "max_error" was a scorer name until scikit-learn 1.9; its score function has no sample_weight.
+    scoring = (
+        "r2", make_scorer(max_error, greater_is_better=False), make_scorer(kw_error),
+        "neg_mean_absolute_error",
+    )
     kwargs = {"scoring": scoring, "sample_weight": W[EVAL]}
     expected = dict(without_cache(monkeypatch, **kwargs))
     with monkeypatch.context() as patch:

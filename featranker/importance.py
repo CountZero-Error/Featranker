@@ -15,7 +15,7 @@ import re
 import warnings
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterator, List, Literal, Optional, Sequence, Union
+from typing import Any, Callable, Dict, List, Literal, Optional, Sequence, Union
 
 import numpy as np
 import sklearn
@@ -44,9 +44,18 @@ from tqdm import tqdm
 try:
     # Private scikit-learn API (permutation_importance uses it too). If it
     # moves, _MultimetricScorer is None and scorers are called one by one.
-    from sklearn.metrics._scorer import _BaseScorer, _MultimetricScorer
+    from sklearn.metrics import _scorer as _sklearn_scorer
+    from sklearn.metrics._scorer import _MultimetricScorer
+
+    # scikit-learn's own scorer classes, whose _score is all their __call__ does.
+    _NATIVE_SCORERS = tuple(
+        cls
+        for name in ("_Scorer", "_PredictScorer", "_ProbaScorer", "_ThresholdScorer")
+        if (cls := getattr(_sklearn_scorer, name, None)) is not None
+    )
 except ImportError:  # pragma: no cover
-    _BaseScorer = _MultimetricScorer = None
+    _MultimetricScorer = None
+    _NATIVE_SCORERS = ()
 
 from .evidence import _model_X, correlation_evidence, shap_evidence
 from .report import Report
@@ -358,7 +367,7 @@ def _with_one_hot(pipeline: Any, columns: List[int], max_categories: Optional[in
 
     With `max_categories`, each column keeps at most that many one-hot columns
     (the infrequent levels share one). Unseen levels join it only for a column
-    with more than `max_categories` levels; otherwise they are all zeros.
+    with at least `max_categories` levels; with fewer they are all zeros.
     """
     *numeric_steps, (_, estimator) = pipeline.steps
     capped = (
@@ -971,12 +980,14 @@ def _sample_whole_groups(rng: np.random.Generator, labels: np.ndarray, size: int
     return np.flatnonzero(np.isin(inverse, chosen))
 
 
-def _labels_fingerprint(labels: Optional[np.ndarray]) -> Optional[str]:
-    """SHA-256 hex digest of the shuffle group labels, or None without labels."""
+def _labels_fingerprint(
+    labels: Optional[np.ndarray], scheme: int = FINGERPRINT_SCHEME
+) -> Optional[str]:
+    """SHA-256 hex digest of the shuffle group labels (or rows), or None without labels."""
     if labels is None:
         return None
     digest = hashlib.sha256()
-    _hash_column(digest, labels)
+    _hash_column(digest, labels, scheme)
     return digest.hexdigest()
 
 
@@ -1035,15 +1046,6 @@ class ShadowColumnsDropped(Exception):
     """A model's ColumnTransformer ignores some shadow columns."""
 
 
-def _column_transformers(model: Any) -> Iterator[Any]:
-    """Fitted ColumnTransformers reached through Pipeline steps."""
-    if isinstance(model, Pipeline):
-        for _, step in model.steps:
-            yield from _column_transformers(step)
-    elif isinstance(model, ColumnTransformer):
-        yield model
-
-
 def _is_string(value: Any, text: str) -> bool:
     return isinstance(value, str) and value == text
 
@@ -1061,10 +1063,12 @@ def _keeps_columns(step: Any) -> bool:
     return False
 
 
-def _contains_column_transformer(estimator: Any) -> bool:
-    """Whether a ColumnTransformer sits among the estimator's parameters, at any depth."""
-    params = estimator.get_params(deep=True) if hasattr(estimator, "get_params") else {}
-    return any(isinstance(value, ColumnTransformer) for value in params.values())
+def _is_column_aware(estimator: Any) -> bool:
+    """Whether the estimator is, or contains at any depth, a selector, FeatureUnion or ColumnTransformer."""
+    parts = [estimator]
+    if hasattr(estimator, "get_params"):
+        parts.extend(estimator.get_params(deep=True).values())
+    return any(isinstance(part, (SelectorMixin, FeatureUnion, ColumnTransformer)) for part in parts)
 
 
 def _step_used(step: Any, columns: List[int]) -> set:
@@ -1080,9 +1084,9 @@ def _pipeline_kept(pipeline: Pipeline, columns: List[int]) -> set:
     """
     The columns of a Pipeline's first step, narrowed by later steps that still see them.
 
-    A later step that is or contains a ColumnTransformer is mapped only while
-    every earlier step is known to keep the columns one for one; after any
-    other step it cannot be mapped, so the result is unknown (raises).
+    A later step that is or contains a selector, FeatureUnion or ColumnTransformer
+    is mapped only while every earlier step is known to keep the columns one for
+    one; after any other step it cannot be mapped, so the result is unknown (raises).
     """
     steps = [
         step for _, step in pipeline.steps
@@ -1095,8 +1099,8 @@ def _pipeline_kept(pipeline: Pipeline, columns: List[int]) -> set:
     for later in steps[1:]:
         if preserved:
             kept &= _kept_inputs(later, columns)
-        elif any(_column_transformers(later)):
-            raise ValueError("a ColumnTransformer follows a step that may change the columns")
+        elif _is_column_aware(later):
+            raise ValueError("a column-aware step follows a step that may change the columns")
         preserved = preserved and _keeps_columns(later)
     return kept
 
@@ -1107,8 +1111,8 @@ def _kept_inputs(estimator: Any, columns: List[int]) -> set:
 
     Looks into ColumnTransformer branches, FeatureUnion parts, fitted feature
     selectors, and a Pipeline's steps (see _pipeline_kept). Any other estimator
-    is assumed to use every column, unless it wraps a ColumnTransformer
-    (a meta-estimator), which cannot be followed. Raises when the columns
+    is assumed to use every column, unless it wraps a selector, FeatureUnion or
+    ColumnTransformer (a meta-estimator), which cannot be followed. Raises when the columns
     cannot be determined; the caller treats that as unverifiable.
     """
     if isinstance(estimator, Pipeline):
@@ -1118,8 +1122,8 @@ def _kept_inputs(estimator: Any, columns: List[int]) -> set:
     if isinstance(estimator, SelectorMixin):
         return {columns[i] for i in estimator.get_support(indices=True)}
     if not isinstance(estimator, ColumnTransformer):
-        if _contains_column_transformer(estimator):
-            raise ValueError("a meta-estimator wraps a ColumnTransformer")
+        if _is_column_aware(estimator):
+            raise ValueError("a meta-estimator wraps a selector, FeatureUnion or ColumnTransformer")
         return set(columns)
     if estimator.n_features_in_ != len(columns):
         raise ValueError("transformer width differs from its input")
@@ -1186,10 +1190,12 @@ def _share_key(scorer: Any, is_regression: bool, weighted: bool) -> Any:
     What scorers must agree on to share one prediction: the positive label they
     resolve (it picks the probability column or flips a decision function), or
     _DIRECT for a scorer scikit-learn's multi-metric scorer cannot be trusted
-    with. Under weights it passes sample_weight only to score functions that
-    name the parameter, so others are called directly.
+    with (anything but an instance of one of scikit-learn's own scorer classes).
+    Under weights it passes sample_weight only to score functions that name the
+    parameter, so others are called directly.
     """
-    if _BaseScorer is None or not isinstance(scorer, _BaseScorer):
+    # Exact type: a subclass may override __call__, which the multi-metric path skips.
+    if type(scorer) not in _NATIVE_SCORERS:
         return _DIRECT
     try:
         if weighted and "sample_weight" not in inspect.signature(scorer._score_func).parameters:
@@ -1566,8 +1572,8 @@ class FeatureRanker:
                 linear models one-hot encode at most this many levels per
                 categorical column: the most frequent levels, with the rest
                 sharing one infrequent column. A level unseen in training
-                joins that column only when the column has more than
-                max_categories levels; otherwise it is all zeros, as without
+                joins that column only when the column has at least
+                max_categories levels; with fewer it is all zeros, as without
                 the cap.
                 Bounds the dense one-hot matrix, which grows with the number
                 of levels; trees and custom models are unaffected.
@@ -1977,7 +1983,10 @@ class FeatureRanker:
             ("train_weights_sha256", self.train_weights_sha256_),
             ("weights_sha256", _weights_fingerprint(weights)),
             ("train_shuffle_groups_sha256", self.train_shuffle_groups_sha256_),
-            ("shuffle_groups_sha256", _labels_fingerprint(shuffle_labels)),
+            (
+                "shuffle_groups_sha256",
+                _labels_fingerprint(shuffle_labels, self.fingerprint_scheme_),
+            ),
             ("max_categories", self.max_categories),
             ("n_train_rows", self.train_n_rows_),
         ):
@@ -2036,8 +2045,8 @@ class FeatureRanker:
                     continue
                 no_shadows.add(name)
                 reason = (
-                    "A ColumnTransformer in the model does not use every shadow "
-                    "column, so it is left out of the shadow evidence."
+                    "The model does not use every shadow column, so it is left out "
+                    "of the shadow evidence."
                     if status == SHADOWS_DROPPED
                     else "Which columns the model uses could not be verified, so "
                     "it is left out of the shadow evidence."

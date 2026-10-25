@@ -53,15 +53,17 @@ def _spearman_matrix(X: np.ndarray) -> np.ndarray:
     # themselves only a block is extra. rankdata(axis=0) returns Fortran order,
     # and so does the preallocated array: the column sums then run in the same
     # order as on a whole matrix, which keeps the values identical to ranking at once.
-    blocks = _column_blocks(X.shape[1], X.shape[0])
-    if len(blocks) == 1:
-        centered = rankdata(X, axis=0)
-    else:
-        centered = np.empty(X.shape, order="F")
-        for start, stop in blocks:
+    blocks = _column_blocks(X.shape[1], X.shape[0]) or [(0, 0)]
+    first = rankdata(X[:, blocks[0][0] : blocks[0][1]], axis=0)
+    # The buffers take the dtype rankdata returns (SciPy keeps float32 ranks only
+    # from some versions on), so the values equal ranking the whole matrix at once.
+    centered = first if len(blocks) == 1 else np.empty(X.shape, dtype=first.dtype, order="F")
+    if len(blocks) > 1:
+        centered[:, : blocks[0][1]] = first
+        for start, stop in blocks[1:]:
             centered[:, start:stop] = rankdata(X[:, start:stop], axis=0)
     centered -= (X.shape[0] + 1) / 2
-    norm = np.empty(X.shape[1])
+    norm = np.empty(X.shape[1], dtype=centered.dtype)
     for start, stop in blocks:
         norm[start:stop] = (centered[:, start:stop] ** 2).sum(axis=0)
     norm = np.sqrt(norm)

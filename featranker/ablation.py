@@ -125,8 +125,11 @@ def _prepare(
             raise ValueError("[!] X and y are not the training data this report was ranked from.")
         # The run block leaves the weights key out when there were none.
         _check_weights(weights[0], len(X_values), run.get("train_weights_sha256"), "sample_weight")
+    # No version before 1.21 could subsample training rows, so a missing hash means every row;
+    # the ranker must have fit on the same rows (None being every row) in both directions.
     expected_rows = run.get("train_rows_sha256")
-    if expected_rows is not None and _labels_fingerprint(ranker.train_rows_) != expected_rows:
+    actual_rows = None if ranker.train_rows_ is None else _labels_fingerprint(ranker.train_rows_)
+    if actual_rows != expected_rows:
         raise ValueError(
             "[!] This ranker was not fit on the training rows this report was ranked from "
             "(fit it with the same max_samples and random_state)."

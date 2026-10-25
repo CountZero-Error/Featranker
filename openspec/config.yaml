@@ -63,6 +63,7 @@ context: |
     1.19 scorer-cache: shared predictions across scorers
     1.20 release-ci: installed-wheel smoke test in CI and release
     1.21 memory-limits: max_categories, fit max_samples, lower-peak shadows and Spearman
+    1.21.1 prepush-fixes: Signal pre-push review fixes
   Known limitations (found 2026-10-19/20 in reviews and the benchmark,
   updated 2026-10-22 after 1.6-1.15; maintainer decides):
     Method and statistics

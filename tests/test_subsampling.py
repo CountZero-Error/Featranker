@@ -244,7 +244,9 @@ def test_subsample_missing_a_class_fails_with_a_clear_error():
     ranker = FeatureRanker("clf", models={"lr": LogisticRegression()}, verbose=False)
     ranker.fit(X[TRAIN], y_train, feature_names=NAMES)
 
-    with pytest.raises(RuntimeError, match="No models ranked.*Only one class present"):
+    # scikit-learn 1.9 returns nan for a one-class roc_auc instead of raising.
+    message = "No models ranked.*(Only one class present|baseline score must be finite)"
+    with pytest.raises(RuntimeError, match=message):
         ranker.rank_features(
             X[EVAL], y_eval, scoring="roc_auc", n_repeats=2, random_state=seed,
             max_samples=10,

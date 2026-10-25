@@ -18,6 +18,7 @@ import importlib.metadata
 import importlib.resources
 import importlib.util
 import json
+import math
 import os
 import re
 import subprocess
@@ -82,8 +83,14 @@ def check_api(extras: bool) -> None:
     assert report["consensus"], f"empty consensus; failures: {report['failures']}"
     assert report["consensus"][0]["feature_group"] == "strong", report["consensus"][0]
     assert isinstance(summarize(report), list)
-    curve = ranker.ablate(X[train], y[train], X[val], y[val], report, ks=[1, 2])["ablation"]["curve"]
+    ablation = ranker.ablate(X[train], y[train], X[val], y[val], report, ks=[1, 2])["ablation"]
+    curve = ablation["curve"]
     assert len(curve) == 2, curve
+    for row in curve:
+        score = row["paired_median_score"]
+        assert row["n_models_scored"] > 0 and score is not None and math.isfinite(score), (
+            f"ablation row k={row['k']} has no scored model; failures: {ablation['failures']}"
+        )
 
     from sklearn.linear_model import Ridge
     from sklearn.pipeline import Pipeline

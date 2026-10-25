@@ -872,10 +872,21 @@ def test_ablate_accepts_a_ranker_pickled_without_train_rows():
     assert ablated["ablation"]["curve"][0]["scores"]["ridge"] is not None
 
 
-def test_ablate_accepts_a_report_without_train_rows_sha256():
+def test_ablate_refuses_a_subsampled_ranker_for_a_report_from_before_the_row_hash():
     ranker = recording_ranker().fit(X, Y, feature_names=NAMES, max_samples=100, random_state=6)
     report = rank(ranker)
     del report["run"]["train_rows_sha256"]
+    del report["run"]["fingerprint_scheme"]  # float columns hash the same in both schemes
+
+    with pytest.raises(ValueError, match="training rows"):
+        ranker.ablate(X, Y, X[300:], Y[300:], report, ks=[1])
+
+
+def test_ablate_accepts_a_full_ranker_for_a_report_from_before_the_row_hash():
+    ranker = recording_ranker().fit(X, Y, feature_names=NAMES)
+    report = rank(ranker)
+    assert "train_rows_sha256" not in report["run"]
+    del report["run"]["fingerprint_scheme"]
 
     ranker.ablate(X, Y, X[300:], Y[300:], report, ks=[1])
 
