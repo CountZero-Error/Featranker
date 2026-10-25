@@ -4,7 +4,7 @@
 TBD - created by archiving change memory-limits. Update Purpose after archive.
 ## Requirements
 ### Requirement: Category cap
-`FeatureRanker(max_categories=None)` SHALL accept None or an int of at least 2; other values SHALL raise `ValueError`. When set, built-in linear models SHALL one-hot code at most that many levels per categorical column, grouping the rest as infrequent; an unseen level SHALL share the infrequent column only for a column with more than that many levels, and otherwise be all zeros. When None, pipelines and reports SHALL be unchanged. `ConsensusSelector` and the CLI (`--max-categories`) SHALL pass it through.
+`FeatureRanker(max_categories=None)` SHALL accept None or an int of at least 2; other values SHALL raise `ValueError`. When set, built-in linear models SHALL one-hot code at most that many levels per categorical column, grouping the rest as infrequent; an unseen level SHALL share the infrequent column only for a column with at least that many levels, and otherwise be all zeros. When None, pipelines and reports SHALL be unchanged. `ConsensusSelector` and the CLI (`--max-categories`) SHALL pass it through.
 
 #### Scenario: High-cardinality column capped
 - **WHEN** a categorical column has 1000 levels and `max_categories=20`
@@ -13,6 +13,10 @@ TBD - created by archiving change memory-limits. Update Purpose after archive.
 #### Scenario: Default unchanged
 - **WHEN** `max_categories` is not given
 - **THEN** reports equal those of the previous version
+
+#### Scenario: Unseen level at equality
+- **WHEN** a categorical column has exactly `max_categories` levels and an unseen level is encoded
+- **THEN** it falls into the infrequent column
 
 ### Requirement: Lower-peak shadows and correlations
 Shadow columns and Spearman correlations SHALL be computed with fewer full-size temporaries and SHALL produce values identical (bit for bit) to the previous version. The peak memory of the Spearman step SHALL NOT exceed the previous version's at any width.

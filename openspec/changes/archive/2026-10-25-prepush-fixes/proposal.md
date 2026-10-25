@@ -37,6 +37,7 @@ Report schema: unchanged except the resampled summary message and evidence.
 - `prepush-fixes`: the corrections above.
 
 ### Modified Capabilities
+- `memory-limits`: the category-cap boundary is "at least max_categories levels".
 
 ## Impact
 
