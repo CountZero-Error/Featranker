@@ -871,7 +871,7 @@ def _build_stability(
         )
         return []
 
-    rows = []
+    rows: List[Dict[str, Any]] = []
     for name, ranks in split_ranks.items():
         ranked = [rank for rank in ranks if rank is not None]
         rows.append(
@@ -974,7 +974,7 @@ def _shuffle_labels(
 def _sample_whole_groups(rng: np.random.Generator, labels: np.ndarray, size: int) -> np.ndarray:
     """Sorted rows of whole groups, drawn in random order until `size` rows are covered."""
     _, inverse = np.unique(labels, return_inverse=True)
-    order = rng.permutation(inverse.max() + 1)
+    order = rng.permutation(int(np.max(inverse)) + 1)
     covered = np.cumsum(np.bincount(inverse)[order])
     chosen = order[: np.searchsorted(covered, size) + 1]
     return np.flatnonzero(np.isin(inverse, chosen))
