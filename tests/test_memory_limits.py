@@ -391,7 +391,7 @@ def test_ablation_refits_with_the_same_cap():
 
 def test_ranker_pickled_before_max_categories_loads_with_none():
     ranker = cat_ranker()
-    state = ranker.__getstate__()
+    state = dict(ranker.__dict__)  # object.__getstate__ is 3.11+
     del state["max_categories"]
     loaded = FeatureRanker.__new__(FeatureRanker)
     loaded.__setstate__(state)
@@ -711,7 +711,7 @@ def test_fit_resets_the_subsample_when_refit_without_it():
 
 def test_ranker_pickled_before_train_subsample_loads():
     ranker = recording_ranker().fit(X, Y, feature_names=NAMES)
-    state = ranker.__getstate__()
+    state = dict(ranker.__dict__)  # object.__getstate__ is 3.11+
     for key in ("train_n_rows_", "train_rows_"):
         state.pop(key, None)
     loaded = FeatureRanker.__new__(FeatureRanker)
@@ -861,7 +861,7 @@ def test_ablate_refuses_a_ranker_refit_on_other_rows():
 def test_ablate_accepts_a_ranker_pickled_without_train_rows():
     ranker = recording_ranker().fit(X, Y, feature_names=NAMES)
     report = rank(ranker)
-    state = ranker.__getstate__()
+    state = dict(ranker.__dict__)  # object.__getstate__ is 3.11+
     for key in ("train_n_rows_", "train_rows_"):
         state.pop(key)
     loaded = FeatureRanker.__new__(FeatureRanker)
