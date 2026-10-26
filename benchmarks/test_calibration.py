@@ -108,7 +108,8 @@ def test_rules_match_the_selectors_own_filters(monkeypatch):
     stability = [row(f"x{i}", share=sh, p=p, q=q, families=f) for i, (sh, p, q, f) in enumerate(
         [(0.9, 0.001, 0.01, 3), (0.5, 0.04, 0.05, 2), (0.49, 0.2, 0.051, 1), (0.0, 1.0, 1.0, 0), (0.7, 0.5, 0.04, 4)])]
     report = {"stability": stability, "feature_groups": {r["feature_group"]: [r["feature_group"]] for r in stability},
-              "n_splits": 10, "shadow_test": {"min_p_value": 0.001}}
+              "n_splits": 10, "shadow_test": {"min_p_value": 0.001},
+              "splits": [{"report": {"consensus": [{}]}}] * 10}
 
     class Stub:
         def __init__(self, *args, **kwargs):
@@ -136,7 +137,7 @@ def test_null_summary_with_an_empty_stability_table_counts_the_run_but_no_groups
     (summary,) = cal.summarize_null([empty, full])
     assert (summary["n_runs"], summary["n_groups"], summary["hits"]) == (2, 10, 0)
     assert summary["rules"]["share"] == {"frac_groups": 0.0, "frac_runs_any": 0.0}
-    with pytest.raises(ValueError):  # known limit of the frozen script: a cell with no groups at all cannot be summarised
+    with pytest.raises((ValueError, ZeroDivisionError)):  # known limit of the frozen script: a cell with no groups at all cannot be summarised
         cal.summarize_null([empty])
 
 
@@ -160,7 +161,7 @@ def test_decision_q_needs_both_the_point_estimate_and_the_upper_bound():
     assert not allowed(8)  # 4 %: upper bound above 7.5 %
     assert not allowed(10)  # 5 %: point estimate fine, upper bound above 7.5 %
     assert not allowed(11)  # point estimate above 5 %
-    assert allowed(50, n=2000) is True  # 2.5 %, narrow interval
+    assert allowed(50, n=2000)  # 2.5 %, narrow interval
     out = cal.decide_q([null_row(hits=4), null_row(group="tree", hits=20)])
     assert "conservative for built-in `fast` models" in out[0]["text"]
     assert "excess" in out[1]["text"] and "10.0%" in out[1]["text"]

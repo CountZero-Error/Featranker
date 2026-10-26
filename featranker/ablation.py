@@ -8,11 +8,13 @@ import warnings
 from typing import Any, Dict, List, Optional, Sequence
 
 import numpy as np
+import sklearn
 
 from .importance import (
     FINGERPRINT_SCHEME,
     FeatureRanker,
     _fingerprint,
+    _json_params,
     _labels_fingerprint,
     _resolve_scorer,
     _validate_X,
@@ -77,6 +79,36 @@ def _voters(ranker: FeatureRanker, report: Dict[str, Any]) -> List[str]:
     if unknown:
         raise ValueError(
             f"[!] The report's model '{unknown[0]}' is not one of the ranker's models."
+        )
+    recorded_version = (report.get("provenance") or {}).get("scikit-learn")
+    different_version = recorded_version is not None and recorded_version != sklearn.__version__
+    changed: List[str] = []
+    for name in voters:
+        recorded = report["models"][name].get("params")  # older reports have none
+        model = ranker.trained_models.get(name)
+        if recorded is None or model is None:
+            continue
+        current = _json_params(model)
+        if different_version:
+            # Parameter names differ between scikit-learn versions: compare the shared ones.
+            shared = recorded.keys() & current.keys()
+            recorded, current = ({k: p[k] for k in shared} for p in (recorded, current))
+        if current == recorded:
+            continue
+        if not different_version:
+            raise ValueError(
+                f"[!] The ranker's model '{name}' has other parameters than the report's; "
+                "use the ranker the report was made with."
+            )
+        changed.append(name)
+    if changed:
+        # Another scikit-learn version may change defaults, so this cannot be told from a real change.
+        warnings.warn(
+            f"The report was made with scikit-learn {recorded_version}, this is "
+            f"{sklearn.__version__}, and the parameters both versions have differ for "
+            f"{', '.join(repr(n) for n in changed)}; the ablation assumes the same models.",
+            UserWarning,
+            stacklevel=4,
         )
     return voters
 

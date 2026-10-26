@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "featranker"
-version = "1.21.1"
+version = "1.21.2"
 description = "Rank feature importance across multiple ML models."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -60,7 +60,7 @@ include-package-data = true
 featranker = ["importance_config.yaml", "py.typed"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["tests", "benchmarks"]
 
 [tool.mypy]
 python_version = "3.10"

@@ -336,6 +336,7 @@ def test_resampled_report_has_shadow_test_block_for_cv5():
         "method": "binomial", "hit": "above_shadow_share > 0.5",
         "null_probability": 0.5, "correction": "benjamini-hochberg",
         "n_trials": 5, "min_p_value": 0.03125, "calibrated": False,
+        "experimental": True,
     }
     assert all(TEST_KEYS <= set(row) for row in report["stability"])
     json.dumps(report, allow_nan=False)

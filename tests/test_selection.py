@@ -454,7 +454,7 @@ def test_empty_q_selection_warning_names_splits_and_min_p_value():
         s = selector(k=None, max_shadow_q=0.01, shadow_seed=0, cv=5).fit(X_DATA, Y_DATA)
 
     assert s.selected_groups_ == []
-    message = str(caught[0].message)
+    message = next(str(w.message) for w in caught if "No feature group" in str(w.message))
     assert "5 splits" in message and "0.031" in message and "RepeatedKFold" in message
 
 

@@ -199,6 +199,13 @@ class ConsensusSelector(SelectorMixin, BaseEstimator):
         for attribute in FITTED_ATTRIBUTES:
             self.__dict__.pop(attribute, None)
         self._validate_rule()
+        if self.max_shadow_q is not None:
+            warnings.warn(
+                "max_shadow_q is experimental: shadow q-values are uncalibrated "
+                "reference values, not significance levels.",
+                UserWarning,
+                stacklevel=2,
+            )
         X = _string_columns(X)
         if hasattr(X, "columns"):
             names = list(X.columns)
@@ -272,6 +279,18 @@ class ConsensusSelector(SelectorMixin, BaseEstimator):
             )
 
         rows = report["stability"]
+        for rule, field in (
+            ("min_shadow_share", "above_shadow_share"),
+            ("max_shadow_q", "shadow_q_value"),
+            ("min_shadow_families", "shadow_families"),
+        ):
+            # Models that drop or cannot be verified for the shadows add no fields.
+            if getattr(self, rule) is not None and rows and not any(field in r for r in rows):
+                raise ValueError(
+                    f"[!] {rule} needs shadow evidence, but no model kept the shadow "
+                    "columns in any split (a model that drops them, or whose use of them "
+                    "cannot be verified, gives no shadow evidence)."
+                )
         if self.min_shadow_share is not None:
             rows = [r for r in rows if r["above_shadow_share"] >= self.min_shadow_share]
         if self.max_shadow_q is not None:

@@ -5,7 +5,7 @@ Mechanism evidence for a report: correlated feature groups and a SHAP summary.
 import itertools
 import numbers
 import warnings
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple, TypeVar, cast
 
 import numpy as np
 from scipy.cluster.hierarchy import fcluster, linkage
@@ -272,8 +272,31 @@ def _group_summary(
     return summary
 
 
+_MaybeArray = TypeVar("_MaybeArray", bound=Optional[np.ndarray])
+
+
+def _read_only(values: _MaybeArray) -> _MaybeArray:
+    """
+    A read-only array over the same memory (no copy); None stays None.
+
+    A plain view with write=False is not enough: scikit-learn's check_array
+    sets the flag back on a view of a writable array. A view of a read-only
+    buffer cannot be flipped back. Dtypes without a buffer format are copied.
+    """
+    if values is None:
+        return values
+    try:
+        buffer: Any = memoryview(cast(Any, values)).toreadonly()
+        return cast(_MaybeArray, np.asarray(buffer))
+    except (TypeError, ValueError, NotImplementedError, BufferError):
+        frozen = cast(np.ndarray, values).copy()
+        frozen.setflags(write=False)
+        return cast(_MaybeArray, frozen)
+
+
 def _model_X(X: np.ndarray, names: Optional[List[str]]) -> Any:
-    """What models see: X itself, or a DataFrame named `names` (no copy)."""
+    """What models see: X itself, or a DataFrame named `names` (no copy); read-only either way."""
+    X = _read_only(X)
     if names is None:
         return X
     import pandas as pd

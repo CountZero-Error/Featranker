@@ -23,7 +23,7 @@ import yaml
 from joblib import Parallel, delayed
 from scipy.stats import binom
 from sklearn.base import clone, is_regressor
-from sklearn.compose import ColumnTransformer
+from sklearn.compose import ColumnTransformer, TransformedTargetRegressor
 from sklearn.dummy import DummyClassifier, DummyRegressor
 from sklearn.feature_selection import SelectorMixin
 from sklearn.impute import SimpleImputer
@@ -31,6 +31,7 @@ from sklearn.metrics import get_scorer
 from sklearn.model_selection import KFold, StratifiedKFold
 from sklearn.pipeline import FeatureUnion, Pipeline, make_pipeline
 from sklearn.preprocessing import (
+    FunctionTransformer,
     LabelEncoder,
     MaxAbsScaler,
     MinMaxScaler,
@@ -57,7 +58,7 @@ except ImportError:  # pragma: no cover
     _MultimetricScorer = None
     _NATIVE_SCORERS = ()
 
-from .evidence import _model_X, correlation_evidence, shap_evidence
+from .evidence import _model_X, _read_only, correlation_evidence, shap_evidence
 from .report import Report
 
 try:
@@ -478,6 +479,11 @@ def _resolve_max_samples(value: Any, n_rows: int) -> int:
     raise ValueError("[!] max_samples must be a positive int or a float in (0, 1].")
 
 
+def _plain_int(value: Any) -> Any:
+    """A NumPy integer as a plain int (reports stay strict JSON); anything else, bools too, as is."""
+    return int(value) if isinstance(value, numbers.Integral) and not isinstance(value, bool) else value
+
+
 def _plain_number(value: Any) -> Any:
     """A numpy scalar as a plain int or float, so the report stays JSON-safe."""
     return int(value) if isinstance(value, numbers.Integral) else float(value)
@@ -800,7 +806,8 @@ def _resolve_splits(
     else:
         pairs = cv
 
-    resolved = []
+    resolved: List[tuple] = []
+    seen: Dict[bytes, int] = {}
     for pair in pairs:
         try:
             train, evaluation = pair
@@ -810,6 +817,18 @@ def _resolve_splits(
         train, evaluation = _split_indices(train, n_rows), _split_indices(evaluation, n_rows)
         if np.intersect1d(train, evaluation).size:
             raise ValueError("[!] Train and eval indices overlap within a split.")
+        # Digests, not the index bytes: a million-row cv would keep every split twice.
+        key = hashlib.sha256(
+            np.sort(train).tobytes() + b"|" + np.sort(evaluation).tobytes()
+        ).digest()
+        if key in seen:
+            raise ValueError(
+                f"[!] Splits {seen[key]} and {len(resolved)} have identical train and "
+                "eval indices; a repeated split would count as an independent trial. "
+                "Small data with a repeated splitter can repeat a split by chance; "
+                "use a splitter without repeats or more rows."
+            )
+        seen[key] = len(resolved)
         resolved.append((train, evaluation))
     if not resolved:
         raise ValueError("[!] cv produced no splits.")
@@ -1064,11 +1083,30 @@ def _keeps_columns(step: Any) -> bool:
 
 
 def _is_column_aware(estimator: Any) -> bool:
-    """Whether the estimator is, or contains at any depth, a selector, FeatureUnion or ColumnTransformer."""
+    """
+    Whether the estimator is, or contains at any depth, a selector, FeatureUnion,
+    ColumnTransformer or opaque transformer (see _is_opaque_transformer). A target transformer of a
+    TransformedTargetRegressor is not counted.
+    """
     parts = [estimator]
     if hasattr(estimator, "get_params"):
-        parts.extend(estimator.get_params(deep=True).values())
-    return any(isinstance(part, (SelectorMixin, FeatureUnion, ColumnTransformer)) for part in parts)
+        params = estimator.get_params(deep=True)
+        # A TransformedTargetRegressor's transformer sees y only, never the columns.
+        owners = [""] if isinstance(estimator, TransformedTargetRegressor) else []
+        owners += [
+            f"{key}__" for key, value in params.items()
+            if isinstance(value, TransformedTargetRegressor)
+        ]
+        target_only = tuple(f"{owner}transformer" for owner in owners)
+        parts.extend(
+            value for key, value in params.items()
+            if not any(key == name or key.startswith(f"{name}__") for name in target_only)
+        )
+    return any(
+        isinstance(part, (SelectorMixin, FeatureUnion, ColumnTransformer))
+        or _is_opaque_transformer(part)
+        for part in parts
+    )
 
 
 def _step_used(step: Any, columns: List[int]) -> set:
@@ -1084,8 +1122,8 @@ def _pipeline_kept(pipeline: Pipeline, columns: List[int]) -> set:
     """
     The columns of a Pipeline's first step, narrowed by later steps that still see them.
 
-    A later step that is or contains a selector, FeatureUnion or ColumnTransformer
-    is mapped only while every earlier step is known to keep the columns one for
+    A later step that is or contains a selector, FeatureUnion, ColumnTransformer or
+    opaque transformer is mapped only while every earlier step is known to keep the columns one for
     one; after any other step it cannot be mapped, so the result is unknown (raises).
     """
     steps = [
@@ -1100,9 +1138,19 @@ def _pipeline_kept(pipeline: Pipeline, columns: List[int]) -> set:
         if preserved:
             kept &= _kept_inputs(later, columns)
         elif _is_column_aware(later):
-            raise ValueError("a column-aware step follows a step that may change the columns")
+            raise ValueError("a column-aware or opaque step follows a step that may change the columns")
         preserved = preserved and _keeps_columns(later)
     return kept
+
+
+def _is_opaque_transformer(estimator: Any) -> bool:
+    """A transformer (transform, no predict) whose column use cannot be assumed."""
+    if hasattr(estimator, "predict") or not hasattr(estimator, "transform"):
+        return False
+    if isinstance(estimator, FunctionTransformer):
+        # func=None is the identity: a fitted ColumnTransformer stores "passthrough" this way.
+        return estimator.func is not None
+    return not type(estimator).__module__.startswith("sklearn.")
 
 
 def _kept_inputs(estimator: Any, columns: List[int]) -> set:
@@ -1111,8 +1159,10 @@ def _kept_inputs(estimator: Any, columns: List[int]) -> set:
 
     Looks into ColumnTransformer branches, FeatureUnion parts, fitted feature
     selectors, and a Pipeline's steps (see _pipeline_kept). Any other estimator
-    is assumed to use every column, unless it wraps a selector, FeatureUnion or
-    ColumnTransformer (a meta-estimator), which cannot be followed. Raises when the columns
+    is assumed to use every column, unless it is or wraps (a meta-estimator) a
+    selector, FeatureUnion, ColumnTransformer or opaque transformer (see
+    _is_opaque_transformer: it may drop columns; final predictors are not
+    affected), which cannot be followed. Raises when the columns
     cannot be determined; the caller treats that as unverifiable.
     """
     if isinstance(estimator, Pipeline):
@@ -1123,7 +1173,10 @@ def _kept_inputs(estimator: Any, columns: List[int]) -> set:
         return {columns[i] for i in estimator.get_support(indices=True)}
     if not isinstance(estimator, ColumnTransformer):
         if _is_column_aware(estimator):
-            raise ValueError("a meta-estimator wraps a selector, FeatureUnion or ColumnTransformer")
+            raise ValueError(
+                "an opaque transformer, or a meta-estimator wrapping a selector, "
+                "FeatureUnion, ColumnTransformer or opaque transformer"
+            )
         return set(columns)
     if estimator.n_features_in_ != len(columns):
         raise ValueError("transformer width differs from its input")
@@ -1165,9 +1218,11 @@ def _fit_model(
                     "The final estimator does not accept sample_weight in fit(), "
                     "so it is not fit unweighted."
                 )
-            fit_params[key] = weights
+            fit_params[key] = _read_only(weights)
+        # Read-only (X via _model_X), so a model that writes to its input fails
+        # alone instead of corrupting the arrays every later model fits on.
         fitted = clone(model, safe=False).fit(
-            _model_X(X_values, names), y_values, **fit_params
+            _model_X(X_values, names), _read_only(y_values), **fit_params
         )
         return name, fitted, None
     except Exception as error:
@@ -1423,6 +1478,8 @@ def _rank_model(
 ]:
     """Returns (name, report, ranking failure, evidence failures)."""
     try:
+        # Scoring sees read-only views too, as fitting does (X via _model_X).
+        y_values, weights = _read_only(y_values), _read_only(weights)
         X_model = _model_X(X_values, names)
         scorers = [scorer, *(other for other, _ in secondary_scorers)]
         scored = _score_all(scorers, model, X_model, y_values, weights, share=False)
@@ -1483,8 +1540,8 @@ def _rank_model(
                 train_X, train_y, train_weights = train_data
                 train_score = _finite_float(
                     scorer(
-                        model, _model_X(train_X, names), train_y,
-                        **_score_weights(train_weights),
+                        model, _model_X(train_X, names), _read_only(train_y),
+                        **_score_weights(_read_only(train_weights)),
                     ),
                     "train score",
                 )
@@ -1590,6 +1647,7 @@ class FeatureRanker:
             raise TypeError("[!] shadows must be True or False.")
         if not isinstance(evidence, bool):
             raise TypeError("[!] evidence must be True or False.")
+        shadow_seed = _plain_int(shadow_seed)
         if shadow_seed is not None and (
             not isinstance(shadow_seed, int) or isinstance(shadow_seed, bool)
         ):
@@ -1728,6 +1786,7 @@ class FeatureRanker:
         failure, not fit unweighted.
         """
         self.is_fitted_ = False
+        random_state = _plain_int(random_state)
         categorical = _categorical_indices(X, self.categorical, feature_names)
         X_values, names = _validate_X(
             X,
@@ -1926,6 +1985,7 @@ class FeatureRanker:
         """
         if not self.is_fitted_:
             raise RuntimeError("[!] Call fit() before rank_features().")
+        n_repeats, random_state = _plain_int(n_repeats), _plain_int(random_state)
         if not _is_positive_int(n_repeats):
             raise ValueError("[!] n_repeats must be a positive integer.")
         (scorer, scoring_name), *secondary_scorers = _resolve_scorers(scoring)
@@ -2208,6 +2268,8 @@ class FeatureRanker:
         )
         y_values = _validate_y(y, len(X_values))
         weights = _validate_weights(sample_weight, len(X_values))
+        n_repeats, top_k = _plain_int(n_repeats), _plain_int(top_k)
+        random_state = _plain_int(random_state)
         if not _is_positive_int(n_repeats):
             raise ValueError("[!] n_repeats must be a positive integer.")
         if not _is_positive_int(top_k):
@@ -2355,6 +2417,7 @@ class FeatureRanker:
                 "n_trials": len(splits),
                 "min_p_value": 0.5 ** len(splits),
                 "calibrated": False,
+                "experimental": True,
                 "note": SHADOW_TEST_NOTE,
             }
         if self.shuffle != "rows":

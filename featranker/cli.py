@@ -579,15 +579,31 @@ def _run_ranking(args: argparse.Namespace) -> Dict[str, Any]:
     return report
 
 
+def _output_file(output_path: Path) -> Path:
+    """The file written: the path with a .json extension guaranteed."""
+    if output_path.suffix.lower() != ".json":
+        return output_path.with_suffix(".json")
+    return output_path
+
+
+def _check_output(output_path: Path) -> Optional[str]:
+    """Why the report cannot be written to output_path, or None."""
+    if output_path.name in {"", ".", ".."}:
+        return "--output needs a file name"
+    target = _output_file(output_path)
+    if target.is_dir():
+        return f"--output {str(target)!r} is a directory"
+    if not target.resolve().parent.is_dir():
+        return f"output folder {str(target.parent)!r} does not exist"
+    return None
+
+
 def _write_report(results: Dict[str, Any], output_path: Optional[Path]) -> None:
     output = json.dumps(results, indent=2)
     if output_path is None:
         print(output)
         return
-    # Guarantee a .json extension when writing to disk.
-    if output_path.suffix.lower() != ".json":
-        output_path = output_path.with_suffix(".json")
-    output_path.write_text(output, encoding="utf-8")
+    _output_file(output_path).write_text(output, encoding="utf-8")
 
 
 def main() -> int:
@@ -597,6 +613,10 @@ def main() -> int:
         parser.print_help()
         return 0
     args = parser.parse_args()
+    # Fail before a long ranking run, not after it.
+    problem = None if args.output is None else _check_output(args.output)
+    if problem:
+        parser.error(problem)
     try:
         results = _run_ranking(args)
     except (
@@ -607,7 +627,10 @@ def main() -> int:
         yaml.YAMLError,
     ) as error:
         parser.error(str(error))
-    _write_report(results, args.output)
+    try:
+        _write_report(results, args.output)
+    except OSError as error:
+        parser.error(f"could not write the report: {error}")
     return 0
 
 
