@@ -321,9 +321,9 @@ def environment(commit: str) -> Dict[str, Any]:
         except importlib.metadata.PackageNotFoundError:
             versions[package] = None
     return {
-        "featranker": {"commit": commit, "version": _frozen_version(commit), "imported_from": str(package_dir),
+        "featranker": {"commit": commit, "version": _frozen_version(commit), "imported_from": run._shown_path(package_dir),
                        "package_sha256": digest.hexdigest()},
-        "run_py": {"imported_from": str(Path(run.__file__).resolve()),
+        "run_py": {"imported_from": run._shown_path(Path(run.__file__)),
                    "sha256": hashlib.sha256(Path(run.__file__).read_bytes()).hexdigest()},
         "packages": versions, "python": sys.version.split()[0], "platform": platform.platform(),
         "machine": platform.machine(), "cpu_count": os.cpu_count(),

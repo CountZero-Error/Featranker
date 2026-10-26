@@ -27062,11 +27062,11 @@
     "featranker": {
       "commit": "a1c7380",
       "version": "1.6.0",
-      "imported_from": "/private/tmp/claude-501/-Users-countzero-Desktop-CodeHouse-Featranker/cadcd63d-7b6d-493f-b6ff-2c6b332d292b/scratchpad/frozen16/featranker",
+      "imported_from": "<scratch>/frozen16/featranker",
       "package_sha256": "1068717ab3e74e2f4426d52bf5f2c6c7917c2094bbd8f1b26a90342c85f3cae0"
     },
     "run_py": {
-      "imported_from": "/Users/countzero/Desktop/CodeHouse/Featranker/benchmarks/run.py",
+      "imported_from": "benchmarks/run.py",
       "sha256": "be1f53e84090940f619e6789eea240963d6fb23e76862aa6ab9ce4222dab97be"
     },
     "packages": {

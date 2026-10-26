@@ -59,7 +59,7 @@ import featranker.evidence as evidence_mod  # noqa: E402
 import featranker.importance as imp  # noqa: E402
 
 assert "memhead" in featranker.__file__, featranker.__file__  # must be the frozen HEAD copy
-state["events"].append({"featranker_file": featranker.__file__})
+state["events"].append({"featranker_file": "/".join(featranker.__file__.split("/")[-3:])})  # no machine path
 
 
 def wrap(module, name):

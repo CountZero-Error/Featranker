@@ -26,6 +26,14 @@ from typing import Any, Callable, Dict, List, NamedTuple, Optional, Tuple
 import numpy as np
 
 HERE = Path(__file__).resolve().parent
+
+
+def _shown_path(path: Path) -> str:
+    """A path for the results file: repo-relative, never the machine's absolute path."""
+    try:
+        return path.resolve().relative_to(HERE.parent).as_posix()
+    except ValueError:
+        return f"<outside repo>/{path.parent.name}/{path.name}"
 N_ROWS = 1000
 N_FEATURES = 10
 N_TREES = 100
@@ -359,7 +367,7 @@ def environment() -> Dict[str, Any]:
     tree = {
         "version": re.search(r'^version = "([^"]+)"', pyproject, re.M).group(1),
         "commit": git("rev-parse", "--short", "HEAD"), "dirty": bool(git("status", "--porcelain", "featranker")),
-        "imported_from": str(Path(featranker.__file__).resolve().parent),
+        "imported_from": _shown_path(Path(featranker.__file__).parent),
     }
     return {
         "featranker": tree, "packages": versions, "python": sys.version.split()[0], "platform": platform.platform(),

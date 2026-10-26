@@ -4,7 +4,7 @@
       "version": "1.4.0",
       "commit": "e486fbf",
       "dirty": false,
-      "imported_from": "/Users/countzero/Desktop/CodeHouse/Featranker/featranker"
+      "imported_from": "featranker"
     },
     "packages": {
       "numpy": "1.26.4",
