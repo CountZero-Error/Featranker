@@ -18,8 +18,10 @@ jobs:
         # unpinned entry; 1.5.2 is the first 1.5.x release with Python 3.13 wheels.
         scikit-learn: ["scikit-learn>=1.5,<1.6", "scikit-learn"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
@@ -43,8 +45,10 @@ jobs:
           - {python: "3.13", scikit-learn: "scikit-learn", extras: ""}
           - {python: "3.13", scikit-learn: "scikit-learn", extras: "[all,shap,plot]"}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
         with:
           python-version: ${{ matrix.python }}
           cache: pip
