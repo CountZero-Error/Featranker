@@ -590,6 +590,8 @@ def _check_output(output_path: Path) -> Optional[str]:
     """Why the report cannot be written to output_path, or None."""
     if output_path.name in {"", ".", ".."}:
         return "--output needs a file name"
+    if output_path.name == "-":
+        return "--output '-' is not supported (it would write a file named '-.json'); give a file name"
     target = _output_file(output_path)
     if target.is_dir():
         return f"--output {str(target)!r} is a directory"

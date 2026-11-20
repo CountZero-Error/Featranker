@@ -1505,6 +1505,7 @@ def _rank_model(
         )
         report = {
             "family": family,
+            "class": type(model).__name__,
             "evaluation_score": baseline,
             "in_consensus": baseline_score is None or baseline > baseline_score,
             "params": _json_params(model),
@@ -1699,6 +1700,7 @@ class FeatureRanker:
         # ... and those pickled by 0.6 lack the 0.7 shadow options.
         self.__dict__.setdefault("shadows", False)
         self.__dict__.setdefault("shadow_seed", None)
+        self.shadow_seed = _plain_int(self.shadow_seed)  # NumPy ints made reports non-JSON
         # ... and those pickled by 1.0 lack the 1.1 evidence flag.
         self.__dict__.setdefault("evidence", False)
         # ... and those pickled by 1.5 lack the 1.6 shadow mode.
@@ -2464,6 +2466,7 @@ class FeatureRanker:
         return ablate(
             self, X, y, X_eval, y_eval, report, ks=ks, scoring=scoring,
             sample_weight=sample_weight, eval_sample_weight=eval_sample_weight,
+            _stacklevel=4,
         )
 
     def _score_baseline(

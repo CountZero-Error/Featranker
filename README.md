@@ -131,6 +131,61 @@ featranker --task reg --train-data train.csv --eval-data eval.csv \
 > [!TIP]
 > NumPy training matrices require `feature_names`; pandas DataFrames keep their column names. See [Usage](https://github.com/CountZero-Error/Featranker/blob/main/docs/usage.md) for every parameter, your own models, `n_jobs`, the CLI, and the input contract.
 
+## ▍ 10-minute recipe
+
+From a ranking to a validated subset, on three disjoint sets of rows: train (fit), validation (rank and choose `k`), and test (touched once, at the end). The script has four steps: rank on the validation rows; check support (how many models voted, what `summarize()` flags); choose `k` from the validation ablation curve; validate the chosen groups against all features on the test rows with `ablate()`. It runs as is and uses only scikit-learn models (`group="fast"`), so the output does not depend on optional extras.
+
+```python
+from sklearn.datasets import load_diabetes
+from sklearn.model_selection import train_test_split
+
+from featranker import FeatureRanker
+
+data = load_diabetes()
+names = list(data.feature_names)
+X_dev, X_test, y_dev, y_test = train_test_split(data.data, data.target, test_size=0.3, random_state=0)
+X_train, X_val, y_train, y_val = train_test_split(X_dev, y_dev, test_size=0.4, random_state=0)
+
+ranker = FeatureRanker(task="reg", group="fast", verbose=False)
+ranker.fit(X_train, y_train, feature_names=names)
+report = ranker.rank_features(X_val, y_val, scoring="r2", random_state=42)
+
+print("voting models:", report["consensus"][0]["n_models"])
+print("findings:", [f["code"] for f in report.summary()])
+
+validation = ranker.ablate(X_train, y_train, X_val, y_val, report, ks=[1, 2, 3, 5, 10])
+curve = validation["ablation"]["curve"]
+best = max(curve, key=lambda row: row["median_score"])
+k = best["k"]
+print("chosen groups:", best["feature_groups"], f"(k={k}, validation r2 {best['median_score']:.2f})")
+
+test = ranker.ablate(X_train, y_train, X_test, y_test, report, ks=[k, 10])
+scores = {row["k"]: row["median_score"] for row in test["ablation"]["curve"]}
+chosen, everything = scores[k], scores[10]
+print(f"test r2, chosen {k} groups: {chosen:.2f}   all 10 groups: {everything:.2f}")
+```
+
+```text
+voting models: 5
+findings: ['tied_groups', 'tied_groups', 'within_noise']
+chosen groups: ['bmi', 's5', 'bp', 's4', 's3'] (k=5, validation r2 0.46)
+test r2, chosen 5 groups: 0.13   all 10 groups: 0.15
+```
+
+What this shows. Five models voted, but the validation `summarize()` findings say several groups are tied in rank and three are within noise, so the order below the top is not firm. The validation curve picked `k=5`. On the untouched test rows those five groups score r2 0.13 against 0.15 for all ten: the selection did **not** beat using every feature here, and a smaller feature set is the only gain left (the drop from validation to test is mostly the difference between two small splits, and partly the optimism of choosing `k` on the validation curve; see [Ablation curve](https://github.com/CountZero-Error/Featranker/blob/main/docs/usage.md#ablation-curve)). Report the test number, not the validation one. If the chosen groups do not beat all features on test, keep all features or collect more data.
+
+## ▍ When to use FeatRanker
+
+Use it when you want to know which feature groups a set of different models relies on, with a ranking you can check: a consensus over model families, a dummy baseline, optional shadow features, and a refit curve (`ablate()`) that tests whether the top groups are enough.
+
+Do not use it, or read it with care, when:
+
+- **n is tiny.** Rankings from a few dozen evaluation rows are mostly noise; ties and `within_noise` findings are the signal to stop. Use `rank_resampled()` to see how much the order moves.
+- **You need causal claims.** Permutation importance describes how fitted models use a feature, not what happens if you change it.
+- **You want one model's importance.** The consensus is over many models by design; for a single model use scikit-learn's `permutation_importance` directly.
+- **p is very wide and you have no feature groups.** Every column is its own group and the cost grows with the number of groups; group columns, use `group="fast"`, or see the memory and speed notes in the [usage guide](https://github.com/CountZero-Error/Featranker/blob/main/docs/usage.md#speed).
+- **You would trust the shadow p- or q-values as calibrated.** They are experimental; see the [report guide](https://github.com/CountZero-Error/Featranker/blob/main/docs/report.md) and the [benchmark](https://github.com/CountZero-Error/Featranker/blob/main/docs/benchmark.md), which also shows where FeatRanker loses.
+
 ## ▍ 03 · How it works
 
 ```text
@@ -185,6 +240,7 @@ Every report carries a `run` block (preset, data and split fingerprints, and the
 
 | Page | Contents |
 |---|---|
+| [**Recipe**](#-10-minute-recipe) and [**When to use**](#-when-to-use-featranker) | Ranking to a validated subset in one script, and when not to use FeatRanker |
 | [**Usage**](https://github.com/CountZero-Error/Featranker/blob/main/docs/usage.md) | API and defaults, working with reports (`summary`, `to_frame`, `plot`), choosing a scorer, your own models, columns by name, missing values, categorical features, sample weights, parallel runs, the CLI, resampled ranking, ablation curve, shadow features, the shadow hits test, per-family evidence and `min_shadow_families`, mechanism evidence, pipeline feature selection, `summarize` (single-split and resampled), comparing runs, LLM interpretation (deprecated), labels, troubleshooting |
 | [**Report**](https://github.com/CountZero-Error/Featranker/blob/main/docs/report.md) | How to read the results, resampled (stability) reports, full report structure, ranking and failure rules |
 | [**Models**](https://github.com/CountZero-Error/Featranker/blob/main/docs/models.md) | All 40 built-in models, optional extras, known issues |

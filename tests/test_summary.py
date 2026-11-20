@@ -68,7 +68,7 @@ def test_summary_is_pure_deterministic_and_strict_json():
     assert report == before
     json.dumps(first, allow_nan=False)
     for finding in first:
-        assert set(finding) == {"code", "severity", "message", "evidence"}
+        assert set(finding) == {"code", "severity", "message", "evidence", "basis", "scoring"}
         assert finding["severity"] in {"info", "warning"}
         assert isinstance(finding["message"], str) and finding["message"]
 

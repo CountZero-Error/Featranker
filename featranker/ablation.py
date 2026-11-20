@@ -61,7 +61,7 @@ def _validate_ks(ks: Any, n_groups: int) -> List[int]:
     return sorted({int(k) for k in ks})
 
 
-def _voters(ranker: FeatureRanker, report: Dict[str, Any]) -> List[str]:
+def _voters(ranker: FeatureRanker, report: Dict[str, Any], stacklevel: int = 3) -> List[str]:
     """Names of the voting models; raises when the report cannot be ablated."""
     if not ranker.is_fitted_:
         raise ValueError("[!] Call fit() before ablate().")
@@ -84,8 +84,14 @@ def _voters(ranker: FeatureRanker, report: Dict[str, Any]) -> List[str]:
     different_version = recorded_version is not None and recorded_version != sklearn.__version__
     changed: List[str] = []
     for name in voters:
-        recorded = report["models"][name].get("params")  # older reports have none
+        recorded_class = report["models"][name].get("class")  # older reports have none
         model = ranker.trained_models.get(name)
+        if recorded_class is not None and model is not None and type(model).__name__ != recorded_class:
+            raise ValueError(
+                f"[!] The ranker's model '{name}' is a {type(model).__name__}, but the report's "
+                f"is a {recorded_class}; use the ranker the report was made with."
+            )
+        recorded = report["models"][name].get("params")  # older reports have none
         if recorded is None or model is None:
             continue
         current = _json_params(model)
@@ -108,7 +114,7 @@ def _voters(ranker: FeatureRanker, report: Dict[str, Any]) -> List[str]:
             f"{sklearn.__version__}, and the parameters both versions have differ for "
             f"{', '.join(repr(n) for n in changed)}; the ablation assumes the same models.",
             UserWarning,
-            stacklevel=4,
+            stacklevel=stacklevel,
         )
     return voters
 
@@ -305,9 +311,10 @@ def ablate(
     scoring: Any = None,
     sample_weight: Any = None,
     eval_sample_weight: Any = None,
+    _stacklevel: int = 3,  # private: FeatureRanker.ablate passes one more
 ) -> Report:
     """A copy of report with an "ablation" block; see FeatureRanker.ablate()."""
-    voters = _voters(ranker, report)
+    voters = _voters(ranker, report, _stacklevel)
     n_groups = len(report["consensus"])
     ks = _validate_ks(ks, n_groups)
     scoring = report["scoring"] if scoring is None else scoring

@@ -111,6 +111,10 @@ Within each split, `rank_std` still measures disagreement between model families
 
 <a id="structure"></a>
 
+### Descriptive versus experimental
+
+Every `summarize()` finding has `basis` and `scoring` (the report's scorer name). Rankings, family support, ablation curves and the findings built on them are `"descriptive"`: they describe these models on these rows. Findings that rest on the shadow p- and q-values are `"experimental"`: those values are uncalibrated and not a significance test (today only `insufficient_splits`). Each entry of `models` records `"class"`, the fitted estimator's class name (for example `"Ridge"`), which `ablate()` checks against the ranker's model of that name.
+
 ## ▍ Structure
 
 `evaluation_mode` is always `"held_out"`. It names the workflow (scoring on data passed to `rank_features()`); FeatRanker cannot check that this data is really separate from the training data.

@@ -120,7 +120,11 @@ def _findings(report: Dict[str, Any]) -> List[Dict[str, Any]]:
     # Resampled prompts rely on the stability table, not on summarize() findings.
     if report.get("evaluation_mode") == "resampled":
         return []
-    return summarize(report)
+    # basis and scoring (1.22) are left out so the deprecated prompt stays byte-stable.
+    return [
+        {k: v for k, v in finding.items() if k not in ("basis", "scoring")}
+        for finding in summarize(report)
+    ]
 
 
 def _all_parts(report: Dict[str, Any]) -> List[Dict[str, Any]]:

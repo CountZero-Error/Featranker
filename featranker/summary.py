@@ -15,6 +15,9 @@ MIN_OVERFIT_SHARE = 0.5
 # A resampled report with a smallest shadow p-value above this cannot reach q <= 0.05.
 SPLIT_Q_LEVEL = 0.05
 
+# Finding codes that rest on the experimental shadow p-/q-values; all others are descriptive.
+EXPERIMENTAL_CODES = {"insufficient_splits"}
+
 REQUIRED_KEYS = ("baseline_score", "models", "consensus", "failures")
 RESAMPLED_KEYS = ("splits", "stability", "failures")
 FAILURE_STAGES = ("initialization", "fit", "ranking", "evidence", "shadows")
@@ -366,7 +369,8 @@ def summarize(report: Any) -> List[Dict[str, Any]]:
     or rank_resampled().
 
     Each finding is a dict with code, severity ("info" or "warning"), message,
-    and JSON-safe evidence. The report is not modified.
+    JSON-safe evidence, basis ("descriptive", or "experimental" when the finding
+    rests on shadow p-/q-values) and scoring (the report's scorer name or None). The report is not modified.
     """
     if not isinstance(report, dict):
         raise TypeError("[!] summarize() expects a report dict.")
@@ -374,8 +378,13 @@ def summarize(report: Any) -> List[Dict[str, Any]]:
     for key in RESAMPLED_KEYS if resampled else REQUIRED_KEYS:
         if key not in report:
             raise ValueError(f"[!] Report is missing required key '{key}'.")
+    scoring = report.get("scoring")
     return [
-        finding
+        {
+            **finding,
+            "basis": "experimental" if finding["code"] in EXPERIMENTAL_CODES else "descriptive",
+            "scoring": scoring,
+        }
         for rule in (RESAMPLED_RULES if resampled else RULES)
         for finding in rule(report)
     ]
