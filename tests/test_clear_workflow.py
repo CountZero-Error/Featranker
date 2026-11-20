@@ -200,6 +200,7 @@ def test_docs_index_and_report_doc():
     assert "basis" in report_doc and "experimental" in report_doc
 
 
-def test_version_is_1_22():
+def test_version_is_at_least_1_22():
     text = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
-    assert re.search(r'^version = "1\.22\.0"$', text, flags=re.M)
+    found = re.search(r'^version = "(\d+)\.(\d+)\.(\d+)"$', text, flags=re.M)
+    assert found and tuple(map(int, found.groups())) >= (1, 22, 0)

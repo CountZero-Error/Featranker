@@ -362,6 +362,20 @@ def _validate_max_categories(max_categories: Any) -> Optional[int]:
     return int(max_categories)
 
 
+# ponytail: add any new built-in linear model that rejects sparse input here.
+DENSE_ONLY_ESTIMATORS = frozenset(
+    {
+        "LinearDiscriminantAnalysis",
+        "QuadraticDiscriminantAnalysis",
+        "GaussianNB",
+        "PLSRegression",
+        "SGDClassifier",  # SGD intercept update differs on sparse input
+        "Perceptron",
+    }
+)
+_FORCE_DENSE_ONE_HOT = False  # tests flip this to compare against dense output
+
+
 def _with_one_hot(pipeline: Any, columns: List[int], max_categories: Optional[int] = None) -> Any:
     """
     A built-in linear pipeline whose numeric steps skip `columns`, which are one-hot coded.
@@ -371,6 +385,7 @@ def _with_one_hot(pipeline: Any, columns: List[int], max_categories: Optional[in
     with at least `max_categories` levels; with fewer they are all zeros.
     """
     *numeric_steps, (_, estimator) = pipeline.steps
+    dense = _FORCE_DENSE_ONE_HOT or type(estimator).__name__ in DENSE_ONLY_ESTIMATORS
     capped = (
         {}
         if max_categories is None
@@ -380,8 +395,8 @@ def _with_one_hot(pipeline: Any, columns: List[int], max_categories: Optional[in
         ColumnTransformer(
             [("cat", OneHotEncoder(**{"handle_unknown": "ignore", **capped}), columns)],
             remainder=make_pipeline(*(step for _, step in numeric_steps)),
-            # Dense output: several linear models reject sparse input.
-            sparse_threshold=0,
+            # Keep sparse output unless the estimator rejects sparse input.
+            sparse_threshold=0 if dense else 1.0,
         ),
         estimator,
     )
