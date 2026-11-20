@@ -977,6 +977,8 @@ min_shadow_share=0.5   keeps ['x0', 'x1']
 min_shadow_families=2  keeps ['x0', 'x1', 'x2']
 ```
 
+On real data `min_shadow_share=0.5` can be too strict: see the [real-data study](realdata.md).
+
 Output from scikit-learn models only (`group="fast"`, seven classification families). The four additive families (logistic, linear margin, discriminant, naive Bayes) do not put `x2` above their shadows in most splits (shares 0.0 to 0.3), so its share stays below 0.5 and the share rule drops it (it keeps `x1` only because the share is 0.53), while bagging, boosting and the single tree, which can represent the interaction, put `x2` above its shadows in most splits, so three families pass.
 
 `ConsensusSelector(min_shadow_families=N)` keeps groups with `shadow_families >= N`. It answers "do at least `N` families find signal?" and leaves `min_shadow_share`, `max_shadow_q`, and their meanings unchanged; it turns shadows on and combines with the other rules (all filters apply, then `k`).
@@ -991,7 +993,7 @@ Output from scikit-learn models only (`group="fast"`, seven classification famil
 
 By default (`shadow_mode="joint"`) the shadow block is the rows in one shuffled order, applied to every column, so two collinear real columns stay exactly as collinear in the shadows. `shadow_mode="independent"` shuffles each shadow column with its own row order instead: every shadow column is still a permutation of its real column, but relationships between columns are broken. The orders are drawn column by column from one generator seeded with `shadow_seed` (the evaluation shadows use their own seed, as before), so `shadow_seed` still makes runs reproducible, and `"joint"` produces exactly the shadows of earlier versions. The report records the mode as `shadow_mode` next to `shadows` and `shadow_seed`; reports without shadows have no `shadow_mode`.
 
-The [calibration study](calibration.md) found no evidence for or against `independent` (small pooled gains in recall of the collinear source, within seed noise); the default stays `joint`. The mode changes which shadow is strongest, so results can differ between modes. Both `FeatureRanker` and `ConsensusSelector` accept `shadow_mode`.
+The [calibration study](calibration.md) found no evidence for or against `independent` (small pooled gains in recall of the collinear source, within seed noise); the default stays `joint`. The regenerated 1.22.0 run computes decision S as True (independent raises `e` recall by +0.030 and copy kept by +0.045, no null cell above 0.05); the gains are within seed noise and the default stays `joint`. The mode changes which shadow is strongest, so results can differ between modes. Both `FeatureRanker` and `ConsensusSelector` accept `shadow_mode`.
 
 ```python
 import numpy as np
@@ -1193,7 +1195,7 @@ Output shown with the `xgboost` and `catboost` extras installed. The score is ho
 |---|---|---|
 | `task`, `scoring` | required | As in `FeatureRanker` and `rank_features()`; `scoring` may be a list (the first scorer selects, the rest are reported in `report_`). |
 | `k` | `None` | Keep the first `k` groups in the [stability](report.md#resampled-reports) order (or all groups if there are fewer). Python or NumPy integer. |
-| `min_shadow_share` | `None` | Keep groups whose stability `above_shadow_share` is at least this (0 to 1). Turns on [shadow features](#shadow-features). |
+| `min_shadow_share` | `None` | Keep groups whose stability `above_shadow_share` is at least this (0 to 1). Turns on [shadow features](#shadow-features). On the 13 real datasets of the [real-data study](realdata.md), `0.5` kept as little as 1% of the features and lost held-out score there; check held-out scores. |
 | `max_shadow_q` | `None` | Keep groups whose stability `shadow_q_value` (the [shadow hits test](#shadow-test)) is at most this (greater than 0, at most 1); a heuristic filter, since the values are [uncalibrated](#shadow-test); experimental, so `fit()` warns. Turns on shadow features. Use `cv` with 10 or more splits, such as `RepeatedKFold`; with 5 the test has little power. |
 | `min_shadow_families` | `None` | Keep groups whose stability `shadow_families` (see [family evidence](#family-evidence)) is at least this (a positive integer). Turns on shadow features. `1` and `2` both selected at most 1% of noise groups on null data; `1` kept more noise than `2` in the signal study (see the [calibration study](calibration.md) for how to choose); a heuristic. |
 | `group`, `models`, `families`, `n_jobs`, `shadow_seed`, `shadow_mode`, `missing`, `categorical`, `model_input`, `shuffle` | as `FeatureRanker` | Passed to the ranker built in `fit()`. |

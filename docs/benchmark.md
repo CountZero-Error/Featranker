@@ -9,6 +9,9 @@ The code is in [`benchmarks/`](https://github.com/CountZero-Error/Featranker/tre
 > [!NOTE]
 > 2026-10-21: the `min_shadow_share` rows here were computed when the resampled stability `above_shadow_share` averaged only over the splits that had a consensus. FeatRanker 1.8 divides by `n_splits` instead (see [the report reference](report.md)), which makes that rule stricter where many splits have no consensus; the `max_shadow_q` and family rows are unaffected. This benchmark was not re-run, so the effect on its numbers was not measured.
 
+> [!NOTE]
+> 2026-11-20: the benchmark was regenerated on FeatRanker 1.22.0 (commit 482b62d, same pinned versions as [Reproduce](#reproduce); total 18.3 min) into `benchmarks/results/20261120.json` and `20261120.md`. The selection metrics are identical to the recorded 20261019 run in every table both runs share (the new run adds per-family tables). FeatRanker configurations were 9 to 33% slower per configuration (e.g. classification hard `featranker_q_all` 17.96 s to 23.90 s) and the total went from 15.4 to 18.3 min (+19%); Boruta was 9 to 13% slower, while `permutation_rule` and `SelectByShuffling` were not slower (-15% to +4%). The machine was shared with concurrent test runs, so this is not a measured slowdown of FeatRanker. The tables below are still those of the 20261019 run. The `min_shadow_share` caveat above (1.8 change) is therefore measured for these selection metrics: they did not change.
+
 ## Short version
 
 - **False selections.** The four FeatRanker configurations selected **no noise feature in any of their 80 runs**. Boruta selected 7 noise features over its 20 runs, the permutation rule 5. Only `SelectByShuffling` also selected none, and it did so by missing most of the signal.

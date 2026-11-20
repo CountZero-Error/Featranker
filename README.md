@@ -184,6 +184,7 @@ Do not use it, or read it with care, when:
 - **You need causal claims.** Permutation importance describes how fitted models use a feature, not what happens if you change it.
 - **You want one model's importance.** The consensus is over many models by design; for a single model use scikit-learn's `permutation_importance` directly.
 - **p is very wide and you have no feature groups.** Every column is its own group and the cost grows with the number of groups; group columns, use `group="fast"`, or see the memory and speed notes in the [usage guide](https://github.com/CountZero-Error/Featranker/blob/main/docs/usage.md#speed).
+- **You would shrink a real-data feature set with `min_shadow_share=0.5` alone.** In the [real-data study](https://github.com/CountZero-Error/Featranker/blob/main/docs/realdata.md) that rule kept as little as 1% of the features on some datasets and lost held-out score there; choose `k` from the ablation curve with nested cross-validation and check held-out scores.
 - **You would trust the shadow p- or q-values as calibrated.** They are experimental; see the [report guide](https://github.com/CountZero-Error/Featranker/blob/main/docs/report.md) and the [benchmark](https://github.com/CountZero-Error/Featranker/blob/main/docs/benchmark.md), which also shows where FeatRanker loses.
 
 ## ▍ 03 · How it works
