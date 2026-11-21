@@ -501,7 +501,8 @@ def test_auto_groups_rejects_unknown_categorical_names_and_values():
         auto_groups(FRAME, categorical=7)
 
 
-def test_shap_explains_trees_on_codes_and_lists_one_hot_pipelines():
+def test_shap_explains_trees_on_codes_and_one_hot_linear_pipelines():
+    # Since 1.24 the built one-hot linear pipelines are explained (one-hot SHAP summed per column).
     pytest.importorskip("shap")
     r = ranker("reg", "all", evidence=True)
 
@@ -511,10 +512,13 @@ def test_shap_explains_trees_on_codes_and_lists_one_hot_pipelines():
     linear = set(r.models["reg"]["linear"]) & set(report["models"])
     tree = set(r.models["reg"]["tree"]) & set(report["models"])
     assert linear and tree
-    assert linear <= set(unsupported)
-    assert all("ColumnTransformer" in unsupported[name] for name in linear)
+    assert not any("ColumnTransformer" in reason for reason in unsupported.values())
     explained = {name for name, m in report["models"].items() if "shap" in m}
-    assert explained and explained <= tree
+    explained_linear = explained & linear
+    assert explained_linear and explained & tree
+    for name in explained_linear:
+        assert report["models"][name]["shap"]["explainer"] == "linear"
+        assert report["models"][name]["shap"]["groups"]["city"]["direction"] is None
     for name in explained & {"random_forest_regressor", "decision_tree_regressor"}:
         groups = report["models"][name]["shap"]["groups"]
         assert groups["city"]["mean_abs"] > groups["x"]["mean_abs"]

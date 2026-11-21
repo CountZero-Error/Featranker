@@ -14,7 +14,13 @@ from scipy.stats import rankdata
 from sklearn.compose import ColumnTransformer
 from sklearn.impute import SimpleImputer
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import MaxAbsScaler, MinMaxScaler, RobustScaler, StandardScaler
+from sklearn.preprocessing import (
+    MaxAbsScaler,
+    MinMaxScaler,
+    OneHotEncoder,
+    RobustScaler,
+    StandardScaler,
+)
 
 # Group pairs whose strongest member-column |Spearman rho| reaches this are listed.
 CORRELATION_THRESHOLD = 0.5
@@ -226,11 +232,75 @@ def _unwrap(model: Any, *arrays: np.ndarray) -> Tuple[Any, List[np.ndarray]]:
     return final, transformed
 
 
+def _dense(array: Any) -> np.ndarray:
+    return np.asarray(array.toarray() if hasattr(array, "toarray") else array)
+
+
+class _Fold:
+    def __init__(self, n_features_in: int, blocks: List[Tuple[int, Any]]) -> None:
+        self.n_features_in_ = n_features_in
+        self.blocks = blocks
+
+
+def _keeps_columns(remainder: Any) -> bool:
+    """"drop", "passthrough", or steps that keep columns one for one."""
+    if isinstance(remainder, str):
+        return remainder in ("drop", "passthrough")
+    steps = [step for _, step in remainder.steps] if isinstance(remainder, Pipeline) else [remainder]
+    return all(
+        step is None or isinstance(step, str) and step == "passthrough" or _is_column_step(step)
+        for step in steps
+    )
+
+
+def _one_hot_fold(model: Any) -> Optional[_Fold]:
+    """
+    For FeatRanker's own one-hot pipeline (ColumnTransformer with only a "cat"
+    OneHotEncoder plus a remainder, then the estimator), how to sum its output
+    columns back to input columns; None for any other model.
+    """
+    if not (isinstance(model, Pipeline) and len(model.steps) == 2):
+        return None
+    ct = model[0]
+    if not (
+        isinstance(ct, ColumnTransformer)
+        and [name for name, _, _ in ct.transformers] == ["cat"]
+        and isinstance(ct.transformers[0][1], OneHotEncoder)
+        and _keeps_columns(ct.remainder)
+    ):
+        return None
+    encoder = ct.named_transformers_["cat"]
+    cat_cols = list(ct.transformers_[0][2])
+    remainder_cols = list(ct.transformers_[-1][2]) if ct.transformers_[-1][0] == "remainder" else []
+    infrequent = getattr(encoder, "infrequent_categories_", None) or [None] * len(cat_cols)
+    start = ct.output_indices_["cat"].start
+    blocks: List[Tuple[int, Any]] = []
+    position = start
+    for i, source in enumerate(cat_cols):
+        # Infrequent levels share one output column.
+        merged = infrequent[i]
+        width = len(encoder.categories_[i]) - (len(merged) - 1 if merged is not None and len(merged) else 0)
+        blocks.append((source, np.arange(position, position + width)))
+        position += width
+    rest = ct.output_indices_.get("remainder", slice(position, position))
+    if position != ct.output_indices_["cat"].stop or rest.stop - rest.start != len(remainder_cols):
+        raise ValueError("pipeline steps change the number of columns")
+    blocks += [(c, np.array([rest.start + j])) for j, c in enumerate(remainder_cols)]
+    return _Fold(len(cat_cols) + len(remainder_cols), blocks)
+
+
 def _shap_values(
     model: Any, X: Any, background: Any, shap: Any
 ) -> Tuple[str, np.ndarray]:
     """(explainer name, SHAP values shaped (k, n_rows, n_columns))."""
-    final, (X_final, background_final) = _unwrap(model, X, background)
+    fold = _one_hot_fold(model)
+    if fold is None:
+        final, (X_final, background_final) = _unwrap(model, X, background)
+    else:
+        final = model[-1]
+        if not (hasattr(final, "coef_") and hasattr(final, "intercept_")):
+            raise ValueError("SHAP supports only linear models on one-hot coded columns")
+        X_final, background_final = (_dense(model[0].transform(a)) for a in (X, background))
     if hasattr(final, "coef_") and hasattr(final, "intercept_"):
         masker = shap.maskers.Independent(background_final, max_samples=len(background_final))
         name, values = "linear", shap.LinearExplainer(final, masker).shap_values(X_final)
@@ -244,6 +314,12 @@ def _shap_values(
         stacked = np.moveaxis(stacked, 2, 0)
     if stacked.ndim != 3 or not np.isfinite(stacked).all():
         raise ValueError("unexpected SHAP output")
+    if fold is not None:
+        # Sum each one-hot block back to its source column; remainder maps by index.
+        folded = np.zeros(stacked.shape[:2] + (fold.n_features_in_,))
+        for source, cols in fold.blocks:
+            folded[:, :, source] = stacked[:, :, cols].sum(axis=2)
+        stacked = folded
     return name, stacked
 
 
