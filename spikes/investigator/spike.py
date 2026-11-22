@@ -5,6 +5,8 @@ planted mechanisms than one that only reads the report?
 Throwaway and never shipped. Design and decision rule:
 openspec/changes/spike-investigator-value/design.md (D1-D8). No network here;
 run.py supplies the real LLM.
+
+Needs featranker<2.0: it imports featranker.interpret, removed in 2.0.
 """
 
 import json

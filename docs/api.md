@@ -8,7 +8,7 @@ From 1.0, these are FeatRanker's public API:
 
 | Kind | Public |
 |---|---|
-| Python names | Everything in `featranker.__all__`: `FeatureRanker`, `ConsensusSelector`, `Report`, `auto_groups`, `summarize`, and the deprecated `to_prompt` and `explain`. Also `featranker.__version__`. |
+| Python names | Everything in `featranker.__all__`: `FeatureRanker`, `ConsensusSelector`, `Report`, `auto_groups`, `summarize`. Also `featranker.__version__`. |
 | Parameters and methods | The documented parameters, methods, and fitted attributes of those names (see [Usage](usage.md)). |
 | Reports | The report keys and their meaning documented in [Report](report.md). |
 | Command line | The `featranker` command and its flags (`featranker --help`). |
@@ -27,9 +27,13 @@ Before something public is removed, it is deprecated with a `DeprecationWarning`
 
 ## ▍ Deprecations
 
-| Since | Deprecated | Removal | Note |
+None currently.
+
+## ▍ Removed
+
+| Deprecated in | Removed in | Name | Note |
 |---|---|---|---|
-| 1.1 | `to_prompt()` and `explain()` | 2.0 | Each call emits a `FutureWarning`; behavior is otherwise unchanged through 1.x. The report [evidence](usage.md#evidence) added in 1.1 replaces the need for an LLM reading. |
+| 1.1 | 2.0 | `to_prompt()`, `explain()` and the `featranker.interpret` module | Removed in 2.0, the major release under the policy above. The report [evidence](usage.md#evidence) replaces the need for an LLM reading. |
 
 ## ▍ Typing
 

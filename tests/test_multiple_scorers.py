@@ -240,17 +240,6 @@ def test_secondary_scorers_are_weighted_and_see_the_subsample():
     assert seen and all(n == 40 and w is not None and len(w) == 40 for n, w in seen)
 
 
-def test_summary_and_prompt_still_work_with_secondary_scorers():
-    from featranker import to_prompt
-
-    report = rank()
-    assert report.summary()
-    with pytest.warns(FutureWarning):
-        prompt = to_prompt(report, anonymize=True)
-    assert "FINDINGS" in prompt
-    assert "neg_mean_absolute_error" not in prompt
-
-
 def broken_too(model, X_, y_):
     raise ValueError("second boom")
 
