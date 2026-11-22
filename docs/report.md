@@ -117,6 +117,8 @@ Every `summarize()` finding has `basis` and `scoring` (the report's scorer name)
 
 ## ▍ Structure
 
+A JSON Schema for these keys ships as `featranker/report.schema.json`; see [Report schema](api.md#report-schema).
+
 `evaluation_mode` is always `"held_out"`. It names the workflow (scoring on data passed to `rank_features()`); FeatRanker cannot check that this data is really separate from the training data.
 
 Every report has a `run` block (after `provenance`): `task`, `group`, `fingerprint_scheme` (`2`; integer and boolean columns are hashed exactly, and `ablate()` treats a report without the key as scheme 1), `data_sha256`, and, for `rank_features()`, `train_data_sha256` (`null` for a ranker pickled before 1.12); for `rank_resampled()`, `cv` and `splits_sha256` instead, with each split's report carrying its own `run`. When `feature_groups="auto"` chose the groups (`ConsensusSelector`, `--feature-groups auto`), `run["auto_groups"]` is `{"threshold": ..., "method": "spearman-complete-linkage"}`; otherwise the key is absent. See [Comparing runs](usage.md#comparing-runs).

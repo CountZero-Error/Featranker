@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/CountZero-Error/Featranker/v2/report.schema.json",
+  "title": "FeatRanker report (2.x)",
+  "description": "Loose by design: core keys and types only; unknown keys are allowed everywhere.",
+  "type": "object",
+  "required": ["evaluation_mode", "scoring", "provenance", "run", "failures"],
+  "properties": {
+    "evaluation_mode": {"enum": ["held_out", "resampled"]},
+    "provenance": {
+      "type": "object",
+      "required": ["featranker"],
+      "properties": {"featranker": {"type": ["string", "null"]}}
+    },
+    "run": {"type": "object"},
+    "failures": {"type": "array"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"evaluation_mode": {"const": "held_out"}}},
+      "then": {
+        "required": ["models", "consensus"],
+        "properties": {
+          "models": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "required": ["family", "evaluation_score", "importance"],
+              "properties": {
+                "family": {"type": "string"},
+                "evaluation_score": {"type": ["number", "null"]}
+              }
+            }
+          },
+          "consensus": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["feature_group", "median_rank"],
+              "properties": {
+                "feature_group": {"type": "string"},
+                "median_rank": {"type": "number"}
+              }
+            }
+          },
+          "ablation": {
+            "type": "object",
+            "required": ["curve"],
+            "properties": {"curve": {"type": "array"}}
+          }
+        }
+      }
+    },
+    {
+      "if": {"properties": {"evaluation_mode": {"const": "resampled"}}},
+      "then": {
+        "required": ["splits", "stability"],
+        "properties": {
+          "splits": {"type": "array", "items": {"type": "object"}},
+          "stability": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["feature_group"],
+              "properties": {"feature_group": {"type": "string"}}
+            }
+          }
+        }
+      }
+    }
+  ]
+}

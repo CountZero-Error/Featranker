@@ -15,6 +15,23 @@ From 1.0, these are FeatRanker's public API:
 
 Everything else is internal and can change in any release: modules other than `featranker` itself, any name starting with `_`, the built-in model registry file's layout, progress-bar text, and the exact wording of warnings, errors, and `summarize()` messages (finding codes are public; messages are not).
 
+<a id="report-schema"></a>
+
+## ▍ Report schema
+
+Every report is described by `featranker/report.schema.json` (JSON Schema draft 2020-12, shipped in the package). It is loose: core keys and types only, unknown keys are allowed.
+
+```python
+import json
+from importlib.resources import files
+from jsonschema import Draft202012Validator  # pip install jsonschema
+
+schema = json.loads((files("featranker") / "report.schema.json").read_text(encoding="utf-8"))
+Draft202012Validator(schema).validate(json.loads(json.dumps(report)))
+```
+
+Promise for 2.x: every report validates against the shipped schema; minor releases add only optional keys; removing, renaming or retyping a required key needs a major release.
+
 ## ▍ Stability policy
 
 FeatRanker follows [semantic versioning](https://semver.org) from 1.0.0:
