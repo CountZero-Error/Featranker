@@ -35,7 +35,6 @@ from sklearn.preprocessing import (
     LabelEncoder,
     MaxAbsScaler,
     MinMaxScaler,
-    OneHotEncoder,
     RobustScaler,
     StandardScaler,
 )
@@ -58,7 +57,7 @@ except ImportError:  # pragma: no cover
     _MultimetricScorer = None
     _NATIVE_SCORERS = ()
 
-from .evidence import _model_X, _read_only, correlation_evidence, shap_evidence
+from .evidence import _FeatRankerOneHot, _model_X, _read_only, correlation_evidence, shap_evidence
 from .report import Report
 
 try:
@@ -385,7 +384,12 @@ def _with_one_hot(pipeline: Any, columns: List[int], max_categories: Optional[in
     with at least `max_categories` levels; with fewer they are all zeros.
     """
     *numeric_steps, (_, estimator) = pipeline.steps
-    dense = _FORCE_DENSE_ONE_HOT or type(estimator).__name__ in DENSE_ONLY_ESTIMATORS
+    dense = (
+        _FORCE_DENSE_ONE_HOT
+        or type(estimator).__name__ in DENSE_ONLY_ESTIMATORS
+        # sparse input made saga stop early
+        or getattr(estimator, "solver", None) in ("sag", "saga")
+    )
     capped = (
         {}
         if max_categories is None
@@ -393,7 +397,7 @@ def _with_one_hot(pipeline: Any, columns: List[int], max_categories: Optional[in
     )
     return make_pipeline(
         ColumnTransformer(
-            [("cat", OneHotEncoder(**{"handle_unknown": "ignore", **capped}), columns)],
+            [("cat", _FeatRankerOneHot(**{"handle_unknown": "ignore", **capped}), columns)],
             remainder=make_pipeline(*(step for _, step in numeric_steps)),
             # Keep sparse output unless the estimator rejects sparse input.
             sparse_threshold=0 if dense else 1.0,
@@ -1165,7 +1169,10 @@ def _is_opaque_transformer(estimator: Any) -> bool:
     if isinstance(estimator, FunctionTransformer):
         # func=None is the identity: a fitted ColumnTransformer stores "passthrough" this way.
         return estimator.func is not None
-    return not type(estimator).__module__.startswith("sklearn.")
+    # FeatRanker's own one-hot encoder subclass lives outside sklearn but keeps every column.
+    return not (
+        type(estimator).__module__.startswith("sklearn.") or isinstance(estimator, _FeatRankerOneHot)
+    )
 
 
 def _kept_inputs(estimator: Any, columns: List[int]) -> set:

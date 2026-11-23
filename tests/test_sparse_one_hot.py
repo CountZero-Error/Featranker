@@ -16,6 +16,7 @@ DENSE_ONLY = {
     "SGDClassifier", "Perceptron",
 }
 DIVERGED = -10.0  # unregularised least squares on a full one-hot block plus intercept
+LEAST_SQUARES = {"linear_regression", "ransac_regression"}
 
 
 def frame(levels, n=600, task="reg", seed=0):
@@ -57,7 +58,7 @@ def test_sparse_capable_models_get_sparse_input(task):
     seen_dense_only = False
     for name, model in models.items():
         out = model.steps[0][1].transform(X.iloc[400:])
-        if final_class(model) in DENSE_ONLY:
+        if final_class(model) in DENSE_ONLY or getattr(model.steps[-1][1], "solver", None) in ("sag", "saga"):
             seen_dense_only = True
             assert isinstance(out, np.ndarray) and not sp.issparse(out), name
         else:
@@ -80,6 +81,8 @@ def test_scores_match_dense_within_tolerance(task, monkeypatch):
         d = model["evaluation_score"]
         if d < DIVERGED:  # the dense path diverged; sparse must not
             assert np.isfinite(s) and s >= d and s > DIVERGED, (name, s, d)
+        elif name in LEAST_SQUARES:  # no unique solution; owner ruling 2026-11-23
+            assert np.isfinite(s), (name, s, d)
         else:
             assert abs(s - d) <= 1e-3, (name, s, d)
 

@@ -7,6 +7,7 @@
   "required": ["evaluation_mode", "scoring", "provenance", "run", "failures"],
   "properties": {
     "evaluation_mode": {"enum": ["held_out", "resampled"]},
+    "scoring": {"type": "string"},
     "provenance": {
       "type": "object",
       "required": ["featranker"],
@@ -28,6 +29,7 @@
               "required": ["family", "evaluation_score", "importance"],
               "properties": {
                 "family": {"type": "string"},
+                "importance": {"type": "object"},
                 "evaluation_score": {"type": ["number", "null"]}
               }
             }

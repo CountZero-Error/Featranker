@@ -236,6 +236,10 @@ def _dense(array: Any) -> np.ndarray:
     return np.asarray(array.toarray() if hasattr(array, "toarray") else array)
 
 
+class _FeatRankerOneHot(OneHotEncoder):
+    """Marks the one-hot encoder of a pipeline FeatRanker built (see `_one_hot_fold`)."""
+
+
 class _Fold:
     def __init__(self, n_features_in: int, blocks: List[Tuple[int, Any]]) -> None:
         self.n_features_in_ = n_features_in
@@ -265,7 +269,7 @@ def _one_hot_fold(model: Any) -> Optional[_Fold]:
     if not (
         isinstance(ct, ColumnTransformer)
         and [name for name, _, _ in ct.transformers] == ["cat"]
-        and isinstance(ct.transformers[0][1], OneHotEncoder)
+        and isinstance(ct.transformers[0][1], _FeatRankerOneHot)
         and _keeps_columns(ct.remainder)
     ):
         return None
