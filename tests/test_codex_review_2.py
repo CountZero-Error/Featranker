@@ -45,6 +45,7 @@ def ranked(ranker, scoring="r2"):
 def old_style(report):
     old = json.loads(json.dumps(report, allow_nan=False))
     del old["run"]
+    del old["schema_version"]
     for model in old["models"].values():
         model.pop("family", None)
     old["provenance"]["featranker"] = "1.11.0"

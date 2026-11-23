@@ -12,6 +12,7 @@ import sklearn
 
 from .importance import (
     FINGERPRINT_SCHEME,
+    REPORT_SCHEMA_VERSION,
     FeatureRanker,
     _fingerprint,
     _json_params,
@@ -209,13 +210,19 @@ def _sub_ranker(ranker: FeatureRanker, voters: List[str], kept: List[str]) -> Fe
         "verbose": False,
     }
     if ranker.user_models is not None:
-        return FeatureRanker(models={n: ranker.user_models[n] for n in voters}, **options)
+        return FeatureRanker(
+            models={n: ranker.fit_models_.get(n, ranker.user_models[n]) for n in voters}, **options
+        )
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")  # the original run already warned about init failures
         sub = FeatureRanker(group=ranker.group, **options)
     sub.models = {
         task: {
-            group: {name: model for name, model in models.items() if name in voters}
+            group: {
+                name: ranker.fit_models_.get(name, model)
+                for name, model in models.items()
+                if name in voters
+            }
             for group, models in groups.items()
         }
         for task, groups in ranker.models.items()
@@ -297,7 +304,11 @@ def _median(scores: Dict[str, Optional[float]]) -> Optional[float]:
     mid = len(ordered) // 2
     if len(ordered) % 2:
         return float(ordered[mid])
-    return float(ordered[mid - 1]) / 2 + float(ordered[mid]) / 2  # a+b could overflow
+    low, high = float(ordered[mid - 1]), float(ordered[mid])
+    with np.errstate(over="ignore"):
+        total = low + high
+    # Halving first keeps a+b from overflowing; it would lose subnormals.
+    return total / 2 if np.isfinite(total) else low / 2 + high / 2
 
 
 def _paired_models(voters: List[str], curve: List[Dict[str, Any]]) -> List[str]:
@@ -306,12 +317,10 @@ def _paired_models(voters: List[str], curve: List[Dict[str, Any]]) -> List[str]:
 
 
 def _warn_if_old_report(report: Dict[str, Any], stacklevel: int) -> None:
-    """Warn when the report predates 2.0 (no "run" block, or made by featranker 1.x)."""
-    made_by = str((report.get("provenance") or {}).get("featranker") or "")
-    major = made_by.split(".")[0]
-    if "run" not in report or (major.isdigit() and int(major) < 2):
+    """Warn when the report's schema_version is not the current one."""
+    if report.get("schema_version") != REPORT_SCHEMA_VERSION:
         warnings.warn(
-            "This report looks older than featranker 2.0 (no 'run' block, or made by 1.x); "
+            f"This report's schema_version is not {REPORT_SCHEMA_VERSION}; "
             "the ablated copy may not validate against report.schema.json.",
             UserWarning,
             stacklevel=stacklevel,

@@ -630,6 +630,8 @@ HASH_CHUNK_ROWS = 65536
 
 
 FINGERPRINT_SCHEME = 2
+# Stamped on every report; see report.schema.json.
+REPORT_SCHEMA_VERSION = 2
 # Integer and boolean columns hash as int64, unsigned ones as uint64, never as float.
 EXACT_INTEGER_TYPES = {"b": "<i8", "i": "<i8", "u": "<u8"}
 # Booleans hash as the integers 0 and 1, so they share the integer tag.
@@ -1712,6 +1714,8 @@ class FeatureRanker:
         self.user_models = None if models is None else _validate_models(models)
         self.models = {} if models is not None else self.init_models()
         self.trained_models: Dict[str, Any] = {}
+        # Unfitted clones of the templates the last fit() used (what ablate() refits).
+        self.fit_models_: Dict[str, Any] = {}
         self.baseline_model_: Any = None
         self.fit_failures_: List[Dict[str, str]] = []
         self.is_fitted_ = False
@@ -1754,6 +1758,8 @@ class FeatureRanker:
         self.__dict__.setdefault("train_subsample_", {})
         # ... and those pickled by 1.16 were fingerprinted with scheme 1.
         self.__dict__.setdefault("fingerprint_scheme_", 1)
+        # ... and those pickled before 2.0 lack the frozen refit configuration.
+        self.__dict__.setdefault("fit_models_", {})
         if "model_families_" not in self.__dict__:
             self.model_families_ = (
                 _registry_families() if self.user_models is None else {}
@@ -1887,8 +1893,10 @@ class FeatureRanker:
             X_values, _ = _encode_categorical(X_values, categorical, names, levels)
 
         candidates: Dict[str, Any] = {}
+        templates: Dict[str, Any] = {}  # before one-hot wrapping
         if self.user_models is not None:
             candidates.update(self.user_models)
+            templates.update(self.user_models)
         else:
             groups = (
                 ["linear", "tree"] if self.group in {"all", "fast"} else [self.group]
@@ -1899,16 +1907,22 @@ class FeatureRanker:
             ]
             for group in groups:
                 built = self.models.get(self.task, {}).get(group, {})
-                if one_hot and group == "linear":
-                    built = {
-                        name: _with_one_hot(model, one_hot, self.max_categories)
-                        for name, model in built.items()
-                    }
-                candidates.update(built)
+                templates.update(built)
+                candidates.update(
+                    {name: _with_one_hot(model, one_hot, self.max_categories) for name, model in built.items()}
+                    if one_hot and group == "linear"
+                    else built
+                )
 
         self._check_family_names(candidates)
 
         self.trained_models = {}
+        self.fit_models_ = {}
+        for name, template in templates.items():
+            try:
+                self.fit_models_[name] = clone(template, safe=False)
+            except Exception:
+                pass  # that model's fit fails and is recorded below
         self.fit_failures_ = []
         # Models see the shadow block too; the dummy below sees real columns only.
         X_models = (
@@ -2165,6 +2179,7 @@ class FeatureRanker:
             )
 
         report = {
+            "schema_version": REPORT_SCHEMA_VERSION,
             "evaluation_mode": "held_out",
             "scoring": scoring_name,
             "n_repeats": n_repeats,
@@ -2409,6 +2424,7 @@ class FeatureRanker:
         if self.max_categories is not None:
             run["max_categories"] = self.max_categories
         result = {
+            "schema_version": REPORT_SCHEMA_VERSION,
             "evaluation_mode": "resampled",
             "scoring": first["scoring"],
             "n_repeats": n_repeats,

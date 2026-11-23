@@ -4,8 +4,9 @@
   "title": "FeatRanker report (2.x)",
   "description": "Loose by design: core keys and types only; unknown keys are allowed everywhere.",
   "type": "object",
-  "required": ["evaluation_mode", "scoring", "provenance", "run", "failures"],
+  "required": ["schema_version", "evaluation_mode", "scoring", "provenance", "run", "failures"],
   "properties": {
+    "schema_version": {"const": 2},
     "evaluation_mode": {"enum": ["held_out", "resampled"]},
     "scoring": {"type": "string"},
     "provenance": {

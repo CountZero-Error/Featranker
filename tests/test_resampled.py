@@ -303,7 +303,7 @@ def test_report_shape_and_strict_json():
     report = resample(ranker(), top_k=1)
 
     assert set(report) == {
-        "evaluation_mode", "scoring", "n_repeats", "random_state", "feature_groups",
+        "schema_version", "evaluation_mode", "scoring", "n_repeats", "random_state", "feature_groups",
         "provenance", "run", "top_k", "n_splits", "splits", "stability", "failures",
     }
     assert report["evaluation_mode"] == "resampled"

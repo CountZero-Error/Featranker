@@ -51,12 +51,13 @@ Each model family casts one vote. Voting models are grouped by `family` (for exa
 
 ```python
 {
+    "schema_version": 2,
     "evaluation_mode": "resampled",
     "scoring": "neg_mean_absolute_error",
     "n_repeats": 10,
     "random_state": 0,
     "feature_groups": {"bmi": ["bmi"], "...": ["..."]},
-    "provenance": {"featranker": "0.6.0", "...": "..."},
+    "provenance": {"featranker": "2.0.0", "...": "..."},
     "run": {
         "task": "reg",
         "group": "all",
@@ -116,6 +117,8 @@ Within each split, `rank_std` still measures disagreement between model families
 Every `summarize()` finding has `basis` and `scoring` (the report's scorer name). Rankings, family support, ablation curves and the findings built on them are `"descriptive"`: they describe these models on these rows. Findings that rest on the shadow p- and q-values are `"experimental"`: those values are uncalibrated and not a significance test (today only `insufficient_splits`). Each entry of `models` records `"class"`, the fitted estimator's class name (for example `"Ridge"`), which `ablate()` checks against the ranker's model of that name.
 
 ## ▍ Structure
+
+Every report has a top-level `schema_version`, `2` for all 2.x reports. The code that makes the report stamps it, so it does not depend on `provenance`; `ablate()` warns when it is not 2.
 
 A JSON Schema for these keys ships as `featranker/report.schema.json`; see [Report schema](api.md#report-schema).
 
@@ -216,6 +219,7 @@ With `evidence=True`, each model also has `train_score` and `overfit_gap` (`null
 
 ```python
 {
+    "schema_version": 2,
     "evaluation_mode": "held_out",
     "scoring": "neg_mean_absolute_error",
     "n_repeats": 20,
@@ -225,7 +229,7 @@ With `evidence=True`, each model also has `train_score` and `overfit_gap` (`null
     },
     "baseline_score": -14.7,
     "provenance": {
-        "featranker": "0.5.0",
+        "featranker": "2.0.0",
         "python": "3.13.1",
         "numpy": "2.2.0",
         "scikit-learn": "1.7.1",

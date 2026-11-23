@@ -203,15 +203,21 @@ COLUMN_SCALERS = (StandardScaler, MinMaxScaler, MaxAbsScaler, RobustScaler)
 
 def _is_column_step(step: Any) -> bool:
     # An imputer with add_indicator=True would append columns.
-    if isinstance(step, SimpleImputer):
+    # Exact classes only: a subclass may reorder columns.
+    if type(step) is SimpleImputer:
         return not step.add_indicator
-    return isinstance(step, COLUMN_SCALERS)
+    return type(step) in COLUMN_SCALERS
 
 
 def _unwrap(model: Any, *arrays: np.ndarray) -> Tuple[Any, List[np.ndarray]]:
     """The final estimator and the arrays passed through leading column scalers."""
     if not isinstance(model, Pipeline):
         return model, list(arrays)
+    if type(model) is not Pipeline:
+        raise ValueError(
+            f"{type(model).__name__} is a Pipeline subclass; Pipeline subclasses are not "
+            "supported because they may reorder columns"
+        )
     *earlier, (_, final) = model.steps
     for _, step in earlier:
         if isinstance(step, ColumnTransformer):
@@ -250,7 +256,7 @@ def _keeps_columns(remainder: Any) -> bool:
     """"drop", "passthrough", or steps that keep columns one for one."""
     if isinstance(remainder, str):
         return remainder in ("drop", "passthrough")
-    steps = [step for _, step in remainder.steps] if isinstance(remainder, Pipeline) else [remainder]
+    steps = [step for _, step in remainder.steps] if type(remainder) is Pipeline else [remainder]
     return all(
         step is None or isinstance(step, str) and step == "passthrough" or _is_column_step(step)
         for step in steps
@@ -263,13 +269,13 @@ def _one_hot_fold(model: Any) -> Optional[_Fold]:
     OneHotEncoder plus a remainder, then the estimator), how to sum its output
     columns back to input columns; None for any other model.
     """
-    if not (isinstance(model, Pipeline) and len(model.steps) == 2):
+    if not (type(model) is Pipeline and len(model.steps) == 2):
         return None
     ct = model[0]
     if not (
-        isinstance(ct, ColumnTransformer)
+        type(ct) is ColumnTransformer
         and [name for name, _, _ in ct.transformers] == ["cat"]
-        and isinstance(ct.transformers[0][1], _FeatRankerOneHot)
+        and type(ct.transformers[0][1]) is _FeatRankerOneHot
         and _keeps_columns(ct.remainder)
     ):
         return None
@@ -325,9 +331,26 @@ def _shap_values(
         # Sum each one-hot block back to its source column; remainder maps by index.
         folded = np.zeros(stacked.shape[:2] + (fold.n_features_in_,))
         for source, cols in fold.blocks:
-            folded[:, :, source] = stacked[:, :, cols].sum(axis=2)
+            with np.errstate(over="ignore"):
+                folded[:, :, source] = stacked[:, :, cols].sum(axis=2)
+        if not np.isfinite(folded).all():
+            raise ValueError("SHAP values overflow when summed")
         stacked = folded
     return name, stacked
+
+
+def _finite_mean_abs(per_row: np.ndarray) -> float:
+    """Mean over rows, then classes, of |per_row|; scaled only if the plain mean overflows."""
+    magnitude = np.abs(per_row)
+    with np.errstate(over="ignore"):
+        value = float(magnitude.mean(axis=1).mean())
+    if not np.isfinite(value):
+        peak = float(magnitude.max())
+        with np.errstate(over="ignore"):
+            value = float((magnitude / peak).mean(axis=1).mean()) * peak
+    if not np.isfinite(value):
+        raise ValueError("SHAP mean_abs overflows")
+    return value
 
 
 def _group_summary(
@@ -341,7 +364,10 @@ def _group_summary(
     classes = stacked[-1:] if len(stacked) <= 2 else stacked
     summary: Dict[str, Dict[str, Optional[float]]] = {}
     for group, columns in groups.items():
-        per_row = classes[:, :, columns].sum(axis=2)  # sum over member columns
+        with np.errstate(over="ignore"):
+            per_row = classes[:, :, columns].sum(axis=2)  # sum over member columns
+        if not np.isfinite(per_row).all():
+            raise ValueError("SHAP group contributions overflow")
         direction = None
         # Codes are labels, so a correlation with the SHAP values means nothing.
         if len(columns) == 1 and len(classes) == 1 and columns[0] not in categorical:
@@ -349,7 +375,7 @@ def _group_summary(
             rho = _spearman_matrix(pair)[0, 1]
             direction = None if np.isnan(rho) else float(rho)
         summary[group] = {
-            "mean_abs": float(np.abs(per_row).mean(axis=1).mean()),
+            "mean_abs": _finite_mean_abs(per_row),
             "direction": direction,
         }
     return summary
