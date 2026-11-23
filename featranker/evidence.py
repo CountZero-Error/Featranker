@@ -276,6 +276,9 @@ def _one_hot_fold(model: Any) -> Optional[_Fold]:
     encoder = ct.named_transformers_["cat"]
     cat_cols = list(ct.transformers_[0][2])
     remainder_cols = list(ct.transformers_[-1][2]) if ct.transformers_[-1][0] == "remainder" else []
+    sources = cat_cols + remainder_cols
+    if len(set(sources)) != len(sources) or sorted(sources) != list(range(ct.n_features_in_)):
+        raise ValueError("ColumnTransformer sources must be distinct and cover every input column once")
     infrequent = getattr(encoder, "infrequent_categories_", None) or [None] * len(cat_cols)
     start = ct.output_indices_["cat"].start
     blocks: List[Tuple[int, Any]] = []

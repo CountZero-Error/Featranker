@@ -133,7 +133,7 @@ featranker --task reg --train-data train.csv --eval-data eval.csv \
 
 ## ▍ 10-minute recipe
 
-From a ranking to a validated subset, on three disjoint sets of rows: train (fit), validation (rank and choose `k`), and test (touched once, at the end). The script has four steps: rank on the validation rows; check support (how many models voted, what `summarize()` flags); choose `k` from the validation ablation curve; validate the chosen groups against all features on the test rows with `ablate()`. It runs as is and uses only scikit-learn models (`group="fast"`), so the output does not depend on optional extras.
+From a ranking to a validated subset, on three disjoint sets of rows: train (fit), validation (rank and choose `k`), and test (touched once, at the end). The choice of subset is made on training and validation rows only; the test set is used once, for the frozen choice. The script has four steps: rank on the validation rows; check support (how many models voted, what `summarize()` flags); choose `k` from the validation ablation curve; validate the chosen groups against all features on the test rows with `ablate()`. It runs as is and uses only scikit-learn models (`group="fast"`), so the output does not depend on optional extras.
 
 ```python
 from sklearn.datasets import load_diabetes
@@ -172,7 +172,7 @@ chosen groups: ['bmi', 's5', 'bp', 's4', 's3'] (k=5, validation r2 0.46)
 test r2, chosen 5 groups: 0.13   all 10 groups: 0.15
 ```
 
-What this shows. Five models voted, but the validation `summarize()` findings say several groups are tied in rank and three are within noise, so the order below the top is not firm. The validation curve picked `k=5`. On the untouched test rows those five groups score r2 0.13 against 0.15 for all ten: the selection did **not** beat using every feature here, and a smaller feature set is the only gain left (the drop from validation to test is mostly the difference between two small splits, and partly the optimism of choosing `k` on the validation curve; see [Ablation curve](https://github.com/CountZero-Error/Featranker/blob/main/docs/usage.md#ablation-curve)). Report the test number, not the validation one. If the chosen groups do not beat all features on test, keep all features or collect more data.
+What this shows. Five models voted, but the validation `summarize()` findings say several groups are tied in rank and three are within noise, so the order below the top is not firm. The validation curve, which includes `k=10` (all features), picked `k=5`: that is the subset-versus-all decision, and it is frozen before the test rows are touched. On the untouched test rows those five groups score r2 0.13 against 0.15 for all ten: the selection did **not** beat using every feature here, and a smaller feature set is the only gain left (the drop from validation to test is mostly the difference between two small splits, and partly the optimism of choosing `k` on the validation curve; see [Ablation curve](https://github.com/CountZero-Error/Featranker/blob/main/docs/usage.md#ablation-curve)). Report the test number, not the validation one, and do not change the choice because of it: that would make the test rows part of the selection. To decide again, use new development data (or cross-validate inside the training rows), then test once more on rows not used before.
 
 ## ▍ When to use FeatRanker
 

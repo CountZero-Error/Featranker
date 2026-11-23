@@ -19,7 +19,7 @@ Everything else is internal and can change in any release: modules other than `f
 
 ## ▍ Report schema
 
-Every report is described by `featranker/report.schema.json` (JSON Schema draft 2020-12, shipped in the package). It is loose: core keys and types only, unknown keys are allowed.
+Every report is described by `featranker/report.schema.json` (JSON Schema draft 2020-12, shipped in the package). It is loose: core keys and types only, unknown keys are allowed. The stability promise covers reports made by 2.x from 2.x inputs. `ablate()` on an older (before 2.0, 1.x) report warns, and its output may not validate against the schema.
 
 ```python
 import json

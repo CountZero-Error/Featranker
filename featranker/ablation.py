@@ -291,12 +291,31 @@ def _refit_scores(
 
 def _median(scores: Dict[str, Optional[float]]) -> Optional[float]:
     present = [score for score in scores.values() if score is not None]
-    return float(np.median(present)) if present else None
+    if not present:
+        return None
+    ordered = sorted(present)
+    mid = len(ordered) // 2
+    if len(ordered) % 2:
+        return float(ordered[mid])
+    return float(ordered[mid - 1]) / 2 + float(ordered[mid]) / 2  # a+b could overflow
 
 
 def _paired_models(voters: List[str], curve: List[Dict[str, Any]]) -> List[str]:
     """The voters with a score at every k, in report order."""
     return [name for name in voters if all(row["scores"][name] is not None for row in curve)]
+
+
+def _warn_if_old_report(report: Dict[str, Any], stacklevel: int) -> None:
+    """Warn when the report predates 2.0 (no "run" block, or made by featranker 1.x)."""
+    made_by = str((report.get("provenance") or {}).get("featranker") or "")
+    major = made_by.split(".")[0]
+    if "run" not in report or (major.isdigit() and int(major) < 2):
+        warnings.warn(
+            "This report looks older than featranker 2.0 (no 'run' block, or made by 1.x); "
+            "the ablated copy may not validate against report.schema.json.",
+            UserWarning,
+            stacklevel=stacklevel,
+        )
 
 
 def ablate(
@@ -315,6 +334,7 @@ def ablate(
 ) -> Report:
     """A copy of report with an "ablation" block; see FeatureRanker.ablate()."""
     voters = _voters(ranker, report, _stacklevel)
+    _warn_if_old_report(report, _stacklevel)
     n_groups = len(report["consensus"])
     ks = _validate_ks(ks, n_groups)
     scoring = report["scoring"] if scoring is None else scoring

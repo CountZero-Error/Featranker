@@ -2,7 +2,7 @@
 
 <sub><a href="README.md">◂ Back to docs</a></sub>
 
-Does FeatRanker's selection keep held-out performance close to using all features while dropping features, on real tabular data? This is a descriptive study, fixed in [`PREREG.md`](https://github.com/CountZero-Error/Featranker/blob/main/benchmarks/realdata/PREREG.md) on 2026-11-20 before any run: no significance test, and every dataset and outcome is reported, including where selection loses. The code is [`benchmarks/realdata/run.py`](https://github.com/CountZero-Error/Featranker/tree/main/benchmarks/realdata) (not part of the package, not run by CI). Every number below comes from `benchmarks/results/realdata/realdata-20261120-final.json` (rendered as `realdata-final.md`). FeatRanker 1.22.0, scikit-learn 1.5.1, NumPy 1.26.4.
+Does FeatRanker's selection keep held-out performance close to using all features while dropping features, on real tabular data? This is a descriptive study, fixed in [`PREREG.md`](https://github.com/CountZero-Error/Featranker/blob/main/benchmarks/realdata/PREREG.md) on 2026-11-20 before any run: no significance test, and every dataset and outcome is reported, including where selection loses. The code is [`benchmarks/realdata/run.py`](https://github.com/CountZero-Error/Featranker/tree/main/benchmarks/realdata) (not part of the package, not run by CI). Every number below comes from `benchmarks/results/realdata/realdata-20261120-final.json` (rendered as `realdata-final.md`). FeatRanker 1.22.0 (an internal build; first released as part of 2.0), scikit-learn 1.5.1, NumPy 1.26.4.
 
 ## Short version
 
@@ -109,14 +109,14 @@ Mean delta against `all` over 3 seeds, with [min, max]. Negative means the arm s
 ### What this means for users
 
 - `min_shadow_share=0.5` is a strict filter, and on real data it can keep far fewer features than the signal needs. Do not use it as a default way to shrink a feature set.
-- Choose the subset by held-out score instead: use the [ablation curve](usage.md#ablation-curve) to pick `k`, put that choice inside nested cross-validation, and compare against all features on rows nobody has touched (the [10-minute recipe](../README.md#-10-minute-recipe) does this). If the chosen groups do not match all features on held-out rows, keep all features.
+- Choose the subset by held-out score instead: use the [ablation curve](usage.md#ablation-curve) to pick `k`, make that choice on training or validation rows only, and compare against all features once on rows nobody has touched (the [10-minute recipe](../README.md#-10-minute-recipe) does this; this study itself is an outer 70/30 train/test split per seed with `ConsensusSelector` cross-validating inside the training part, not nested cross-validation). Include all features (the largest `k`) in that curve, so the subset-versus-all decision is also made before the final held-out rows are used.
 - Treat the shadow rule as evidence that a group is distinguishable from noise, not as proof that the groups it drops are useless.
 
 ### What this does not show
 
 - Only 3 seeds and 13 datasets; small differences are noise, and no test was run.
 - Numeric features only, with one fixed selector setting: `group="fast"`, `min_shadow_share=0.5`. Other thresholds, `max_shadow_q`, `min_shadow_families`, and `group="all"` were not studied.
-- It does not show that `fr_half` or `rf_median` are better rules: `fr_half` was given a free choice of `k` (half), and no arm beat all features.
+- It does not show that `fr_half` or `rf_median` are better rules: `fr_half` was given a free choice of `k` (half), and only one of the 117 pairs beat all features by more than 0.01: `rf_median` with `HistGradientBoosting` on kc1 (+0.0185).
 - It measures held-out score, not whether the dropped features are causally or scientifically relevant.
 
 ## Reproduce

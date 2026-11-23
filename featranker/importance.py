@@ -514,7 +514,8 @@ def _resolve_scorer(scoring: Any) -> tuple[Any, str]:
     if callable(scoring):
         # make_scorer objects have no __name__; their score function does.
         named = getattr(scoring, "_score_func", scoring)
-        return scoring, getattr(named, "__name__", type(scoring).__name__)
+        name = getattr(named, "__name__", None)
+        return scoring, name if isinstance(name, str) and name else type(scoring).__name__
     raise TypeError("[!] scoring must be a scikit-learn scorer name or callable.")
 
 

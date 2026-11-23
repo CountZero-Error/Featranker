@@ -309,10 +309,12 @@ def main() -> None:
     results: Dict[str, Any] = {
         "rows": [], "shapes": {}, "versions": _versions(), "featranker": _featranker_info(args.commit),
         "prereg_sha256": hashlib.sha256(PREREG.read_bytes()).hexdigest(), "started": started,
+        "script_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
     }
     if args.resume and args.out.exists():
         prev = json.loads(args.out.read_text())
         for key, now in (("featranker source", (prev["featranker"]["source_sha256"], results["featranker"]["source_sha256"])),
+                         ("script sha256", (prev.get("script_sha256"), results["script_sha256"])),
                          ("prereg sha256", (prev["prereg_sha256"], results["prereg_sha256"])),
                          ("versions", (prev["versions"], results["versions"]))):
             if now[0] != now[1]:
