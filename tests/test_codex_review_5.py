@@ -6,8 +6,8 @@ import warnings
 import numpy as np
 import pytest
 from sklearn import linear_model as lm
-from sklearn.base import BaseEstimator, ClassifierMixin, RegressorMixin
-from sklearn.linear_model import LogisticRegression, Ridge
+from sklearn.base import BaseEstimator, RegressorMixin
+from sklearn.linear_model import Ridge
 from sklearn.metrics import make_scorer, r2_score
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
@@ -42,28 +42,6 @@ class ReversePoisson(lm.PoissonRegressor):
 
     def predict(self, X):
         return super().predict(swap(X))
-
-
-class ProbaOnly(ClassifierMixin, BaseEstimator):
-    """A logistic model without decision_function."""
-
-    def __init__(self, reverse=False):
-        self.reverse = reverse
-
-    def _x(self, X):
-        return swap(X) if self.reverse else np.asarray(X)
-
-    def fit(self, X, y):
-        self.inner_ = LogisticRegression().fit(self._x(X), y)
-        self.classes_, self.coef_ = self.inner_.classes_, self.inner_.coef_
-        self.intercept_ = self.inner_.intercept_
-        return self
-
-    def predict(self, X):
-        return self.inner_.predict(self._x(X))
-
-    def predict_proba(self, X):
-        return self.inner_.predict_proba(self._x(X))
 
 
 def ranked(model, X_train, y_train, X, y, task="reg", scoring=None, **kwargs):
@@ -104,13 +82,6 @@ def test_swapped_columns_never_pass(shap_installed, X, wrap):
     assert supported(ranked(wrap(lm.PoissonRegressor()), TRAIN, y_train, X, y))
 
 
-@pytest.mark.parametrize("X", EVALS.values(), ids=EVALS)
-def test_probability_only_classifier(shap_installed, X):
-    y_train, y = (TRAIN[:, 0] > 0).astype(int), (X[:, 0] > 0).astype(int)
-    assert not supported(ranked(ProbaOnly(True), TRAIN, y_train, X, y, "clf"))
-    assert supported(ranked(ProbaOnly(), TRAIN, y_train, X, y, "clf"))
-
-
 def test_row_order_does_not_matter(shap_installed):
     rng = np.random.default_rng(0)
     X = rng.normal(size=(200, 3))
@@ -147,66 +118,6 @@ def test_gblinear_stays_supported(shap_installed):
             assert supported(ranked(wrapped, X[:200], y[:200], X[200:], y[200:], task))
 
 
-class Saturated(ClassifierMixin, BaseEstimator):
-    """Fixed coefficients, float32 probabilities, mostly rounded to 0 or 1."""
-
-    def __init__(self, reverse=False, slope=200.0):
-        self.reverse, self.slope = reverse, slope
-
-    def fit(self, X, y):
-        self.classes_, self.intercept_ = np.array([0, 1]), np.array([0.0])
-        self.coef_ = np.array([[self.slope, 0.0]])
-        return self
-
-    def predict_proba(self, X):
-        z = (swap(X) if self.reverse else np.asarray(X)) @ self.coef_[0]
-        p = (1 / (1 + np.exp(-np.clip(z, -100, 100)))).astype(np.float32)
-        return np.column_stack([1 - p, p])
-
-    def predict(self, X):
-        return (self.predict_proba(X)[:, 1] > 0.5).astype(int)
-
-
-def saturated_data(n_inside, seed=0):
-    """Column a has n_inside small values and is large elsewhere; b has the opposite sign pattern."""
-    rng = np.random.default_rng(seed)
-    X = rng.choice([-1.0, 1.0], size=(80, 2)) * rng.uniform(0.2, 1.0, size=(80, 2))
-    X[:n_inside] = rng.normal(scale=0.01, size=(n_inside, 2))
-    return X
-
-
-@pytest.mark.parametrize("n_inside", [2, 3, 10])
-@pytest.mark.parametrize("seed", [0, 1, 2])
-def test_saturated_probabilities_are_checked(shap_installed, n_inside, seed):
-    X = saturated_data(n_inside, seed)
-    X[:2] = [[-0.01, -0.01], [0.01, 0.01]]  # equal columns: only saturated rows can tell
-    X[2:n_inside, 1] = X[2:n_inside, 0]
-    y = (X[:, 0] > 0).astype(int)
-    for reverse in (False, True):
-        report = ranked(Saturated(reverse), X, y, X, y, "clf", scoring="accuracy")
-        assert supported(report) is (not reverse)
-
-
-def test_almost_saturated_probabilities_are_checked(shap_installed):
-    # logits beyond 40: p is tiny but not 0, so it must still constrain the sums
-    X = saturated_data(10)
-    X[:10, 1] = X[:10, 0]
-    X[10:] = np.sign(X[10:]) * 0.2
-    X[10:, 0] = -0.2
-    X[10:45, 1], X[45:, 1] = 0.2, -0.2
-    y = (X[:, 0] > 0).astype(int)
-    for reverse in (False, True):
-        report = ranked(Saturated(reverse), X, y, X, y, "clf", scoring="accuracy")
-        assert supported(report) is (not reverse)
-
-
-def test_too_few_unsaturated_rows_are_unsupported(shap_installed):
-    X = saturated_data(1)
-    X[1:] = np.sign(X[1:])  # logits of 200: every other row is rounded to 0 or 1
-    y = (X[:, 0] > 0).astype(int)
-    assert not supported(ranked(Saturated(), X, y, X, y, "clf", scoring="accuracy"))
-
-
 class Float32Reverse(ReverseRidge):
     def predict(self, X):
         return super().predict(X).astype(np.float32)
@@ -234,36 +145,7 @@ def test_underflowing_predictions_stay_supported(shap_installed, wrap, alpha):
     assert supported(ranked(model, X[:700], y[:700], X[700:], y[700:]))
 
 
-class FixedExp(RegressorMixin, BaseEstimator):
-    """exp(slope * a), or of the other column; underflows and overflows."""
-
-    def __init__(self, reverse=False, slope=-2000.0, dtype=np.float64):
-        self.reverse, self.slope, self.dtype = reverse, slope, dtype
-
-    def fit(self, X, y):
-        self.coef_, self.intercept_ = np.array([self.slope, 0.0]), 0.0
-        return self
-
-    def predict(self, X):
-        z = (swap(X) if self.reverse else np.asarray(X)) @ self.coef_
-        with np.errstate(over="ignore", under="ignore"):
-            return np.exp(z).astype(self.dtype)
-
-
-@pytest.mark.parametrize("dtype,slope", [(np.float64, -2000.0), (np.float32, -300.0)])
-def test_underflowed_rows_are_checked(shap_installed, dtype, slope):
-    # the few ordinary rows have equal columns: only underflowed rows can tell
-    X = np.abs(np.random.default_rng(0).normal(size=(80, 2))) + 0.5
-    X[:10, 0] = X[:10, 1] = np.linspace(0, 0.2, 10)
-    X[10:40, 1] = 0.01
-    y = np.exp(slope * X[:, 0])
-    for reverse in (False, True):
-        report = ranked(FixedExp(reverse, slope, dtype), X, y, X, y)
-        assert supported(report) is (not reverse)
-
-
-# larger values hide the swap within the 1e-3 tolerance (documented)
-@pytest.mark.parametrize("value", [1e2, 1e3])
+@pytest.mark.parametrize("value", [1e3, 4e6])
 @pytest.mark.parametrize("wrap", [lambda m: m, lambda m: make_pipeline(StandardScaler(), m)])
 def test_equal_outlier_rows_do_not_hide_changed_columns(shap_installed, wrap, value):
     class ReverseOLS(lm.LinearRegression):

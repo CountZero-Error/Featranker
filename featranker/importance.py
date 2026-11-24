@@ -557,27 +557,47 @@ def _components(model: Any) -> Dict[str, str]:
 
 
 def _python_scalar(value: Any) -> Any:
-    """NumPy bool, integer and floating scalars (not timedelta64) as Python ones."""
-    if isinstance(value, np.bool_):
+    """bool, int, float and str values (subclasses, enums and NumPy scalars, not timedelta64) as the plain type."""
+    if isinstance(value, (bool, np.bool_)):
         return bool(value)
-    if isinstance(value, np.integer) and not isinstance(value, np.timedelta64):
+    if isinstance(value, (int, np.integer)) and not isinstance(value, np.timedelta64):
         return int(value)
-    if isinstance(value, np.floating):
+    if isinstance(value, (float, np.floating)):
         return float(value)
+    if isinstance(value, str):
+        return str.__str__(value)  # a str Enum gives its value
     return value
 
 
-def _json_params(model: Any) -> Dict[str, Any]:
-    """Estimator params restricted to JSON-safe scalars (finite if float); NumPy scalars become Python ones."""
+def _params_equal(first: Dict[str, Any], second: Dict[str, Any]) -> bool:
+    """Same keys, and per key the same plain type and value."""
+    if first.keys() != second.keys():
+        return False
+    for key, value in first.items():
+        one, other = _python_scalar(value), _python_scalar(second[key])
+        if type(one) is not type(other) or one != other:
+            return False
+    return True
+
+
+def _json_params(model: Any, *, legacy: bool = False) -> Dict[str, Any]:
+    """
+    Estimator params restricted to JSON-safe scalars (finite if float), as plain Python types.
+
+    With legacy=True (reports before schema 2), only str, int, bool, None and finite float instances were
+    recorded; NumPy scalars of other types were left out.
+    """
     params = model.get_params(deep=True) if hasattr(model, "get_params") else {}
-    params = {key: _python_scalar(value) for key, value in params.items()}
-    return {
+    if not legacy:
+        params = {key: _python_scalar(value) for key, value in params.items()}
+    params = {
         key: value
         for key, value in params.items()
         if value is None
         or isinstance(value, (str, int, bool))
         or (isinstance(value, float) and math.isfinite(value))
     }
+    return {key: _python_scalar(value) for key, value in params.items()}
 
 
 def _provenance() -> Dict[str, Optional[str]]:

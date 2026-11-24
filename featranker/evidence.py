@@ -5,13 +5,12 @@ Mechanism evidence for a report: correlated feature groups and a SHAP summary.
 import itertools
 import numbers
 import warnings
-from typing import Any, Dict, List, NamedTuple, Optional, Sequence, Tuple, TypeVar, cast
+from typing import Any, Dict, List, Optional, Sequence, Tuple, TypeVar, cast
 
 import numpy as np
 from scipy.cluster.hierarchy import fcluster, linkage
 from scipy.spatial.distance import squareform
 from scipy.stats import rankdata
-from sklearn.base import is_classifier
 from sklearn.compose import ColumnTransformer
 from sklearn.impute import SimpleImputer
 from sklearn.pipeline import Pipeline
@@ -330,6 +329,33 @@ def _stack_shap(values: Any, fold: Optional[_Fold]) -> np.ndarray:
     return stacked
 
 
+def _require_library_class(final: Any) -> None:
+    """Linear SHAP covers scikit-learn and xgboost classes, not subclasses, wrappers or custom ones."""
+    package = type(final).__module__.partition(".")[0]
+    if package not in ("sklearn", "xgboost"):
+        raise ValueError(
+            f"{type(final).__name__} is not a scikit-learn or xgboost class; "
+            "linear SHAP covers those classes only"
+        )
+    params = final.get_params(deep=False) if hasattr(final, "get_params") else {}
+    if any(
+        hasattr(value, "fit") and not isinstance(value, type)
+        for key, value in params.items()
+        if key != "covariance_estimator"
+    ):
+        raise ValueError(
+            f"{type(final).__name__} wraps an estimator; "
+            "linear SHAP covers scikit-learn and xgboost classes only"
+        )
+    if package == "xgboost" and np.ndim(final.coef_) > 1:
+        raise ValueError("SHAP does not support multiclass xgboost linear models")
+    sentinel = params.get("missing")
+    if package == "xgboost" and not (
+        sentinel is None or (isinstance(sentinel, (float, np.floating)) and np.isnan(sentinel))
+    ):
+        raise ValueError("SHAP does not support xgboost linear models with a missing sentinel")
+
+
 def _shap_values(
     model: Any, X: Any, background: Any, shap: Any
 ) -> Tuple[str, np.ndarray]:
@@ -345,136 +371,14 @@ def _shap_values(
         X_final, background_final = (_dense(model[0].transform(a)) for a in (X, background))
     if not (hasattr(final, "coef_") and hasattr(final, "intercept_")):
         return "tree", _stack_shap(shap.TreeExplainer(final).shap_values(X_final), fold)
+    _require_library_class(final)
     if hasattr(final, "decision_function_shape") and len(getattr(final, "classes_", ())) > 2:
         raise ValueError(
             "SHAP does not support one-vs-one classifiers (more than two classes): "
             "their decision function is pairwise"
         )
     masker = shap.maskers.Independent(background_final, max_samples=len(background_final))
-    explainer = shap.LinearExplainer(final, masker)
-    stacked = _stack_shap(explainer.shap_values(X_final), fold)
-    _check_reproduces_output(model, X, stacked)
-    _check_reproduces_output(
-        model, background, _stack_shap(explainer.shap_values(background_final), fold)
-    )
-    return "linear", stacked
-
-
-# rounding margin, in multiples of the eps of the model output's dtype
-_ROUNDING_MARGIN = 8
-_SPREAD_TOLERANCE = 1e-3
-_SATURATION = 64  # a probability within _SATURATION * eps of 1 is saturated
-
-
-def _output_of(model: Any, X: Any) -> Tuple[np.ndarray, Any]:
-    """((n, outputs) of the whole model's own output, finfo of its dtype); raises if it has none."""
-    if hasattr(model, "decision_function"):
-        out = model.decision_function(X)
-    elif is_classifier(model):
-        proba = np.asarray(model.predict_proba(X))
-        if proba.ndim != 2 or proba.shape[1] != 2:
-            raise ValueError("SHAP values do not reproduce the output of this classifier")
-        out = proba[:, 1]
-    else:
-        out = model.predict(X)
-    out = np.asarray(out)
-    # values are cast to float64 below, so wider floats use its finfo
-    floating = np.issubdtype(out.dtype, np.floating) and out.dtype.itemsize <= 8
-    info = np.finfo(out.dtype if floating else np.float64)
-    return out.astype(float).reshape(len(out), -1), info
-
-
-class _Link(NamedTuple):
-    """g(out) lies in [low, high] per row; error is its rounding error, strict links need information."""
-
-    low: np.ndarray
-    high: np.ndarray
-    error: np.ndarray
-    ordinary: np.ndarray
-    strict: bool
-
-
-def _saturating(
-    g: np.ndarray, error: np.ndarray, below: np.ndarray, above: np.ndarray, bounds: Tuple[float, float]
-) -> _Link:
-    """A link whose rows `below` only have g <= bounds[0], and rows `above` only g >= bounds[1]."""
-    low = np.where(below, -np.inf, np.where(above, bounds[1], g))
-    high = np.where(below, bounds[0], np.where(above, np.inf, g))
-    return _Link(low, high, np.where(below | above, 0.0, error), ~(below | above), True)
-
-
-def _links(model: Any, out: np.ndarray, info: Any) -> List[_Link]:
-    """Each link g the model's output allows, with g(out) per row."""
-    n, eps, tiny = len(out), float(info.eps), float(info.tiny)
-    with np.errstate(all="ignore"):
-        links = [_Link(out, out, np.full(n, np.abs(out).max()), np.ones(n, dtype=bool), False)]
-        if hasattr(model, "decision_function"):
-            return links
-        small = out < tiny
-        if not is_classifier(model) and (out >= 0).all():
-            large = np.isposinf(out)
-            logged = np.log(np.where(small | large, 1.0, out))
-            error = 1 + np.abs(logged).max()
-            bounds = (np.log(tiny) + 1, np.log(float(info.max)) - 1)
-            links.append(_saturating(logged, error, small, large, bounds))
-        if ((out >= 0) & (out <= 1)).all():
-            large = 1 - out < _SATURATION * eps
-            p = np.where(small | large, 0.5, out)
-            logit = np.log(p / (1 - p))
-            bounds = (np.log(tiny) + 1, -np.log(_SATURATION * eps) - 1)
-            links.append(_saturating(logit, np.abs(logit) + 1 + 1 / (1 - p), small, large, bounds))
-    return links
-
-
-def _matches_up_to_constant(
-    sums: np.ndarray, terms: np.ndarray, peak: float, link: _Link, eps: float
-) -> bool:
-    """
-    Whether a constant c exists with sums - c = g(out) within tolerance on every row: each
-    row gives an interval for c, and max(lower) <= min(upper). sums and terms (the size of
-    the values added up) come divided by peak; everything is rescaled by the largest value
-    so nothing overflows, and a nonfinite value fails.
-    """
-    low, high, error, ordinary, strict = link
-    if strict and ordinary.sum() < 2:
-        return False
-    finite_edges = np.concatenate([low[~ordinary], high[~ordinary]])
-    finite_edges = finite_edges[np.isfinite(finite_edges)]
-    with np.errstate(all="ignore"):
-        unit = float(np.max([
-            peak, np.abs(low[ordinary]).max(), error.max(), np.abs(finite_edges).max(initial=0.0)
-        ]))
-        s = sums * (peak / unit)
-        g = low[ordinary] / unit
-        rounding = _ROUNDING_MARGIN * eps * (error / unit + terms * (peak / unit))
-        spread = _SPREAD_TOLERANCE * float(np.ptp(g))
-        tol = rounding + spread * ordinary
-        if not (np.isfinite(g).all() and np.isfinite(tol).all()):
-            return False
-        if strict and not float(np.ptp(g)) > 2 * rounding[ordinary].max():
-            return False
-        return bool(np.max(s - high / unit - tol) <= np.min(s - low / unit + tol))
-
-
-def _check_reproduces_output(model: Any, X: Any, stacked: np.ndarray) -> None:
-    """
-    The SHAP sums, up to a constant, must equal the whole model's output on X within
-    rounding, or (a regressor, or a binary classifier by probability) its log or logit.
-    Catches estimators that change columns between X and coef_.
-    """
-    output, info = _output_of(model, X)
-    target = stacked if output.shape[1] == len(stacked) else stacked[-1:]
-    if output.shape[1] != len(target):
-        raise ValueError("SHAP values do not reproduce the model output: shapes differ")
-    peak = float(np.abs(target).max()) or 1.0
-    scaled = target / peak
-    sums, terms = scaled.sum(axis=2), np.abs(scaled).sum(axis=2)
-    for row_sums, row_terms, out in zip(sums, terms, output.T):
-        if not any(
-            _matches_up_to_constant(row_sums, row_terms, peak, link, float(info.eps))
-            for link in _links(model, out, info)
-        ):
-            raise ValueError("SHAP values do not reproduce the model output")
+    return "linear", _stack_shap(shap.LinearExplainer(final, masker).shap_values(X_final), fold)
 
 
 def _finite_mean_abs(per_row: np.ndarray) -> float:

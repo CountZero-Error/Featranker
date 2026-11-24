@@ -100,7 +100,8 @@ def _select(arm: str, X: np.ndarray, y: np.ndarray, task: str, seed: int, smoke:
         cls = RandomForestClassifier if task == "clf" else RandomForestRegressor
         sel = SelectFromModel(cls(n_estimators=n_trees, random_state=seed, n_jobs=-1), threshold="median")
         sel.fit(SimpleImputer(strategy="median", keep_empty_features=True).fit_transform(X), y)
-        return [int(i) for i in np.flatnonzero(sel.get_support())]
+        # An all-missing column is imputed to a constant; it is never selected.
+        return [int(i) for i in np.flatnonzero(sel.get_support() & ~np.isnan(X).all(axis=0))]
     if arm == "fr_share":
         sel = _consensus(task, seed, smoke, min_shadow_share=0.5)
     else:  # fr_half: each feature is its own group, so n_groups = n_features

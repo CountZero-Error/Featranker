@@ -17,6 +17,7 @@ from .importance import (
     _fingerprint,
     _components,
     _json_params,
+    _params_equal,
     _labels_fingerprint,
     _resolve_scorer,
     _validate_X,
@@ -107,12 +108,12 @@ def _voters(ranker: FeatureRanker, report: Dict[str, Any], stacklevel: int = 3) 
         recorded = report["models"][name].get("params")  # older reports have none
         if recorded is None:
             continue
-        current = _json_params(model)
+        current = _json_params(model, legacy=report.get("schema_version") != REPORT_SCHEMA_VERSION)
         if different_version:
             # Parameter names differ between scikit-learn versions: compare the shared ones.
             shared = recorded.keys() & current.keys()
             recorded, current = ({k: p[k] for k in shared} for p in (recorded, current))
-        if current == recorded:
+        if _params_equal(current, recorded):
             continue
         if not different_version:
             raise ValueError(
