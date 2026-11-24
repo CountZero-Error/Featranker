@@ -5,7 +5,7 @@ Mechanism evidence for a report: correlated feature groups and a SHAP summary.
 import itertools
 import numbers
 import warnings
-from typing import Any, Dict, List, Optional, Sequence, Tuple, TypeVar, cast
+from typing import Any, Dict, List, NamedTuple, Optional, Sequence, Tuple, TypeVar, cast
 
 import numpy as np
 from scipy.cluster.hierarchy import fcluster, linkage
@@ -308,29 +308,8 @@ def _one_hot_fold(model: Any) -> Optional[_Fold]:
     return _Fold(len(cat_cols) + len(remainder_cols), blocks)
 
 
-def _shap_values(
-    model: Any, X: Any, background: Any, shap: Any
-) -> Tuple[str, np.ndarray]:
-    """(explainer name, SHAP values shaped (k, n_rows, n_columns))."""
-    fold = _one_hot_fold(model)
-    if fold is None:
-        final, (X_final, background_final) = _unwrap(model, X, background)
-    else:
-        final = model[-1]
-        _refuse_pipeline_subclass(final)
-        if not (hasattr(final, "coef_") and hasattr(final, "intercept_")):
-            raise ValueError("SHAP supports only linear models on one-hot coded columns")
-        X_final, background_final = (_dense(model[0].transform(a)) for a in (X, background))
-    if hasattr(final, "coef_") and hasattr(final, "intercept_"):
-        if hasattr(final, "decision_function_shape") and len(getattr(final, "classes_", ())) > 2:
-            raise ValueError(
-                "SHAP does not support one-vs-one classifiers (more than two classes): "
-                "their decision function is pairwise"
-            )
-        masker = shap.maskers.Independent(background_final, max_samples=len(background_final))
-        name, values = "linear", shap.LinearExplainer(final, masker).shap_values(X_final)
-    else:
-        name, values = "tree", shap.TreeExplainer(final).shap_values(X_final)
+def _stack_shap(values: Any, fold: Optional[_Fold]) -> np.ndarray:
+    """SHAP values shaped (k, n_rows, n_columns), one-hot blocks summed per source column."""
     # (n, p), (n, p, k), or a list of k arrays, depending on model and version.
     stacked = np.stack(values) if isinstance(values, list) else np.asarray(values)
     if stacked.ndim == 2:
@@ -348,24 +327,47 @@ def _shap_values(
         if not np.isfinite(folded).all():
             raise ValueError("SHAP values overflow when summed")
         stacked = folded
-    if name == "linear":
-        _check_reproduces_output(model, X, stacked)
-    return name, stacked
+    return stacked
+
+
+def _shap_values(
+    model: Any, X: Any, background: Any, shap: Any
+) -> Tuple[str, np.ndarray]:
+    """(explainer name, SHAP values shaped (k, n_rows, n_columns))."""
+    fold = _one_hot_fold(model)
+    if fold is None:
+        final, (X_final, background_final) = _unwrap(model, X, background)
+    else:
+        final = model[-1]
+        _refuse_pipeline_subclass(final)
+        if not (hasattr(final, "coef_") and hasattr(final, "intercept_")):
+            raise ValueError("SHAP supports only linear models on one-hot coded columns")
+        X_final, background_final = (_dense(model[0].transform(a)) for a in (X, background))
+    if not (hasattr(final, "coef_") and hasattr(final, "intercept_")):
+        return "tree", _stack_shap(shap.TreeExplainer(final).shap_values(X_final), fold)
+    if hasattr(final, "decision_function_shape") and len(getattr(final, "classes_", ())) > 2:
+        raise ValueError(
+            "SHAP does not support one-vs-one classifiers (more than two classes): "
+            "their decision function is pairwise"
+        )
+    masker = shap.maskers.Independent(background_final, max_samples=len(background_final))
+    explainer = shap.LinearExplainer(final, masker)
+    stacked = _stack_shap(explainer.shap_values(X_final), fold)
+    _check_reproduces_output(model, X, stacked)
+    _check_reproduces_output(
+        model, background, _stack_shap(explainer.shap_values(background_final), fold)
+    )
+    return "linear", stacked
 
 
 # rounding margin, in multiples of the eps of the model output's dtype
 _ROUNDING_MARGIN = 8
-_OUTPUT_SPREAD_TOLERANCE = 1e-3
+_SPREAD_TOLERANCE = 1e-3
+_SATURATION = 64  # a probability within _SATURATION * eps of 1 is saturated
 
 
-def _centred(values: np.ndarray, scale: float) -> np.ndarray:
-    """values / scale with the mean removed; the division comes first so nothing overflows."""
-    scaled = values / scale
-    return scaled - scaled.mean()
-
-
-def _output_of(model: Any, X: Any) -> Tuple[np.ndarray, float]:
-    """((n, outputs) of the whole model's own output, eps of its dtype); raises if it has none."""
+def _output_of(model: Any, X: Any) -> Tuple[np.ndarray, Any]:
+    """((n, outputs) of the whole model's own output, finfo of its dtype); raises if it has none."""
     if hasattr(model, "decision_function"):
         out = model.decision_function(X)
     elif is_classifier(model):
@@ -376,49 +378,103 @@ def _output_of(model: Any, X: Any) -> Tuple[np.ndarray, float]:
     else:
         out = model.predict(X)
     out = np.asarray(out)
-    floating = np.issubdtype(out.dtype, np.floating)
-    eps = float(np.finfo(out.dtype if floating else np.float64).eps)
-    return out.astype(float).reshape(len(out), -1), eps
+    # values are cast to float64 below, so wider floats use its finfo
+    floating = np.issubdtype(out.dtype, np.floating) and out.dtype.itemsize <= 8
+    info = np.finfo(out.dtype if floating else np.float64)
+    return out.astype(float).reshape(len(out), -1), info
+
+
+class _Link(NamedTuple):
+    """g(out) lies in [low, high] per row; error is its rounding error, strict links need information."""
+
+    low: np.ndarray
+    high: np.ndarray
+    error: np.ndarray
+    ordinary: np.ndarray
+    strict: bool
+
+
+def _saturating(
+    g: np.ndarray, error: np.ndarray, below: np.ndarray, above: np.ndarray, bounds: Tuple[float, float]
+) -> _Link:
+    """A link whose rows `below` only have g <= bounds[0], and rows `above` only g >= bounds[1]."""
+    low = np.where(below, -np.inf, np.where(above, bounds[1], g))
+    high = np.where(below, bounds[0], np.where(above, np.inf, g))
+    return _Link(low, high, np.where(below | above, 0.0, error), ~(below | above), True)
+
+
+def _links(model: Any, out: np.ndarray, info: Any) -> List[_Link]:
+    """Each link g the model's output allows, with g(out) per row."""
+    n, eps, tiny = len(out), float(info.eps), float(info.tiny)
+    with np.errstate(all="ignore"):
+        links = [_Link(out, out, np.full(n, np.abs(out).max()), np.ones(n, dtype=bool), False)]
+        if hasattr(model, "decision_function"):
+            return links
+        small = out < tiny
+        if not is_classifier(model) and (out >= 0).all():
+            large = np.isposinf(out)
+            logged = np.log(np.where(small | large, 1.0, out))
+            error = 1 + np.abs(logged).max()
+            bounds = (np.log(tiny) + 1, np.log(float(info.max)) - 1)
+            links.append(_saturating(logged, error, small, large, bounds))
+        if ((out >= 0) & (out <= 1)).all():
+            large = 1 - out < _SATURATION * eps
+            p = np.where(small | large, 0.5, out)
+            logit = np.log(p / (1 - p))
+            bounds = (np.log(tiny) + 1, -np.log(_SATURATION * eps) - 1)
+            links.append(_saturating(logit, np.abs(logit) + 1 + 1 / (1 - p), small, large, bounds))
+    return links
+
+
+def _matches_up_to_constant(
+    sums: np.ndarray, terms: np.ndarray, peak: float, link: _Link, eps: float
+) -> bool:
+    """
+    Whether a constant c exists with sums - c = g(out) within tolerance on every row: each
+    row gives an interval for c, and max(lower) <= min(upper). sums and terms (the size of
+    the values added up) come divided by peak; everything is rescaled by the largest value
+    so nothing overflows, and a nonfinite value fails.
+    """
+    low, high, error, ordinary, strict = link
+    if strict and ordinary.sum() < 2:
+        return False
+    finite_edges = np.concatenate([low[~ordinary], high[~ordinary]])
+    finite_edges = finite_edges[np.isfinite(finite_edges)]
+    with np.errstate(all="ignore"):
+        unit = float(np.max([
+            peak, np.abs(low[ordinary]).max(), error.max(), np.abs(finite_edges).max(initial=0.0)
+        ]))
+        s = sums * (peak / unit)
+        g = low[ordinary] / unit
+        rounding = _ROUNDING_MARGIN * eps * (error / unit + terms * (peak / unit))
+        spread = _SPREAD_TOLERANCE * float(np.ptp(g))
+        tol = rounding + spread * ordinary
+        if not (np.isfinite(g).all() and np.isfinite(tol).all()):
+            return False
+        if strict and not float(np.ptp(g)) > 2 * rounding[ordinary].max():
+            return False
+        return bool(np.max(s - high / unit - tol) <= np.min(s - low / unit + tol))
 
 
 def _check_reproduces_output(model: Any, X: Any, stacked: np.ndarray) -> None:
     """
-    The SHAP sums, up to a constant, must equal the whole model's output on X: within
-    rounding, or (a regressor or a binary classifier by probability) as a non-decreasing
-    function of it. Catches estimators that change columns between X and coef_.
+    The SHAP sums, up to a constant, must equal the whole model's output on X within
+    rounding, or (a regressor, or a binary classifier by probability) its log or logit.
+    Catches estimators that change columns between X and coef_.
     """
-    output, eps = _output_of(model, X)
-    exact_only = hasattr(model, "decision_function")
+    output, info = _output_of(model, X)
     target = stacked if output.shape[1] == len(stacked) else stacked[-1:]
     if output.shape[1] != len(target):
         raise ValueError("SHAP values do not reproduce the model output: shapes differ")
-    peak_shap = float(np.abs(target).max())
-    unit = peak_shap or 1.0
-    for sums, out in zip((target / unit).sum(axis=2), output.T):
-        peak_out = float(np.abs(out[np.isfinite(out)]).max(initial=0.0))
-        scale = max(peak_out, peak_shap) or 1.0
-        shap_c = _centred(sums * (unit / scale), 1.0)
-        out_c = _centred(out, scale)
-        # Rounding grows with the output and with the terms that add up to it.
-        terms = float(np.abs(target / unit).sum(axis=2).max()) * unit
-        tie_rounding = _ROUNDING_MARGIN * eps * terms / scale
-        rounding = max(tie_rounding, _ROUNDING_MARGIN * eps * peak_out / scale)
-        if np.isfinite(out_c).all() and (
-            np.abs(shap_c - out_c).max() <= _OUTPUT_SPREAD_TOLERANCE * float(np.ptp(out_c)) + rounding
+    peak = float(np.abs(target).max()) or 1.0
+    scaled = target / peak
+    sums, terms = scaled.sum(axis=2), np.abs(scaled).sum(axis=2)
+    for row_sums, row_terms, out in zip(sums, terms, output.T):
+        if not any(
+            _matches_up_to_constant(row_sums, row_terms, peak, link, float(info.eps))
+            for link in _links(model, out, info)
         ):
-            continue
-        if not exact_only and _non_decreasing(out, shap_c, tie_rounding, _ROUNDING_MARGIN * eps * peak_out):
-            continue
-        raise ValueError("SHAP values do not reproduce the model output")
-
-
-def _non_decreasing(out: np.ndarray, shap_sum: np.ndarray, rounding: float, out_slack: float) -> bool:
-    """Whether out never falls where shap_sum rises (ties within rounding may swap)."""
-    order = np.argsort(shap_sum, kind="stable")
-    ranked_out, ranked_sum = out[order], shap_sum[order]
-    gap = float(np.ptp(ranked_sum)) * 1e-6 + rounding
-    rises = np.diff(ranked_sum) > gap
-    return bool(np.all(ranked_out[1:][rises] >= ranked_out[:-1][rises] - out_slack))
+            raise ValueError("SHAP values do not reproduce the model output")
 
 
 def _finite_mean_abs(per_row: np.ndarray) -> float:

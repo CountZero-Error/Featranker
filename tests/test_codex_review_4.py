@@ -304,6 +304,9 @@ class Duck:
     def predict(self, X):
         return self.model_.predict(X)
 
+    def __sklearn_tags__(self):  # scorers of scikit-learn >= 1.6 ask for it
+        return Ridge().__sklearn_tags__()
+
 
 class OddParam(Ridge):
     def __init__(self, alpha=1.0, pairs=None):

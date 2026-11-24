@@ -556,9 +556,21 @@ def _components(model: Any) -> Dict[str, str]:
     }
 
 
+def _python_scalar(value: Any) -> Any:
+    """NumPy bool, integer and floating scalars (not timedelta64) as Python ones."""
+    if isinstance(value, np.bool_):
+        return bool(value)
+    if isinstance(value, np.integer) and not isinstance(value, np.timedelta64):
+        return int(value)
+    if isinstance(value, np.floating):
+        return float(value)
+    return value
+
+
 def _json_params(model: Any) -> Dict[str, Any]:
-    """Estimator params restricted to JSON-safe scalars (finite if float)."""
+    """Estimator params restricted to JSON-safe scalars (finite if float); NumPy scalars become Python ones."""
     params = model.get_params(deep=True) if hasattr(model, "get_params") else {}
+    params = {key: _python_scalar(value) for key, value in params.items()}
     return {
         key: value
         for key, value in params.items()

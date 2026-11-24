@@ -298,7 +298,7 @@ With `evidence=True`, each model also has `train_score` and `overfit_gap` (`null
 
 - `provenance` records the installed `featranker` version (`None` if the package is not installed), plus the Python, NumPy, and scikit-learn versions.
 - `run` records the preset and fingerprints of the data and splits, so two reports can be checked for the same inputs; see [Comparing runs](usage.md#comparing-runs).
-- Each model's `params` is its fitted estimator's `get_params(deep=True)`, limited to strings, integers, booleans, `None`, and finite floats. Nested estimator objects are left out, while pipeline entries such as `ridge__alpha` remain.
+- Each model's `params` is its fitted estimator's `get_params(deep=True)`, limited to strings, integers, booleans, `None`, and finite floats. Nested estimator objects are left out, while pipeline entries such as `ridge__alpha` remain. NumPy number and bool scalars are recorded as Python values; other values (lists, arrays, callables, such as the column selectors of a `ColumnTransformer`) are not recorded, so `ablate()` cannot notice a change in them.
 - Each model's `components` maps the name of each estimator-valued entry of `get_params(deep=True)` to its class name (`{"ridge": "Ridge"}`; `{}` if there are none), so `ablate()` can tell a replaced component from the same parameters.
 - Reports are valid strict JSON.
 - `random_state` controls permutation reproducibility. Estimator randomness stays estimator-specific.
