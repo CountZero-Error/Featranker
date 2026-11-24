@@ -503,6 +503,18 @@ def _plain_int(value: Any) -> Any:
     return int(value) if isinstance(value, numbers.Integral) and not isinstance(value, bool) else value
 
 
+def _seed(value: Any, name: str) -> Optional[int]:
+    """None, or an int (NumPy integers too, bools never) in 0..2**64 - 1, as a plain int."""
+    if value is None:
+        return None
+    if not isinstance(value, numbers.Integral) or isinstance(value, bool):
+        raise TypeError(f"[!] {name} must be an int or None.")
+    value = int(value)
+    if not 0 <= value < 2**64:
+        raise ValueError(f"[!] {name} must be non-negative and below 2**64.")
+    return value
+
+
 def _plain_number(value: Any) -> Any:
     """A numpy scalar as a plain int or float, so the report stays JSON-safe."""
     return int(value) if isinstance(value, numbers.Integral) else float(value)
@@ -1718,14 +1730,7 @@ class FeatureRanker:
             raise TypeError("[!] shadows must be True or False.")
         if not isinstance(evidence, bool):
             raise TypeError("[!] evidence must be True or False.")
-        shadow_seed = _plain_int(shadow_seed)
-        if shadow_seed is not None and (
-            not isinstance(shadow_seed, int) or isinstance(shadow_seed, bool)
-        ):
-            raise TypeError("[!] shadow_seed must be an int or None.")
-        if shadow_seed is not None and shadow_seed < 0:
-            # NumPy generators only accept non-negative integer seeds.
-            raise ValueError("[!] shadow_seed must be non-negative.")
+        shadow_seed = _seed(shadow_seed, "shadow_seed")
         if not isinstance(shadow_mode, str) or shadow_mode not in {"joint", "independent"}:
             raise ValueError("[!] shadow_mode must be 'joint' or 'independent'.")
         if not isinstance(missing, str) or missing not in {"error", "impute"}:
@@ -1861,8 +1866,8 @@ class FeatureRanker:
         estimator); a model that cannot take weights is recorded as a fit
         failure, not fit unweighted.
         """
+        random_state = _seed(random_state, "random_state")
         self.is_fitted_ = False
-        random_state = _plain_int(random_state)
         categorical = _categorical_indices(X, self.categorical, feature_names)
         X_values, names = _validate_X(
             X,
@@ -2069,7 +2074,8 @@ class FeatureRanker:
         """
         if not self.is_fitted_:
             raise RuntimeError("[!] Call fit() before rank_features().")
-        n_repeats, random_state = _plain_int(n_repeats), _plain_int(random_state)
+        random_state = _seed(random_state, "random_state")
+        n_repeats = _plain_int(n_repeats)
         if not _is_positive_int(n_repeats):
             raise ValueError("[!] n_repeats must be a positive integer.")
         (scorer, scoring_name), *secondary_scorers = _resolve_scorers(scoring)
@@ -2354,7 +2360,7 @@ class FeatureRanker:
         y_values = _validate_y(y, len(X_values))
         weights = _validate_weights(sample_weight, len(X_values))
         n_repeats, top_k = _plain_int(n_repeats), _plain_int(top_k)
-        random_state = _plain_int(random_state)
+        random_state = _seed(random_state, "random_state")
         if not _is_positive_int(n_repeats):
             raise ValueError("[!] n_repeats must be a positive integer.")
         if not _is_positive_int(top_k):
@@ -2402,7 +2408,7 @@ class FeatureRanker:
                     verbose=self.verbose,
                     shadows=self.shadows,
                     shadow_seed=(
-                        None if self.shadow_seed is None else self.shadow_seed + index
+                        None if self.shadow_seed is None else (self.shadow_seed + index) % 2**64
                     ),
                     evidence=self.evidence,
                     shadow_mode=self.shadow_mode,
@@ -2421,7 +2427,7 @@ class FeatureRanker:
                     sample_weight=None if weights is None else weights[train],
                     shuffle_groups=None if shuffle_labels is None else shuffle_labels[train],
                     max_samples=max_train_samples,
-                    random_state=None if random_state is None else random_state + index,
+                    random_state=None if random_state is None else (random_state + index) % 2**64,
                 )
                 report = ranker.rank_features(
                     X_values[evaluation],
@@ -2429,7 +2435,7 @@ class FeatureRanker:
                     scoring=scoring,
                     feature_groups=feature_groups,
                     n_repeats=n_repeats,
-                    random_state=None if random_state is None else random_state + index,
+                    random_state=None if random_state is None else (random_state + index) % 2**64,
                     sample_weight=None if weights is None else weights[evaluation],
                     max_samples=max_samples,
                     shuffle_groups=(

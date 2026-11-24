@@ -356,6 +356,18 @@ def _require_library_class(final: Any) -> None:
         raise ValueError("SHAP does not support xgboost linear models with a missing sentinel")
 
 
+def _refuse_unsupported_tree(final: Any) -> None:
+    """Tree models whose SHAP values would be wrong, read from the fitted model."""
+    categories = getattr(final, "is_categorical_", None)  # None or an array
+    if categories is not None and np.any(categories):
+        raise ValueError("SHAP does not support histogram boosting with native categorical features")
+    if any(c.__module__.partition(".")[0] == "catboost" for c in type(final).__mro__):
+        read = getattr(final, "get_all_params", None) or getattr(final, "get_params")
+        policy = read().get("grow_policy")
+        if policy is not None and policy != "SymmetricTree":
+            raise ValueError(f"SHAP does not support CatBoost with grow_policy {policy!r}")
+
+
 def _shap_values(
     model: Any, X: Any, background: Any, shap: Any
 ) -> Tuple[str, np.ndarray]:
@@ -370,12 +382,19 @@ def _shap_values(
             raise ValueError("SHAP supports only linear models on one-hot coded columns")
         X_final, background_final = (_dense(model[0].transform(a)) for a in (X, background))
     if not (hasattr(final, "coef_") and hasattr(final, "intercept_")):
+        _refuse_unsupported_tree(final)
         return "tree", _stack_shap(shap.TreeExplainer(final).shap_values(X_final), fold)
     _require_library_class(final)
     if hasattr(final, "decision_function_shape") and len(getattr(final, "classes_", ())) > 2:
         raise ValueError(
             "SHAP does not support one-vs-one classifiers (more than two classes): "
             "their decision function is pairwise"
+        )
+    if type(final).__module__.partition(".")[0] == "xgboost":
+        # gblinear reads a missing cell as 0.0; so do the explained and background rows.
+        X_final, background_final = (
+            np.where(np.isnan(a), 0.0, a)
+            for a in (np.asarray(v, dtype=float) for v in (X_final, background_final))
         )
     masker = shap.maskers.Independent(background_final, max_samples=len(background_final))
     return "linear", _stack_shap(shap.LinearExplainer(final, masker).shap_values(X_final), fold)

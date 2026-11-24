@@ -158,3 +158,5 @@ On this benchmark, the report-only narrator proxy had the lowest mean recall and
 
 - Freeze by SHA-256 of `spike.py`, not by commit as design D6 says: `spikes/` was not committed before the runs. Both result files carry the frozen hash; `spike_dirty: true` only reflects the uncommitted directory.
 - The scoring-sensitivity rescore above is post hoc and is reported only for transparency.
+
+- `spike.py` needs featranker<2.0: it imports `featranker.interpret`, removed in 2.0. Reproduce from a checkout of commit `951088f`, which holds the frozen script (SHA-256 `b90a37cd4c12e7a1a6485c5056475fd3129ccf9903caf811d48e47c1d0cc54e4`) and a compatible package.

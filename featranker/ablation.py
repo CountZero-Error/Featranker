@@ -355,8 +355,8 @@ def ablate(
     _stacklevel: int = 3,  # private: FeatureRanker.ablate passes one more
 ) -> Report:
     """A copy of report with an "ablation" block; see FeatureRanker.ablate()."""
-    voters = _voters(ranker, report, _stacklevel)
     _warn_if_old_report(report, _stacklevel)
+    voters = _voters(ranker, report, _stacklevel)
     n_groups = len(report["consensus"])
     ks = _validate_ks(ks, n_groups)
     scoring = report["scoring"] if scoring is None else scoring

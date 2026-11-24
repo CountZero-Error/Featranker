@@ -267,7 +267,7 @@ def _versions() -> Dict[str, Any]:
     return out
 
 
-def _featranker_info(commit: str) -> Dict[str, Any]:
+def _featranker_info(commit: Optional[str]) -> Dict[str, Any]:
     """The imported tree's own identity (not importlib.metadata): path, source hash, pyproject version."""
     import featranker
 
@@ -289,7 +289,7 @@ def main() -> None:
                         help="comma-separated OpenML data ids")
     parser.add_argument("--data-home", default=None, help="OpenML cache directory")
     parser.add_argument("--out", type=Path, default=HERE / f"results_{datetime.date.today():%Y%m%d}.json")
-    parser.add_argument("--commit", default="482b62d", help="FeatRanker commit, stored as given")
+    parser.add_argument("--commit", default=None, help="FeatRanker commit, stored as given (null if omitted)")
     parser.add_argument("--resume", action="store_true", help="skip dataset x seed already in --out")
     parser.add_argument("--render", type=Path, help="print the tables of an existing result file and exit")
     args = parser.parse_args()
@@ -353,7 +353,11 @@ def main() -> None:
         if not shape["shape_ok"]:
             print(f"[!] {spec['name']} shape {X.shape} differs from PREREG", file=sys.stderr, flush=True)
         for s in todo:
-            rows = run_dataset(X, y, names, task=spec["task"], seed=s)
+            try:
+                rows = run_dataset(X, y, names, task=spec["task"], seed=s)
+            except Exception as exc:  # a failing split is reported, never dropped
+                msg = f"{type(exc).__name__}: {exc}"
+                rows = [_row(a, m, s, None, 0, 0.0, f"split: {msg}") for a in ARMS for m in MODELS]
             results["rows"] += [{**r, "dataset": spec["name"]} for r in rows]
             save()
             failed = sum(r["error"] is not None for r in rows)

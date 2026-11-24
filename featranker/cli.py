@@ -20,7 +20,17 @@ from .importance import (
     _resolve_feature_groups,
     _resolve_max_samples,
     _resolve_scorers,
+    _seed,
 )
+
+
+def _output_path(text: str) -> Path:
+    """The --output value as a Path; only the raw text '-' is refused (Path('./-') collapses to it)."""
+    if text == "-":
+        raise argparse.ArgumentTypeError(
+            "--output '-' is not supported (it would write a file named '-.json'); give a file name"
+        )
+    return Path(text)
 
 
 def _read_csv(path: Path, target: str) -> tuple[List[str], List[tuple[int, List[str]]]]:
@@ -385,7 +395,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--output",
-        type=Path,
+        type=_output_path,
         default=None,
         help=(
             "Write results as JSON to this file path. "
@@ -590,8 +600,6 @@ def _check_output(output_path: Path) -> Optional[str]:
     """Why the report cannot be written to output_path, or None."""
     if output_path.name in {"", ".", ".."}:
         return "--output needs a file name"
-    if output_path.name == "-":
-        return "--output '-' is not supported (it would write a file named '-.json'); give a file name"
     target = _output_file(output_path)
     if target.is_dir():
         return f"--output {str(target)!r} is a directory"
@@ -619,6 +627,10 @@ def main() -> int:
     problem = None if args.output is None else _check_output(args.output)
     if problem:
         parser.error(problem)
+    try:
+        _seed(args.random_state, "random_state")
+    except (TypeError, ValueError) as error:
+        parser.error(str(error))
     try:
         results = _run_ranking(args)
     except (
