@@ -11,6 +11,7 @@ import numpy as np
 from scipy.cluster.hierarchy import fcluster, linkage
 from scipy.spatial.distance import squareform
 from scipy.stats import rankdata
+from sklearn.base import is_classifier
 from sklearn.compose import ColumnTransformer
 from sklearn.impute import SimpleImputer
 from sklearn.pipeline import Pipeline
@@ -209,16 +210,21 @@ def _is_column_step(step: Any) -> bool:
     return type(step) in COLUMN_SCALERS
 
 
-def _unwrap(model: Any, *arrays: np.ndarray) -> Tuple[Any, List[np.ndarray]]:
-    """The final estimator and the arrays passed through leading column scalers."""
-    if not isinstance(model, Pipeline):
-        return model, list(arrays)
-    if type(model) is not Pipeline:
+def _refuse_pipeline_subclass(model: Any) -> None:
+    if isinstance(model, Pipeline) and type(model) is not Pipeline:
         raise ValueError(
             f"{type(model).__name__} is a Pipeline subclass; Pipeline subclasses are not "
             "supported because they may reorder columns"
         )
+
+
+def _unwrap(model: Any, *arrays: np.ndarray) -> Tuple[Any, List[np.ndarray]]:
+    """The final estimator and the arrays passed through leading column scalers."""
+    if not isinstance(model, Pipeline):
+        return model, list(arrays)
+    _refuse_pipeline_subclass(model)
     *earlier, (_, final) = model.steps
+    _refuse_pipeline_subclass(final)
     for _, step in earlier:
         if isinstance(step, ColumnTransformer):
             raise ValueError(
@@ -311,10 +317,16 @@ def _shap_values(
         final, (X_final, background_final) = _unwrap(model, X, background)
     else:
         final = model[-1]
+        _refuse_pipeline_subclass(final)
         if not (hasattr(final, "coef_") and hasattr(final, "intercept_")):
             raise ValueError("SHAP supports only linear models on one-hot coded columns")
         X_final, background_final = (_dense(model[0].transform(a)) for a in (X, background))
     if hasattr(final, "coef_") and hasattr(final, "intercept_"):
+        if hasattr(final, "decision_function_shape") and len(getattr(final, "classes_", ())) > 2:
+            raise ValueError(
+                "SHAP does not support one-vs-one classifiers (more than two classes): "
+                "their decision function is pairwise"
+            )
         masker = shap.maskers.Independent(background_final, max_samples=len(background_final))
         name, values = "linear", shap.LinearExplainer(final, masker).shap_values(X_final)
     else:
@@ -336,7 +348,77 @@ def _shap_values(
         if not np.isfinite(folded).all():
             raise ValueError("SHAP values overflow when summed")
         stacked = folded
+    if name == "linear":
+        _check_reproduces_output(model, X, stacked)
     return name, stacked
+
+
+# rounding margin, in multiples of the eps of the model output's dtype
+_ROUNDING_MARGIN = 8
+_OUTPUT_SPREAD_TOLERANCE = 1e-3
+
+
+def _centred(values: np.ndarray, scale: float) -> np.ndarray:
+    """values / scale with the mean removed; the division comes first so nothing overflows."""
+    scaled = values / scale
+    return scaled - scaled.mean()
+
+
+def _output_of(model: Any, X: Any) -> Tuple[np.ndarray, float]:
+    """((n, outputs) of the whole model's own output, eps of its dtype); raises if it has none."""
+    if hasattr(model, "decision_function"):
+        out = model.decision_function(X)
+    elif is_classifier(model):
+        proba = np.asarray(model.predict_proba(X))
+        if proba.ndim != 2 or proba.shape[1] != 2:
+            raise ValueError("SHAP values do not reproduce the output of this classifier")
+        out = proba[:, 1]
+    else:
+        out = model.predict(X)
+    out = np.asarray(out)
+    floating = np.issubdtype(out.dtype, np.floating)
+    eps = float(np.finfo(out.dtype if floating else np.float64).eps)
+    return out.astype(float).reshape(len(out), -1), eps
+
+
+def _check_reproduces_output(model: Any, X: Any, stacked: np.ndarray) -> None:
+    """
+    The SHAP sums, up to a constant, must equal the whole model's output on X: within
+    rounding, or (a regressor or a binary classifier by probability) as a non-decreasing
+    function of it. Catches estimators that change columns between X and coef_.
+    """
+    output, eps = _output_of(model, X)
+    exact_only = hasattr(model, "decision_function")
+    target = stacked if output.shape[1] == len(stacked) else stacked[-1:]
+    if output.shape[1] != len(target):
+        raise ValueError("SHAP values do not reproduce the model output: shapes differ")
+    peak_shap = float(np.abs(target).max())
+    unit = peak_shap or 1.0
+    for sums, out in zip((target / unit).sum(axis=2), output.T):
+        peak_out = float(np.abs(out[np.isfinite(out)]).max(initial=0.0))
+        scale = max(peak_out, peak_shap) or 1.0
+        shap_c = _centred(sums * (unit / scale), 1.0)
+        out_c = _centred(out, scale)
+        # Rounding grows with the output and with the terms that add up to it.
+        terms = float(np.abs(target / unit).sum(axis=2).max()) * unit
+        tie_rounding = _ROUNDING_MARGIN * eps * terms / scale
+        rounding = max(tie_rounding, _ROUNDING_MARGIN * eps * peak_out / scale)
+        if np.isfinite(out_c).all() and (
+            np.abs(shap_c - out_c).max() <= _OUTPUT_SPREAD_TOLERANCE * float(np.ptp(out_c)) + rounding
+        ):
+            continue
+        if not exact_only and _non_decreasing(out, shap_c, tie_rounding, _ROUNDING_MARGIN * eps * peak_out):
+            continue
+        raise ValueError("SHAP values do not reproduce the model output")
+
+
+def _non_decreasing(out: np.ndarray, shap_sum: np.ndarray, rounding: float, out_slack: float) -> bool:
+    """Whether out never falls where shap_sum rises (ties within rounding may swap)."""
+    order = np.argsort(shap_sum, kind="stable")
+    ranked_out, ranked_sum = out[order], shap_sum[order]
+    gap = float(np.ptp(ranked_sum)) * 1e-6 + rounding
+    rises = np.diff(ranked_sum) > gap
+    return bool(np.all(ranked_out[1:][rises] >= ranked_out[:-1][rises] - out_slack))
 
 
 def _finite_mean_abs(per_row: np.ndarray) -> float:

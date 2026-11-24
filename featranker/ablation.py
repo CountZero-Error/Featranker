@@ -15,6 +15,7 @@ from .importance import (
     REPORT_SCHEMA_VERSION,
     FeatureRanker,
     _fingerprint,
+    _components,
     _json_params,
     _labels_fingerprint,
     _resolve_scorer,
@@ -87,13 +88,24 @@ def _voters(ranker: FeatureRanker, report: Dict[str, Any], stacklevel: int = 3) 
     for name in voters:
         recorded_class = report["models"][name].get("class")  # older reports have none
         model = ranker.trained_models.get(name)
-        if recorded_class is not None and model is not None and type(model).__name__ != recorded_class:
+        if model is None:
+            raise ValueError(
+                f"[!] The report's model '{name}' was not fitted by the ranker's latest fit(); "
+                "use the ranker the report was made with."
+            )
+        if recorded_class is not None and type(model).__name__ != recorded_class:
             raise ValueError(
                 f"[!] The ranker's model '{name}' is a {type(model).__name__}, but the report's "
                 f"is a {recorded_class}; use the ranker the report was made with."
             )
+        components = report["models"][name].get("components")  # older reports have none
+        if components is not None and components != _components(model):
+            raise ValueError(
+                f"[!] The ranker's model '{name}' has other components than the report's; "
+                "use the ranker the report was made with."
+            )
         recorded = report["models"][name].get("params")  # older reports have none
-        if recorded is None or model is None:
+        if recorded is None:
             continue
         current = _json_params(model)
         if different_version:

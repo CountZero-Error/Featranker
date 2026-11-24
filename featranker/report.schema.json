@@ -27,10 +27,11 @@
             "type": "object",
             "additionalProperties": {
               "type": "object",
-              "required": ["family", "evaluation_score", "importance"],
+              "required": ["family", "evaluation_score", "importance", "components"],
               "properties": {
                 "family": {"type": "string"},
                 "importance": {"type": "object"},
+                "components": {"type": "object", "additionalProperties": {"type": "string"}},
                 "evaluation_score": {"type": ["number", "null"]}
               }
             }

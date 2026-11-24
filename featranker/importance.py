@@ -513,7 +513,9 @@ def _resolve_scorer(scoring: Any) -> tuple[Any, str]:
         return get_scorer(scoring), scoring
     if callable(scoring):
         # make_scorer objects have no __name__; their score function does.
-        named = getattr(scoring, "_score_func", scoring)
+        # Only exact scikit-learn scorers: any other object's _score_func means nothing.
+        is_scorer = type(scoring) is type(get_scorer("r2"))
+        named = getattr(scoring, "_score_func", scoring) if is_scorer else scoring
         name = getattr(named, "__name__", None)
         return scoring, name if isinstance(name, str) and name else type(scoring).__name__
     raise TypeError("[!] scoring must be a scikit-learn scorer name or callable.")
@@ -541,6 +543,16 @@ def _failure(model: Optional[str], stage: str, error: Exception) -> Dict[str, An
         "stage": stage,
         "error_type": type(error).__name__,
         "message": str(error),
+    }
+
+
+def _components(model: Any) -> Dict[str, str]:
+    """Class name of each estimator-valued param (not a class), by param name."""
+    params = model.get_params(deep=True) if hasattr(model, "get_params") else {}
+    return {
+        key: type(value).__name__
+        for key, value in params.items()
+        if hasattr(value, "get_params") and not isinstance(value, type)
     }
 
 
@@ -1534,6 +1546,7 @@ def _rank_model(
             "evaluation_score": baseline,
             "in_consensus": baseline_score is None or baseline > baseline_score,
             "params": _json_params(model),
+            "components": _components(model),
             "importance": importances,
         }
         if shadow is not None:
