@@ -16,7 +16,9 @@ import yaml
 from .evidence import auto_groups, auto_groups_record
 from .importance import (
     FeatureRanker,
+    N_REPEATS_MESSAGE,
     _float_target,
+    _is_positive_int,
     _resolve_feature_groups,
     _resolve_max_samples,
     _resolve_scorers,
@@ -498,6 +500,12 @@ def _load_cli_inputs(args: argparse.Namespace) -> Dict[str, Any]:
         )
     if args.task == "reg":
         y_train, y_eval = _float_target(y_train), _float_target(y_eval)
+    if not _is_positive_int(args.n_repeats):
+        raise ValueError(N_REPEATS_MESSAGE)
+    if args.max_samples is not None:
+        _resolve_max_samples(args.max_samples, len(y_eval))
+    if args.max_train_samples is not None:
+        _resolve_max_samples(args.max_train_samples, len(y_train))
     if args.feature_groups == "auto":
         feature_groups: Optional[Dict[str, List[str]]] = auto_groups(
             X_train,
@@ -511,12 +519,6 @@ def _load_cli_inputs(args: argparse.Namespace) -> Dict[str, Any]:
     # Fail fast: rank_features repeats these checks, but only after
     # every model has been fit.
     _resolve_scorers(_scoring_names(args))
-    if args.n_repeats < 1:
-        raise ValueError("[!] n_repeats must be a positive integer.")
-    if args.max_samples is not None:
-        _resolve_max_samples(args.max_samples, len(y_eval))
-    if args.max_train_samples is not None:
-        _resolve_max_samples(args.max_train_samples, len(y_train))
     n_groups = len(_resolve_feature_groups(feature_names, feature_groups))
     if args.ablate_ks is not None and max(args.ablate_ks) > n_groups:
         raise ValueError(

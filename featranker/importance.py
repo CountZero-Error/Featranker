@@ -15,7 +15,7 @@ import re
 import warnings
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Literal, Optional, Sequence, Union
+from typing import Any, Callable, Dict, FrozenSet, List, Literal, Optional, Sequence, Union
 
 import numpy as np
 import sklearn
@@ -375,7 +375,9 @@ DENSE_ONLY_ESTIMATORS = frozenset(
 _FORCE_DENSE_ONE_HOT = False  # tests flip this to compare against dense output
 
 
-def _with_one_hot(pipeline: Any, columns: List[int], max_categories: Optional[int] = None) -> Any:
+def _with_one_hot(
+    pipeline: Any, columns: List[int], max_categories: Optional[int] = None, dense: bool = False
+) -> Any:
     """
     A built-in linear pipeline whose numeric steps skip `columns`, which are one-hot coded.
 
@@ -385,7 +387,8 @@ def _with_one_hot(pipeline: Any, columns: List[int], max_categories: Optional[in
     """
     *numeric_steps, (_, estimator) = pipeline.steps
     dense = (
-        _FORCE_DENSE_ONE_HOT
+        dense
+        or _FORCE_DENSE_ONE_HOT
         or type(estimator).__name__ in DENSE_ONLY_ESTIMATORS
         # sparse input made saga stop early
         or getattr(estimator, "solver", None) in ("sag", "saga")
@@ -483,17 +486,21 @@ def _float_target(values: np.ndarray) -> np.ndarray:
         raise ValueError("[!] Regression targets must be numeric.") from error
 
 
+MAX_COUNT = 2**63  # counts must stay serialisable in reports
+N_REPEATS_MESSAGE = "[!] n_repeats must be a positive integer below 2**63."
+
+
 def _is_positive_int(value: Any) -> bool:
-    return isinstance(value, int) and not isinstance(value, bool) and value >= 1
+    return isinstance(value, int) and not isinstance(value, bool) and 1 <= value < MAX_COUNT
 
 
 def _resolve_max_samples(value: Any, n_rows: int) -> int:
     """Rows to score: a positive int (capped at n_rows) or a float share in (0, 1]."""
     if not isinstance(value, numbers.Real) or isinstance(value, bool):
         raise ValueError("[!] max_samples must be a positive int or a float in (0, 1].")
-    if isinstance(value, numbers.Integral) and int(value) >= 1:
+    if isinstance(value, numbers.Integral) and 1 <= int(value) < MAX_COUNT:
         return min(int(value), n_rows)
-    if not isinstance(value, numbers.Integral) and 0 < float(value) <= 1:
+    if not isinstance(value, numbers.Integral) and 0 < value <= 1:  # type: ignore[operator]  # no float(): a huge Fraction overflows
         return max(1, int(float(value) * n_rows))
     raise ValueError("[!] max_samples must be a positive int or a float in (0, 1].")
 
@@ -1641,6 +1648,9 @@ def _rank_model(
 
 
 class FeatureRanker:
+    # Names of built-in models one-hot coded densely (ablate() on pre-2.0 reports sets it on its copy).
+    _dense_one_hot: FrozenSet[str] = frozenset()
+
     def __init__(
         self,
         task: Literal["clf", "reg"],
@@ -1959,7 +1969,10 @@ class FeatureRanker:
                 built = self.models.get(self.task, {}).get(group, {})
                 templates.update(built)
                 candidates.update(
-                    {name: _with_one_hot(model, one_hot, self.max_categories) for name, model in built.items()}
+                    {
+                        name: _with_one_hot(model, one_hot, self.max_categories, name in self._dense_one_hot)
+                        for name, model in built.items()
+                    }
                     if one_hot and group == "linear"
                     else built
                 )
@@ -2077,7 +2090,7 @@ class FeatureRanker:
         random_state = _seed(random_state, "random_state")
         n_repeats = _plain_int(n_repeats)
         if not _is_positive_int(n_repeats):
-            raise ValueError("[!] n_repeats must be a positive integer.")
+            raise ValueError(N_REPEATS_MESSAGE)
         (scorer, scoring_name), *secondary_scorers = _resolve_scorers(scoring)
 
         categorical = [
@@ -2349,6 +2362,7 @@ class FeatureRanker:
         ranker's own fitted state is not changed. Pass development data only,
         never the final test set.
         """
+        random_state = _seed(random_state, "random_state")
         categorical = _categorical_indices(X, self.categorical, feature_names)
         # Raw values: each split learns its own levels in fit().
         X_values, names = _validate_X(
@@ -2360,11 +2374,10 @@ class FeatureRanker:
         y_values = _validate_y(y, len(X_values))
         weights = _validate_weights(sample_weight, len(X_values))
         n_repeats, top_k = _plain_int(n_repeats), _plain_int(top_k)
-        random_state = _seed(random_state, "random_state")
         if not _is_positive_int(n_repeats):
-            raise ValueError("[!] n_repeats must be a positive integer.")
+            raise ValueError(N_REPEATS_MESSAGE)
         if not _is_positive_int(top_k):
-            raise ValueError("[!] top_k must be a positive integer.")
+            raise ValueError("[!] top_k must be a positive integer below 2**63.")
         if max_samples is not None:
             _resolve_max_samples(max_samples, len(X_values))
         if max_train_samples is not None:

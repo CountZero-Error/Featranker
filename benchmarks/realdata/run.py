@@ -317,9 +317,11 @@ def main() -> None:
         for key, now in (("featranker source", (prev["featranker"]["source_sha256"], results["featranker"]["source_sha256"])),
                          ("script sha256", (prev.get("script_sha256"), results["script_sha256"])),
                          ("prereg sha256", (prev["prereg_sha256"], results["prereg_sha256"])),
-                         ("versions", (prev["versions"], results["versions"]))):
+                         ("versions", (prev["versions"], results["versions"])),
+                         ("commit", (prev["featranker"].get("commit"), args.commit or prev["featranker"].get("commit")))):
             if now[0] != now[1]:
                 parser.error(f"--resume refused: {key} differs from the stored run ({args.out})")
+        results["featranker"]["commit"] = prev["featranker"].get("commit")
         results["rows"], results["started"] = prev["rows"], prev.get("started", started)
         results["shapes"], prior_wall = prev.get("shapes", {}), prev.get("wall_seconds", 0.0)
     done = {(r["dataset"], r["seed"]) for r in results["rows"]}

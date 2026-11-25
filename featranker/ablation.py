@@ -5,7 +5,7 @@ Ablation curve: refit the voting models on the top-k consensus groups.
 import copy
 import numbers
 import warnings
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, FrozenSet, List, Optional, Sequence
 
 import numpy as np
 import sklearn
@@ -64,6 +64,28 @@ def _validate_ks(ks: Any, n_groups: int) -> List[int]:
     return sorted({int(k) for k in ks})
 
 
+_THRESHOLD = "columntransformer__sparse_threshold"
+
+
+def _dense_voters(ranker: FeatureRanker, report: Dict[str, Any]) -> FrozenSet[str]:
+    """Voters 1.x one-hot coded densely: built-in one-hot pipelines of a pre-2.0 report."""
+    if report.get("schema_version") == REPORT_SCHEMA_VERSION or ranker.user_models is not None:
+        return frozenset()
+    dense = set()
+    for name, entry in report["models"].items():
+        model = ranker.trained_models.get(name)
+        recorded = (entry.get("params") or {}).get(_THRESHOLD, 0)
+        if (
+            entry["in_consensus"]
+            and model is not None
+            and _THRESHOLD in _json_params(model)
+            and recorded == 0
+            and not isinstance(recorded, bool)
+        ):
+            dense.add(name)
+    return frozenset(dense)
+
+
 def _voters(ranker: FeatureRanker, report: Dict[str, Any], stacklevel: int = 3) -> List[str]:
     """Names of the voting models; raises when the report cannot be ablated."""
     if not ranker.is_fitted_:
@@ -86,6 +108,7 @@ def _voters(ranker: FeatureRanker, report: Dict[str, Any], stacklevel: int = 3) 
     recorded_version = (report.get("provenance") or {}).get("scikit-learn")
     different_version = recorded_version is not None and recorded_version != sklearn.__version__
     changed: List[str] = []
+    dense = _dense_voters(ranker, report)
     for name in voters:
         recorded_class = report["models"][name].get("class")  # older reports have none
         model = ranker.trained_models.get(name)
@@ -109,6 +132,8 @@ def _voters(ranker: FeatureRanker, report: Dict[str, Any], stacklevel: int = 3) 
         if recorded is None:
             continue
         current = _json_params(model, legacy=report.get("schema_version") != REPORT_SCHEMA_VERSION)
+        if name in dense:  # 1.x recorded the dense threshold as 0 (or nothing)
+            recorded, current = ({**p, _THRESHOLD: 0} for p in (recorded, current))
         if different_version:
             # Parameter names differ between scikit-learn versions: compare the shared ones.
             shared = recorded.keys() & current.keys()
@@ -211,7 +236,9 @@ def _kept_columns(
     return top, [i for i, name in enumerate(ranker.feature_names_) if name in kept]
 
 
-def _sub_ranker(ranker: FeatureRanker, voters: List[str], kept: List[str]) -> FeatureRanker:
+def _sub_ranker(
+    ranker: FeatureRanker, voters: List[str], kept: List[str], dense: FrozenSet[str] = frozenset()
+) -> FeatureRanker:
     """An unfitted ranker with the same preprocessing and only the voting models."""
     options: Dict[str, Any] = {
         "task": ranker.task,
@@ -229,6 +256,7 @@ def _sub_ranker(ranker: FeatureRanker, voters: List[str], kept: List[str]) -> Fe
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")  # the original run already warned about init failures
         sub = FeatureRanker(group=ranker.group, **options)
+    sub._dense_one_hot = dense
     sub.models = {
         task: {
             group: {
@@ -378,6 +406,7 @@ def ablate(
         "sample_weight": train_weight,
         "eval_sample_weight": eval_sample_weight,
     }
+    dense = _dense_voters(ranker, report)
     curve: List[Dict[str, Any]] = []
     failures: List[Dict[str, Any]] = []
     baseline_score: Optional[float] = None
@@ -386,7 +415,7 @@ def ablate(
         kept = [ranker.feature_names_[i] for i in positions]
         data = (X_values[:, positions], y_values, eval_values[:, positions], y_eval_values)
         scores, k_failures, k_baseline = _refit_scores(
-            _sub_ranker(ranker, voters, kept), voters, k, kept, data, settings
+            _sub_ranker(ranker, voters, kept, dense), voters, k, kept, data, settings
         )
         curve.append({
             "k": k,

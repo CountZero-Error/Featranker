@@ -118,7 +118,7 @@ Every `summarize()` finding has `basis` and `scoring` (the report's scorer name)
 
 ## ▍ Structure
 
-Every report has a top-level `schema_version`, `2` for all 2.x reports. The code that makes the report stamps it, so it does not depend on `provenance`; `ablate()` warns when it is not 2.
+Every report has a top-level `schema_version`, `2` for all 2.x reports. The code that makes the report stamps it, so it does not depend on `provenance`; `ablate()` warns when it is not 2, and ablates a 1.x report of built-in models with categorical columns using the dense one-hot preprocessing 1.x used.
 
 A JSON Schema for these keys ships as `featranker/report.schema.json`; see [Report schema](api.md#report-schema).
 
@@ -207,7 +207,7 @@ With `evidence=True`, each model also has `train_score` and `overfit_gap` (`null
             "pairs": [{"groups": ["s1", "s2"], "rho": 0.87}],   # sorted by |rho|
         },
         "shap": {
-            "available": True,        # {"available": False} when shap is not installed
+            "available": True,        # {"available": False} when shap is missing or older than 0.49
             "n_rows": 133,            # evaluation rows explained (at most 1000)
             "unsupported": [{"model": "knn", "reason": "InvalidModelError: ..."}],
         },

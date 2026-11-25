@@ -14,7 +14,14 @@ from sklearn.feature_selection import SelectorMixin
 from sklearn.utils.validation import check_is_fitted
 
 from .evidence import auto_groups, auto_groups_record
-from .importance import FeatureRanker
+from .importance import (
+    N_REPEATS_MESSAGE,
+    FeatureRanker,
+    _is_positive_int,
+    _plain_int,
+    _resolve_max_samples,
+    _seed,
+)
 
 
 FITTED_ATTRIBUTES = (
@@ -160,9 +167,9 @@ class ConsensusSelector(SelectorMixin, BaseEstimator):
                 "[!] Set k, min_shadow_share, max_shadow_q, or min_shadow_families."
             )
         if k is not None and (
-            not isinstance(k, numbers.Integral) or isinstance(k, bool) or k < 1
+            not _is_positive_int(_plain_int(k))
         ):
-            raise ValueError("[!] k must be a positive integer.")
+            raise ValueError("[!] k must be a positive integer below 2**63.")
         if share is not None and (
             not isinstance(share, numbers.Real)
             or isinstance(share, bool)
@@ -199,6 +206,13 @@ class ConsensusSelector(SelectorMixin, BaseEstimator):
         for attribute in FITTED_ATTRIBUTES:
             self.__dict__.pop(attribute, None)
         self._validate_rule()
+        _seed(self.random_state, "random_state")
+        _seed(self.shadow_seed, "shadow_seed")
+        if not _is_positive_int(_plain_int(self.n_repeats)):
+            raise ValueError(N_REPEATS_MESSAGE)
+        for option in (self.max_samples, self.max_train_samples):
+            if option is not None:
+                _resolve_max_samples(option, 1)
         if self.max_shadow_q is not None:
             warnings.warn(
                 "max_shadow_q is experimental: shadow q-values are uncalibrated "

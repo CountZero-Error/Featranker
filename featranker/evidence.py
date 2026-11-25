@@ -4,6 +4,7 @@ Mechanism evidence for a report: correlated feature groups and a SHAP summary.
 
 import itertools
 import numbers
+import re
 import warnings
 from typing import Any, Dict, List, Optional, Sequence, Tuple, TypeVar, cast
 
@@ -474,6 +475,17 @@ def _model_X(X: np.ndarray, names: Optional[List[str]]) -> Any:
     return pd.DataFrame(X, columns=names, copy=False)
 
 
+SHAP_MIN_VERSION = "0.49"
+
+
+def _numbers(version: str) -> Tuple[int, ...]:
+    return tuple(int(part) for part in version.split("."))
+
+
+class _OldShap(Exception):
+    pass
+
+
 def shap_evidence(
     models: Dict[str, Any],
     X_eval: np.ndarray,
@@ -493,12 +505,19 @@ def shap_evidence(
     """
     try:
         import shap
+
+        version = str(getattr(shap, "__version__", ""))
+        found = re.match(r"\d+(\.\d+)*", version)  # an unparsable version is accepted
+        is_old = found is not None and _numbers(found[0]) < _numbers(SHAP_MIN_VERSION)
+        if is_old:
+            raise _OldShap(f"{version} is older than the needed {SHAP_MIN_VERSION}")
     except Exception as error:  # a broken shap/numba install is not an ImportError
-        problem = (
-            "is not installed"
-            if isinstance(error, ImportError)
-            else f"failed to import ({type(error).__name__}: {str(error)[:REASON_CHARS]})"
-        )
+        if isinstance(error, ImportError):
+            problem = "is not installed"
+        elif isinstance(error, _OldShap):
+            problem = f"{error} (SHAP values were wrong on NaN in shap 0.46)"
+        else:
+            problem = f"failed to import ({type(error).__name__}: {str(error)[:REASON_CHARS]})"
         warnings.warn(
             f"shap {problem}, so the SHAP evidence is skipped: "
             "pip install 'featranker[shap]'",
