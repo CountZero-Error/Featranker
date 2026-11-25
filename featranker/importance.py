@@ -3,6 +3,7 @@ Feature importance ranking via permutation importance across multiple ML models.
 """
 
 import datetime
+import functools
 import hashlib
 import importlib
 import importlib.metadata
@@ -12,6 +13,7 @@ import math
 import numbers
 import platform
 import re
+import types
 import warnings
 from collections.abc import Mapping
 from pathlib import Path
@@ -21,6 +23,7 @@ import numpy as np
 import sklearn
 import yaml
 from joblib import Parallel, delayed
+import scipy.sparse
 from scipy.stats import binom
 from sklearn.base import clone, is_regressor
 from sklearn.compose import ColumnTransformer, TransformedTargetRegressor
@@ -631,6 +634,94 @@ def _json_params(model: Any, *, legacy: bool = False) -> Dict[str, Any]:
         or (isinstance(value, float) and math.isfinite(value))
     }
     return {key: _python_scalar(value) for key, value in params.items()}
+
+
+MAX_DESCRIBE_DEPTH = 20
+
+
+def _type_name(value: Any) -> str:
+    return f"{type(value).__module__}.{type(value).__qualname__}"
+
+
+def _array_text(array: Any, inner: int, path: FrozenSet[int]) -> str:
+    """dtype (native byte order), shape and bytes (C order) of any array subclass; object arrays as lists."""
+    array = np.asarray(array)
+    if array.dtype == object:
+        return f"ndarray{array.shape}{_describe(array.tolist(), inner, path)}"
+    if array.dtype.names:  # one text per field: the padding bytes of a record are not values
+        fields = ",".join(f"{name}={_array_text(array[name], inner, path)}" for name in array.dtype.names)
+        return f"ndarray{array.shape}{{{fields}}}"
+    data = np.ascontiguousarray(array.astype(array.dtype.newbyteorder("=")))
+    return f"ndarray{data.dtype}{array.shape}{hashlib.sha256(data.tobytes()).hexdigest()}"
+
+
+def _describe(value: Any, depth: int = 0, path: FrozenSet[int] = frozenset()) -> str:
+    """
+    A canonical text of a parameter value, equal for equal values and free of addresses.
+
+    Strange values (failing __repr__ or __eq__, cycles, huge ints) and values nested deeper than
+    MAX_DESCRIBE_DEPTH, or inside themselves, are described by their type alone.
+    """
+    kind = _type_name(value)
+    if depth > MAX_DESCRIBE_DEPTH or id(value) in path:
+        return kind
+    try:
+        inner, path = depth + 1, path | {id(value)}
+        value = _python_scalar(value)
+        if value is None or isinstance(value, (bool, int, float, str, bytes, complex, range)):
+            return f"{_type_name(value)}:{value!r}"
+        if isinstance(value, np.generic):
+            return f"{kind}:{value}"  # str, not repr: NumPy 1 and 2 differ
+        if isinstance(value, slice):
+            parts = (value.start, value.stop, value.step)
+            return f"{kind}[{','.join(_describe(part, inner, path) for part in parts)}]"
+        if isinstance(value, (list, tuple)):
+            return f"{kind}[{','.join(_describe(item, inner, path) for item in value)}]"
+        if isinstance(value, (set, frozenset)):
+            return f"{kind}{{{','.join(sorted(_describe(item, inner, path) for item in value))}}}"
+        if isinstance(value, dict):
+            pairs = ((_describe(k, inner, path), _describe(v, inner, path)) for k, v in value.items())
+            return f"dict{{{','.join(sorted(f'{k}:{v}' for k, v in pairs))}}}"
+        if isinstance(value, np.ndarray):
+            text = _array_text(value, inner, path)
+            if np.ma.isMaskedArray(value):
+                text += _array_text(np.ma.getmaskarray(value), inner, path)
+            return text
+        if scipy.sparse.issparse(value):
+            matrix = value.tocsr(copy=True)
+            matrix.sum_duplicates()
+            parts = (matrix.data, matrix.indices, matrix.indptr)
+            return f"sparse{matrix.shape}{','.join(_array_text(part, inner, path) for part in parts)}"
+        if kind.startswith("pandas."):
+            names = list(value.columns) if hasattr(value, "columns") else getattr(value, "name", None)
+            return f"{kind}[{_describe(value.to_numpy(), inner, path)},{_describe(names, inner, path)}]"
+        if isinstance(value, functools.partial):
+            parts = (value.func, value.args, value.keywords)
+            return f"{kind}[{','.join(_describe(part, inner, path) for part in parts)}]"
+        name = getattr(value, "__qualname__", None) or getattr(value, "__name__", None)
+        if callable(value) and name and (isinstance(value, type) or not hasattr(value, "get_params")):
+            # np.ufunc names vary in module; method descriptors only know their class.
+            owner_class = getattr(value, "__objclass__", None)
+            home = getattr(value, "__module__", None) or getattr(owner_class, "__module__", None)
+            module = "" if isinstance(value, np.ufunc) else home
+            owner = getattr(value, "__self__", None)
+            bound = "" if owner is None or isinstance(owner, (types.ModuleType, type)) else _describe(
+                owner, inner, path)
+            return f"callable:{module}.{name}{bound}"
+    except Exception:
+        pass
+    return kind
+
+
+def _param_hashes(model: Any) -> Dict[str, str]:
+    """sha256 of the described value of each get_params(deep=True) parameter that _json_params leaves out."""
+    params = model.get_params(deep=True) if hasattr(model, "get_params") else {}
+    held = _json_params(model)
+    return {
+        key: hashlib.sha256(_describe(value).encode("utf-8", "backslashreplace")).hexdigest()
+        for key, value in params.items()
+        if key not in held
+    }
 
 
 def _provenance() -> Dict[str, Optional[str]]:
@@ -1618,6 +1709,7 @@ def _rank_model(
             "in_consensus": baseline_score is None or baseline > baseline_score,
             "params": _json_params(model),
             "components": _components(model),
+            "param_hashes": _param_hashes(model),
             "importance": importances,
         }
         if shadow is not None:
@@ -2084,9 +2176,33 @@ class FeatureRanker:
             "missing": self.missing,
             "model_input": self.model_input,
             "max_categories": self.max_categories,
+            **self._shadow_options(),
         }
         self.is_fitted_ = True
         return self
+
+    def _shadow_options(self) -> Dict[str, Any]:
+        return {
+            "shadows": self.shadows,
+            "shadow_seed": _plain_int(self.shadow_seed),
+            "shadow_mode": self.shadow_mode,
+            "shuffle": self.shuffle,
+        }
+
+    def _check_fit_options(self) -> None:
+        """Raise when an option that shaped the fit was assigned since; pickles without a record pass."""
+        current = {
+            "missing": self.missing,
+            "model_input": self.model_input,
+            "max_categories": self.max_categories,
+            **self._shadow_options(),
+        }
+        recorded = self._fit_settings or {}
+        for key, value in recorded.items():
+            if key == "shuffle" and not recorded.get("shadows"):
+                continue  # the shuffle only shapes the shadows
+            if current[key] != value:
+                raise ValueError(f"[!] {key} was changed after fit(); call fit() again.")
 
     def _validate_assigned(self) -> None:
         """Options that may have been assigned, or unpickled, since __init__."""
@@ -2124,6 +2240,7 @@ class FeatureRanker:
         """
         if not self.is_fitted_:
             raise RuntimeError("[!] Call fit() before rank_features().")
+        self._check_fit_options()
         random_state = _seed(random_state, "random_state")
         n_repeats = _plain_int(n_repeats)
         if not _is_positive_int(n_repeats):

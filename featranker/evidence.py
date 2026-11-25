@@ -549,6 +549,8 @@ def shap_evidence(
                 model, _model_X(rows, names), _model_X(background, names), shap,
                 is_built_in,
             )
+            if len(stacked) > 1 and not len(getattr(model, "classes_", ())):
+                raise ValueError("SHAP does not support regressors with several outputs")
             per_model[name] = {
                 "explainer": explainer,
                 "groups": _group_summary(stacked, rows, groups, categorical),

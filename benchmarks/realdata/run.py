@@ -9,6 +9,7 @@ Not part of the package and not run by CI.
 """
 
 import argparse
+import contextlib
 import datetime
 import hashlib
 import importlib.metadata
@@ -21,7 +22,7 @@ import sys
 import time
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 import numpy as np
 
@@ -278,9 +279,32 @@ def _featranker_info(commit: Optional[str]) -> Dict[str, Any]:
                     and (p.suffix in (".py", ".yaml", ".yml", ".json", ".typed") or p.name == "py.typed")):
         digest.update(f.relative_to(pkg).as_posix().encode() + b"\0" + f.read_bytes() + b"\0")
     pyproject = pkg.parent / "pyproject.toml"
-    match = re.search(r'^version\s*=\s*"([^"]+)"', pyproject.read_text(), re.M) if pyproject.exists() else None
-    return {"file": featranker.__file__, "version": match.group(1) if match else None,
+    if pyproject.exists():
+        match = re.search(r'^version\s*=\s*"([^"]+)"', pyproject.read_text(), re.M)
+        version = match.group(1) if match else None
+    else:  # a wheel install has no pyproject beside the package
+        try:
+            version = importlib.metadata.version("featranker")
+        except importlib.metadata.PackageNotFoundError:
+            version = None
+    return {"file": featranker.__file__, "version": version,
             "source_sha256": digest.hexdigest(), "commit": commit}
+
+
+@contextlib.contextmanager
+def _locked(out: Path, parser: argparse.ArgumentParser) -> Iterator[None]:
+    """An exclusive lock file beside the resolved output; removed on exit, only if this run made it."""
+    target = out.resolve()
+    lock = target.with_name(f"{target.name}.lock")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        os.close(os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+    except FileExistsError:
+        parser.error(f"{lock} exists: another run is writing {out}; delete it if no run is active")
+    try:
+        yield
+    finally:
+        lock.unlink(missing_ok=True)
 
 
 def main() -> None:
@@ -308,6 +332,12 @@ def main() -> None:
     if unknown:
         parser.error(f"unknown data ids: {unknown}; choose from {list(by_id)}")
 
+    with _locked(args.out, parser):
+        _run(args, parser, seeds, chosen, by_id)
+
+
+def _run(args: argparse.Namespace, parser: argparse.ArgumentParser, seeds: List[int], chosen: List[int],
+         by_id: Dict[int, Dict[str, Any]]) -> None:
     started = datetime.datetime.now().isoformat(timespec="seconds")
     t0 = time.perf_counter()
     prior_wall = 0.0

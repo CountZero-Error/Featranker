@@ -32,6 +32,7 @@
                 "family": {"type": "string"},
                 "importance": {"type": "object"},
                 "components": {"type": "object", "additionalProperties": {"type": "string"}},
+                "param_hashes": {"type": "object", "additionalProperties": {"type": "string"}},
                 "evaluation_score": {"type": ["number", "null"]}
               }
             }

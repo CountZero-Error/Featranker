@@ -8,6 +8,7 @@ from typing import Any, Dict, FrozenSet, List, Optional, Sequence
 
 import numpy as np
 import sklearn
+from sklearn.base import clone
 
 from .importance import (
     FINGERPRINT_SCHEME,
@@ -17,6 +18,7 @@ from .importance import (
     _components,
     _is_int,
     _json_params,
+    _param_hashes,
     _params_equal,
     _labels_fingerprint,
     _resolve_scorer,
@@ -50,6 +52,7 @@ def _validate_ks(ks: Any, n_groups: int) -> List[int]:
         return _default_ks(n_groups)
     valid = (
         isinstance(ks, (list, tuple, np.ndarray))
+        and (not isinstance(ks, np.ndarray) or ks.ndim == 1)
         and len(ks) > 0
         and all(
             _is_int(k) and 1 <= int(k) <= n_groups
@@ -69,11 +72,8 @@ _THRESHOLD = "columntransformer__sparse_threshold"
 
 def _fit_settings(ranker: FeatureRanker) -> Dict[str, Any]:
     """The preprocessing options of the last fit() (the current attributes if none were recorded)."""
-    return ranker._fit_settings or {
-        "missing": ranker.missing,
-        "model_input": ranker.model_input,
-        "max_categories": ranker.max_categories,
-    }
+    keys = ("missing", "model_input", "max_categories")
+    return {key: (ranker._fit_settings or vars(ranker))[key] for key in keys}
 
 
 def _legacy_dense(ranker: FeatureRanker, report: Dict[str, Any]) -> FrozenSet[str]:
@@ -125,6 +125,15 @@ def _voters(ranker: FeatureRanker, report: Dict[str, Any], stacklevel: int = 3) 
         raise ValueError(
             f"[!] The report's model '{unknown[0]}' is not one of the ranker's models."
         )
+    if set(((report.get("categorical") or {}).get("columns")) or []) != set(ranker.categorical_features_):
+        raise ValueError(
+            "[!] The ranker coded other categorical columns than the report's; "
+            "use the ranker the report was made with."
+        )
+    if report.get("model_input", "array") != _fit_settings(ranker)["model_input"]:
+        raise ValueError(
+            "[!] The ranker's model_input is not the report's; use the ranker the report was made with."
+        )
     recorded_version = (report.get("provenance") or {}).get("scikit-learn")
     different_version = recorded_version is not None and recorded_version != sklearn.__version__
     changed: List[str] = []
@@ -148,24 +157,30 @@ def _voters(ranker: FeatureRanker, report: Dict[str, Any], stacklevel: int = 3) 
                 f"[!] The ranker's model '{name}' has other components than the report's; "
                 "use the ranker the report was made with."
             )
+        pairs = []
         recorded = report["models"][name].get("params")  # older reports have none
-        if recorded is None:
-            continue
-        current = _json_params(model, legacy=report.get("schema_version") != REPORT_SCHEMA_VERSION)
-        if name in dense:  # 1.x recorded the dense threshold as 0 (or nothing)
-            recorded, current = ({**p, _THRESHOLD: 0} for p in (recorded, current))
-        if different_version:
-            # Parameter names differ between scikit-learn versions: compare the shared ones.
-            shared = recorded.keys() & current.keys()
-            recorded, current = ({k: p[k] for k in shared} for p in (recorded, current))
-        if _params_equal(current, recorded):
-            continue
-        if not different_version:
-            raise ValueError(
-                f"[!] The ranker's model '{name}' has other parameters than the report's; "
-                "use the ranker the report was made with."
-            )
-        changed.append(name)
+        if recorded is not None:
+            current = _json_params(model, legacy=report.get("schema_version") != REPORT_SCHEMA_VERSION)
+            if name in dense:  # 1.x recorded the dense threshold as 0 (or nothing)
+                recorded, current = ({**p, _THRESHOLD: 0} for p in (recorded, current))
+            pairs.append((recorded, current))
+        hashes = report["models"][name].get("param_hashes")  # reports before 2.0 have none
+        if hashes is not None:
+            pairs.append((hashes, _param_hashes(model)))
+        for recorded, current in pairs:
+            if different_version:
+                # Parameter names differ between scikit-learn versions: compare the shared ones.
+                shared = recorded.keys() & current.keys()
+                recorded, current = ({k: p[k] for k in shared} for p in (recorded, current))
+            if _params_equal(current, recorded):
+                continue
+            if not different_version:
+                raise ValueError(
+                    f"[!] The ranker's model '{name}' has other parameters than the report's; "
+                    "use the ranker the report was made with."
+                )
+            if name not in changed:
+                changed.append(name)
     if changed:
         # Another scikit-learn version may change defaults, so this cannot be told from a real change.
         warnings.warn(
@@ -268,8 +283,15 @@ def _sub_ranker(
         "verbose": False,
     }
     if ranker.user_models is not None:
+        # Rankers pickled before 1.22 have no fit_models_ entry: refit a clone of the fitted model.
         return FeatureRanker(
-            models={n: ranker.fit_models_.get(n, ranker.user_models[n]) for n in voters}, **options
+            models={
+                n: ranker.fit_models_[n]
+                if n in ranker.fit_models_
+                else clone(ranker.trained_models[n], safe=False)
+                for n in voters
+            },
+            **options,
         )
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")  # the original run already warned about init failures
