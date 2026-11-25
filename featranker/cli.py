@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional, Sequence
 import numpy as np
 import yaml
 
-from .evidence import auto_groups, auto_groups_record
+from .evidence import _check_threshold, auto_groups, auto_groups_record
 from .importance import (
     FeatureRanker,
     N_REPEATS_MESSAGE,
@@ -21,6 +21,8 @@ from .importance import (
     _is_positive_int,
     _resolve_feature_groups,
     _resolve_max_samples,
+    _validate_max_categories,
+    _validate_n_jobs,
     _resolve_scorers,
     _seed,
 )
@@ -83,16 +85,20 @@ def _infer_categorical(path: Path, target: str) -> List[str]:
     ]
 
 
+def _check_drop_clash(name: str, target: str, weight: Optional[str]) -> None:
+    if name == target:
+        raise ValueError(f"[!] --drop names the target column '{name}'.")
+    if name == weight:
+        raise ValueError(f"[!] --drop names the --sample-weight column '{name}'.")
+
+
 def _check_drop(
     header: List[str], target: str, weight: Optional[str], drop: Sequence[str], path: Path
 ) -> None:
     for name in drop:
         if name not in header:
             raise ValueError(f"[!] --drop names unknown column '{name}' in '{path}'.")
-        if name == target:
-            raise ValueError(f"[!] --drop names the target column '{name}'.")
-        if name == weight:
-            raise ValueError(f"[!] --drop names the --sample-weight column '{name}'.")
+        _check_drop_clash(name, target, weight)
 
 
 def _load_csv(
@@ -463,21 +469,33 @@ def _scoring_names(args: argparse.Namespace) -> List[str]:
     return names
 
 
-def _load_cli_inputs(args: argparse.Namespace) -> Dict[str, Any]:
-    """Load the CSV files and validate options before any model is fit."""
-    allow_nan = args.missing == "impute"
-    if args.ablate_ks is not None and not args.ablate:
-        raise ValueError("[!] --ablate-ks needs --ablate.")
-    drop = _drop_names(args)
-    categorical = _categorical_names(args)
-    if args.sample_weight == args.target:
-        raise ValueError(
-            f"[!] --sample-weight '{args.sample_weight}' is the target column."
-        )
+def _check_weight_not_categorical(args: argparse.Namespace, categorical: Sequence[str]) -> None:
     if args.sample_weight is not None and args.sample_weight in categorical:
         raise ValueError(
             f"[!] '{args.sample_weight}' is given to both --sample-weight and --categorical."
         )
+
+
+def _check_name_clashes(args: argparse.Namespace) -> List[str]:
+    """Column-name clashes between the options (--categorical auto is read from the file later)."""
+    drop = _drop_names(args)
+    for name in drop:
+        _check_drop_clash(name, args.target, args.sample_weight)
+    if args.categorical is not None and args.categorical.strip() == "auto":
+        return drop
+    categorical = _categorical_names(args)
+    if args.target in categorical:
+        raise ValueError(f"[!] --categorical names the target column '{args.target}'.")
+    _check_weight_not_categorical(args, categorical)
+    return drop
+
+
+def _load_cli_inputs(args: argparse.Namespace) -> Dict[str, Any]:
+    """Load the CSV files and validate options before any model is fit."""
+    allow_nan = args.missing == "impute"
+    drop = _check_name_clashes(args)
+    categorical = _categorical_names(args)
+    _check_weight_not_categorical(args, categorical)
     X_train, y_train, feature_names = _load_csv(
         args.train_data, args.target, allow_nan, categorical, args.sample_weight, drop
     )
@@ -500,12 +518,6 @@ def _load_cli_inputs(args: argparse.Namespace) -> Dict[str, Any]:
         )
     if args.task == "reg":
         y_train, y_eval = _float_target(y_train), _float_target(y_eval)
-    if not _is_positive_int(args.n_repeats):
-        raise ValueError(N_REPEATS_MESSAGE)
-    if args.max_samples is not None:
-        _resolve_max_samples(args.max_samples, len(y_eval))
-    if args.max_train_samples is not None:
-        _resolve_max_samples(args.max_train_samples, len(y_train))
     if args.feature_groups == "auto":
         feature_groups: Optional[Dict[str, List[str]]] = auto_groups(
             X_train,
@@ -516,9 +528,6 @@ def _load_cli_inputs(args: argparse.Namespace) -> Dict[str, Any]:
     else:
         feature_groups = _load_feature_groups(args.feature_groups)
         _check_groups_keep_dropped_out(feature_groups, drop)
-    # Fail fast: rank_features repeats these checks, but only after
-    # every model has been fit.
-    _resolve_scorers(_scoring_names(args))
     n_groups = len(_resolve_feature_groups(feature_names, feature_groups))
     if args.ablate_ks is not None and max(args.ablate_ks) > n_groups:
         raise ValueError(
@@ -629,8 +638,23 @@ def main() -> int:
     problem = None if args.output is None else _check_output(args.output)
     if problem:
         parser.error(problem)
-    try:
+    try:  # every option that needs no file, before any file is read (--categorical auto reads one)
         _seed(args.random_state, "random_state")
+        if not _is_positive_int(args.n_repeats):
+            raise ValueError(N_REPEATS_MESSAGE)
+        for option in (args.max_samples, args.max_train_samples):
+            if option is not None:
+                _resolve_max_samples(option, 1)
+        _validate_max_categories(args.max_categories)
+        _validate_n_jobs(args.n_jobs)
+        _resolve_scorers(_scoring_names(args))
+        if args.feature_groups == "auto":
+            _check_threshold(args.auto_groups_threshold)
+        if args.ablate_ks is not None and not args.ablate:
+            raise ValueError("[!] --ablate-ks needs --ablate.")
+        if args.sample_weight == args.target:
+            raise ValueError(f"[!] --sample-weight '{args.sample_weight}' is the target column.")
+        _check_name_clashes(args)
     except (TypeError, ValueError) as error:
         parser.error(str(error))
     try:

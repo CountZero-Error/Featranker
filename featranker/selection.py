@@ -3,23 +3,27 @@ scikit-learn feature selector built on FeatureRanker.rank_resampled().
 """
 
 import math
-import numbers
 import warnings
 from collections.abc import Mapping
-from typing import Any, Dict, List, Literal, Optional, Union
+from typing import Any, Dict, List, Literal, Optional, Union, cast
 
 import numpy as np
 from sklearn.base import BaseEstimator
 from sklearn.feature_selection import SelectorMixin
 from sklearn.utils.validation import check_is_fitted
 
-from .evidence import auto_groups, auto_groups_record
+from .evidence import _check_threshold, auto_groups, auto_groups_record
 from .importance import (
     N_REPEATS_MESSAGE,
     FeatureRanker,
+    MAX_COUNT,
+    _check_cv,
+    _is_int,
     _is_positive_int,
+    _is_real,
     _plain_int,
     _resolve_max_samples,
+    _resolve_scorers,
     _seed,
 )
 
@@ -171,25 +175,22 @@ class ConsensusSelector(SelectorMixin, BaseEstimator):
         ):
             raise ValueError("[!] k must be a positive integer below 2**63.")
         if share is not None and (
-            not isinstance(share, numbers.Real)
-            or isinstance(share, bool)
+            not _is_real(share)
             or math.isnan(share)
             or not 0 <= share <= 1
         ):
             raise ValueError("[!] min_shadow_share must be a number in [0, 1].")
         if q is not None and (
-            not isinstance(q, numbers.Real)
-            or isinstance(q, bool)
+            not _is_real(q)
             or math.isnan(q)
             or not 0 < q <= 1
         ):
             raise ValueError("[!] max_shadow_q must be a number in (0, 1].")
         if families is not None and (
-            not isinstance(families, numbers.Integral)
-            or isinstance(families, bool)
-            or families < 1
+            not _is_int(families)
+            or not 1 <= families < MAX_COUNT
         ):
-            raise ValueError("[!] min_shadow_families must be a positive integer.")
+            raise ValueError("[!] min_shadow_families must be a positive integer below 2**63.")
 
     def fit(
         self, X: Any, y: Any, groups: Any = None, sample_weight: Any = None
@@ -220,6 +221,32 @@ class ConsensusSelector(SelectorMixin, BaseEstimator):
                 UserWarning,
                 stacklevel=2,
             )
+        ranker = FeatureRanker(
+            self.task,
+            self.group,
+            models=self.models,
+            n_jobs=self.n_jobs,
+            verbose=self.verbose,
+            shadows=any(
+                rule is not None
+                for rule in (self.min_shadow_share, self.max_shadow_q, self.min_shadow_families)
+            ),
+            shadow_seed=self.shadow_seed,
+            shadow_mode=self.shadow_mode,
+            missing=self.missing,
+            categorical=self.categorical,
+            model_input=self.model_input,
+            shuffle=self.shuffle,
+            families=self.families,
+            max_categories=self.max_categories,
+        )
+        _check_cv(self.cv)
+        _resolve_scorers(self.scoring)
+        if isinstance(self.feature_groups, str) and self.feature_groups == "auto":
+            _check_threshold(self.auto_groups_threshold)
+        elif self.feature_groups is not None and not isinstance(self.feature_groups, dict):
+            error = ValueError if isinstance(self.feature_groups, str) else TypeError
+            raise error("[!] feature_groups must be a dict, None, or 'auto'.")
         X = _string_columns(X)
         if hasattr(X, "columns"):
             names = list(X.columns)
@@ -241,29 +268,7 @@ class ConsensusSelector(SelectorMixin, BaseEstimator):
                 feature_names=names,
                 categorical=self.categorical,
             )
-        elif feature_groups is not None and not isinstance(feature_groups, dict):
-            error = ValueError if isinstance(feature_groups, str) else TypeError
-            raise error("[!] feature_groups must be a dict, None, or 'auto'.")
 
-        ranker = FeatureRanker(
-            self.task,
-            self.group,
-            models=self.models,
-            n_jobs=self.n_jobs,
-            verbose=self.verbose,
-            shadows=any(
-                rule is not None
-                for rule in (self.min_shadow_share, self.max_shadow_q, self.min_shadow_families)
-            ),
-            shadow_seed=self.shadow_seed,
-            shadow_mode=self.shadow_mode,
-            missing=self.missing,
-            categorical=self.categorical,
-            model_input=self.model_input,
-            shuffle=self.shuffle,
-            families=self.families,
-            max_categories=self.max_categories,
-        )
         report = ranker.rank_resampled(
             X,
             y,
@@ -271,7 +276,7 @@ class ConsensusSelector(SelectorMixin, BaseEstimator):
             cv=self.cv,
             groups=groups,
             feature_names=feature_names,
-            feature_groups=feature_groups,
+            feature_groups=cast(Optional[Dict[str, List[str]]], feature_groups),  # "auto" resolved above
             n_repeats=self.n_repeats,
             random_state=self.random_state,
             # k may be a NumPy integer (e.g. from a GridSearchCV grid).

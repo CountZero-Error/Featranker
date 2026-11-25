@@ -3,7 +3,6 @@ Mechanism evidence for a report: correlated feature groups and a SHAP summary.
 """
 
 import itertools
-import numbers
 import re
 import warnings
 from typing import Any, Dict, List, Optional, Sequence, Tuple, TypeVar, cast
@@ -101,6 +100,13 @@ def auto_groups_record(threshold: float) -> Dict[str, Any]:
     return {"threshold": float(threshold), "method": "spearman-complete-linkage"}
 
 
+def _check_threshold(threshold: Any) -> None:
+    from .importance import _is_real  # importance imports this module
+
+    if not _is_real(threshold) or not 0 < threshold <= 1:
+        raise ValueError("[!] threshold must be a number with 0 < threshold <= 1.")
+
+
 def auto_groups(
     X: Any,
     *,
@@ -122,12 +128,7 @@ def auto_groups(
     # Local import: importance imports this module.
     from .importance import _categorical_indices, _validate_X
 
-    if (
-        isinstance(threshold, bool)
-        or not isinstance(threshold, numbers.Real)
-        or not 0 < threshold <= 1
-    ):
-        raise ValueError("[!] threshold must be a number with 0 < threshold <= 1.")
+    _check_threshold(threshold)
     if feature_names is None and not hasattr(X, "columns"):
         # Same default names as ConsensusSelector.
         width = np.shape(X)[1] if np.ndim(X) == 2 else 0
@@ -359,6 +360,10 @@ def _require_library_class(final: Any) -> None:
 
 def _refuse_unsupported_tree(final: Any) -> None:
     """Tree models whose SHAP values would be wrong, read from the fitted model."""
+    if type(final).__module__.startswith("lightgbm") and "average_output" in (
+        final.booster_.model_to_string(num_iteration=1).splitlines()
+    ):  # SHAP sums over trees what a random forest averages
+        raise ValueError("SHAP does not support LightGBM random forests")
     categories = getattr(final, "is_categorical_", None)  # None or an array
     if categories is not None and np.any(categories):
         raise ValueError("SHAP does not support histogram boosting with native categorical features")
@@ -370,10 +375,10 @@ def _refuse_unsupported_tree(final: Any) -> None:
 
 
 def _shap_values(
-    model: Any, X: Any, background: Any, shap: Any
+    model: Any, X: Any, background: Any, shap: Any, is_built_in: bool = True
 ) -> Tuple[str, np.ndarray]:
-    """(explainer name, SHAP values shaped (k, n_rows, n_columns))."""
-    fold = _one_hot_fold(model)
+    """(explainer name, SHAP values shaped (k, n_rows, n_columns)); one-hot folding only if is_built_in."""
+    fold = _one_hot_fold(model) if is_built_in else None
     if fold is None:
         final, (X_final, background_final) = _unwrap(model, X, background)
     else:
@@ -383,6 +388,12 @@ def _shap_values(
             raise ValueError("SHAP supports only linear models on one-hot coded columns")
         X_final, background_final = (_dense(model[0].transform(a)) for a in (X, background))
     if not (hasattr(final, "coef_") and hasattr(final, "intercept_")):
+        package = type(final).__module__.partition(".")[0]
+        if package not in ("sklearn", "xgboost", "lightgbm", "catboost"):
+            raise ValueError(
+                f"{type(final).__name__} is not a scikit-learn, xgboost, lightgbm or catboost "
+                "class; tree SHAP covers those classes only"
+            )
         _refuse_unsupported_tree(final)
         return "tree", _stack_shap(shap.TreeExplainer(final).shap_values(X_final), fold)
     _require_library_class(final)
@@ -493,6 +504,7 @@ def shap_evidence(
     groups: Dict[str, List[int]],
     categorical: Sequence[int] = (),
     names: Optional[List[str]] = None,
+    is_built_in: bool = True,
 ) -> Tuple[Dict[str, Any], Dict[str, Dict[str, Any]]]:
     """
     SHAP summary per model on evenly spaced evaluation rows.
@@ -501,14 +513,15 @@ def shap_evidence(
     (the report's evidence.shap block, model name -> its shap entry). X_eval
     and X_train have every column the models were fit on; groups name real
     columns only; categorical lists the code columns, whose direction is None;
-    names, if given, are the column names models get as a DataFrame.
+    names, if given, are the column names models get as a DataFrame; is_built_in:
+    the models are the ranker's own, so their one-hot pipelines may be folded.
     """
     try:
         import shap
 
         version = str(getattr(shap, "__version__", ""))
-        found = re.match(r"\d+(\.\d+)*", version)  # an unparsable version is accepted
-        is_old = found is not None and _numbers(found[0]) < _numbers(SHAP_MIN_VERSION)
+        found = re.match(r"[vV]?(\d+(?:\.\d+)*)", version)  # an unparsable version is accepted
+        is_old = found is not None and _numbers(found[1]) < _numbers(SHAP_MIN_VERSION)
         if is_old:
             raise _OldShap(f"{version} is older than the needed {SHAP_MIN_VERSION}")
     except Exception as error:  # a broken shap/numba install is not an ImportError
@@ -533,7 +546,8 @@ def shap_evidence(
     for name, model in models.items():
         try:
             explainer, stacked = _shap_values(
-                model, _model_X(rows, names), _model_X(background, names), shap
+                model, _model_X(rows, names), _model_X(background, names), shap,
+                is_built_in,
             )
             per_model[name] = {
                 "explainer": explainer,

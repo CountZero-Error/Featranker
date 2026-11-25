@@ -3,7 +3,6 @@ Ablation curve: refit the voting models on the top-k consensus groups.
 """
 
 import copy
-import numbers
 import warnings
 from typing import Any, Dict, FrozenSet, List, Optional, Sequence
 
@@ -16,6 +15,7 @@ from .importance import (
     FeatureRanker,
     _fingerprint,
     _components,
+    _is_int,
     _json_params,
     _params_equal,
     _labels_fingerprint,
@@ -52,7 +52,7 @@ def _validate_ks(ks: Any, n_groups: int) -> List[int]:
         isinstance(ks, (list, tuple, np.ndarray))
         and len(ks) > 0
         and all(
-            isinstance(k, numbers.Integral) and not isinstance(k, bool) and 1 <= int(k) <= n_groups
+            _is_int(k) and 1 <= int(k) <= n_groups
             for k in ks
         )
     )
@@ -67,7 +67,16 @@ def _validate_ks(ks: Any, n_groups: int) -> List[int]:
 _THRESHOLD = "columntransformer__sparse_threshold"
 
 
-def _dense_voters(ranker: FeatureRanker, report: Dict[str, Any]) -> FrozenSet[str]:
+def _fit_settings(ranker: FeatureRanker) -> Dict[str, Any]:
+    """The preprocessing options of the last fit() (the current attributes if none were recorded)."""
+    return ranker._fit_settings or {
+        "missing": ranker.missing,
+        "model_input": ranker.model_input,
+        "max_categories": ranker.max_categories,
+    }
+
+
+def _legacy_dense(ranker: FeatureRanker, report: Dict[str, Any]) -> FrozenSet[str]:
     """Voters 1.x one-hot coded densely: built-in one-hot pipelines of a pre-2.0 report."""
     if report.get("schema_version") == REPORT_SCHEMA_VERSION or ranker.user_models is not None:
         return frozenset()
@@ -84,6 +93,17 @@ def _dense_voters(ranker: FeatureRanker, report: Dict[str, Any]) -> FrozenSet[st
         ):
             dense.add(name)
     return frozenset(dense)
+
+
+def _dense_voters(ranker: FeatureRanker, report: Dict[str, Any]) -> FrozenSet[str]:
+    """Voters to refit densely: those the ranker fitted with sparse_threshold 0, and the legacy ones."""
+    if ranker.user_models is not None:
+        return frozenset()
+    fitted = {
+        name for name, model in ranker.trained_models.items()
+        if _json_params(model).get(_THRESHOLD) == 0
+    }
+    return _legacy_dense(ranker, report) | fitted
 
 
 def _voters(ranker: FeatureRanker, report: Dict[str, Any], stacklevel: int = 3) -> List[str]:
@@ -108,7 +128,7 @@ def _voters(ranker: FeatureRanker, report: Dict[str, Any], stacklevel: int = 3) 
     recorded_version = (report.get("provenance") or {}).get("scikit-learn")
     different_version = recorded_version is not None and recorded_version != sklearn.__version__
     changed: List[str] = []
-    dense = _dense_voters(ranker, report)
+    dense = _legacy_dense(ranker, report)
     for name in voters:
         recorded_class = report["models"][name].get("class")  # older reports have none
         model = ranker.trained_models.get(name)
@@ -188,7 +208,7 @@ def _prepare(
     categorical = [i for i, name in enumerate(names) if name in ranker.categorical_features_]
     options: Dict[str, Any] = {
         "expected_names": names,
-        "allow_nan": ranker.missing == "impute",
+        "allow_nan": _fit_settings(ranker)["missing"] == "impute",
         "categorical": categorical,
     }
     X_values, _ = _validate_X(X, **options)
@@ -243,10 +263,8 @@ def _sub_ranker(
     options: Dict[str, Any] = {
         "task": ranker.task,
         "n_jobs": ranker.n_jobs,
-        "missing": ranker.missing,
-        "model_input": ranker.model_input,
+        **_fit_settings(ranker),
         "categorical": [n for n in ranker.categorical_features_ if n in kept] or None,
-        "max_categories": ranker.max_categories,
         "verbose": False,
     }
     if ranker.user_models is not None:

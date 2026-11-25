@@ -176,6 +176,8 @@ def shap_report(model):
     data, y = coded()
     ranker = FeatureRanker("reg", models={"m": model}, verbose=False, evidence=True)
     ranker.fit(data[:100], y[:100], feature_names=["code", "signal", "noise"])
+    if isinstance(getattr(model, "steps", [("", None)])[0][1], ColumnTransformer):
+        ranker.user_models = None  # only a built-in model's one-hot step is folded (codex-review-9)
     return ranker.rank_features(data[100:], y[100:], scoring="r2", n_repeats=2, random_state=0)
 
 

@@ -353,11 +353,11 @@ def _validate_max_categories(max_categories: Any) -> Optional[int]:
     if max_categories is None:
         return None
     if (
-        not isinstance(max_categories, numbers.Integral)
-        or isinstance(max_categories, bool)
+        not _is_int(max_categories)
         or max_categories < 2
+        or max_categories >= MAX_COUNT
     ):
-        raise ValueError("[!] max_categories must be None or an int of at least 2.")
+        raise ValueError("[!] max_categories must be None or an int of at least 2 and below 2**63.")
     return int(max_categories)
 
 
@@ -407,6 +407,11 @@ def _with_one_hot(
         ),
         estimator,
     )
+
+
+def _validate_n_jobs(n_jobs: Any) -> None:
+    if n_jobs is not None and (not _is_int(n_jobs) or n_jobs == 0):
+        raise ValueError("[!] n_jobs must be None or a non-zero int.")
 
 
 def _validate_y(y: Any, n_rows: int) -> np.ndarray:
@@ -490,31 +495,40 @@ MAX_COUNT = 2**63  # counts must stay serialisable in reports
 N_REPEATS_MESSAGE = "[!] n_repeats must be a positive integer below 2**63."
 
 
+def _is_int(value: Any) -> bool:
+    """An int or NumPy integer; never a bool or a NumPy duration (which counts as an integer)."""
+    return isinstance(value, numbers.Integral) and not isinstance(value, (bool, np.timedelta64))
+
+
+def _is_real(value: Any) -> bool:
+    return isinstance(value, numbers.Real) and not isinstance(value, (bool, np.timedelta64))
+
+
 def _is_positive_int(value: Any) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and 1 <= value < MAX_COUNT
 
 
 def _resolve_max_samples(value: Any, n_rows: int) -> int:
     """Rows to score: a positive int (capped at n_rows) or a float share in (0, 1]."""
-    if not isinstance(value, numbers.Real) or isinstance(value, bool):
+    if not _is_real(value):
         raise ValueError("[!] max_samples must be a positive int or a float in (0, 1].")
-    if isinstance(value, numbers.Integral) and 1 <= int(value) < MAX_COUNT:
+    if _is_int(value) and 1 <= int(value) < MAX_COUNT:
         return min(int(value), n_rows)
-    if not isinstance(value, numbers.Integral) and 0 < value <= 1:  # type: ignore[operator]  # no float(): a huge Fraction overflows
+    if not _is_int(value) and 0 < value <= 1:  # no float(): a huge Fraction overflows
         return max(1, int(float(value) * n_rows))
     raise ValueError("[!] max_samples must be a positive int or a float in (0, 1].")
 
 
 def _plain_int(value: Any) -> Any:
     """A NumPy integer as a plain int (reports stay strict JSON); anything else, bools too, as is."""
-    return int(value) if isinstance(value, numbers.Integral) and not isinstance(value, bool) else value
+    return int(value) if _is_int(value) else value
 
 
 def _seed(value: Any, name: str) -> Optional[int]:
     """None, or an int (NumPy integers too, bools never) in 0..2**64 - 1, as a plain int."""
     if value is None:
         return None
-    if not isinstance(value, numbers.Integral) or isinstance(value, bool):
+    if not _is_int(value):
         raise TypeError(f"[!] {name} must be an int or None.")
     value = int(value)
     if not 0 <= value < 2**64:
@@ -524,7 +538,7 @@ def _seed(value: Any, name: str) -> Optional[int]:
 
 def _plain_number(value: Any) -> Any:
     """A numpy scalar as a plain int or float, so the report stays JSON-safe."""
-    return int(value) if isinstance(value, numbers.Integral) else float(value)
+    return int(value) if _is_int(value) else float(value)
 
 
 def _resolve_scorer(scoring: Any) -> tuple[Any, str]:
@@ -756,7 +770,7 @@ def _splits_fingerprint(splits: List[tuple]) -> str:
 
 def _cv_record(cv: Any) -> Union[int, str]:
     """The integer given, or the splitter's repr."""
-    if isinstance(cv, (int, np.integer)) and not isinstance(cv, bool):
+    if _is_int(cv):
         return int(cv)
     if not callable(getattr(cv, "split", None)):
         return "iterable of splits"
@@ -849,7 +863,7 @@ def _split_indices(indices: Any, n_rows: int) -> np.ndarray:
     if (
         values.ndim != 1
         or len(values) == 0
-        or not np.issubdtype(values.dtype, np.integer)
+        or values.dtype.kind not in "iu"  # not a duration, which NumPy counts as an integer
         or values.min() < 0
         or values.max() >= n_rows
     ):
@@ -858,6 +872,17 @@ def _split_indices(indices: Any, n_rows: int) -> np.ndarray:
             f"within 0..{n_rows - 1}."
         )
     return values.astype(int)
+
+
+def _check_cv(cv: Any) -> None:
+    """Raise unless cv is an int >= 2, a splitter or an iterable; consumes nothing."""
+    if _is_int(cv):
+        if cv < 2:
+            raise ValueError(CV_ERROR)
+    elif isinstance(cv, (str, bytes, bool)) or not (
+        callable(getattr(cv, "split", None)) or hasattr(cv, "__iter__")
+    ):  # str has .split(); reject it first
+        raise ValueError(CV_ERROR)
 
 
 def _resolve_splits(
@@ -869,10 +894,9 @@ def _resolve_splits(
     random_state: Optional[int],
 ) -> List[tuple]:
     """Materialize cv into validated (train, eval) index pairs before any fit."""
+    _check_cv(cv)
     split_y = y_values
-    if isinstance(cv, (int, np.integer)) and not isinstance(cv, bool):
-        if cv < 2:
-            raise ValueError(CV_ERROR)
+    if _is_int(cv):
         # Shuffled folds: unshuffled KFold on sorted data gives misleading splits.
         splitter = StratifiedKFold if task == "clf" else KFold
         cv = splitter(n_splits=int(cv), shuffle=True, random_state=random_state)
@@ -882,12 +906,8 @@ def _resolve_splits(
             # Only the fold assignment sees these codes; each split still fits
             # its own encoder on its training rows.
             split_y = LabelEncoder().fit_transform(y_values)
-    if isinstance(cv, (str, bytes, bool)):  # str has .split(); reject it first
-        raise ValueError(CV_ERROR)
     if callable(getattr(cv, "split", None)):
         pairs = cv.split(X_values, split_y, groups)
-    elif not hasattr(cv, "__iter__"):
-        raise ValueError(CV_ERROR)
     else:
         pairs = cv
 
@@ -1650,6 +1670,9 @@ def _rank_model(
 class FeatureRanker:
     # Names of built-in models one-hot coded densely (ablate() on pre-2.0 reports sets it on its copy).
     _dense_one_hot: FrozenSet[str] = frozenset()
+    # missing, model_input and max_categories as of the last successful fit() (None: not
+    # recorded, as in a pickle from before 2.0; ablate() then uses the current attributes).
+    _fit_settings: Optional[Dict[str, Any]] = None
 
     def __init__(
         self,
@@ -1718,7 +1741,7 @@ class FeatureRanker:
                 so map near-identical custom models to one family; unmapped
                 custom models are separate families. A name that is not a
                 configured model raises ValueError in fit().
-            max_categories: None (default) or an int of at least 2. Built-in
+            max_categories: None (default) or an int of at least 2 and below 2**63. Built-in
                 linear models one-hot encode at most this many levels per
                 categorical column: the most frequent levels, with the rest
                 sharing one infrequent column. A level unseen in training
@@ -1753,6 +1776,7 @@ class FeatureRanker:
             raise ImportError("[!] model_input='dataframe' needs pandas: pip install pandas")
         self.task = task
         self.group = group
+        _validate_n_jobs(n_jobs)
         self.n_jobs = n_jobs
         self.verbose = verbose
         self.shadows = shadows
@@ -1877,6 +1901,9 @@ class FeatureRanker:
         failure, not fit unweighted.
         """
         random_state = _seed(random_state, "random_state")
+        if max_samples is not None:
+            _resolve_max_samples(max_samples, 1)
+        self._validate_assigned()
         self.is_fitted_ = False
         categorical = _categorical_indices(X, self.categorical, feature_names)
         X_values, names = _validate_X(
@@ -2053,8 +2080,18 @@ class FeatureRanker:
                 for index, name in enumerate(names)
             }
         self.n_features_in_ = len(names)
+        self._fit_settings = {
+            "missing": self.missing,
+            "model_input": self.model_input,
+            "max_categories": self.max_categories,
+        }
         self.is_fitted_ = True
         return self
+
+    def _validate_assigned(self) -> None:
+        """Options that may have been assigned, or unpickled, since __init__."""
+        _validate_n_jobs(self.n_jobs)
+        self.max_categories = _validate_max_categories(self.max_categories)
 
     def rank_features(
         self,
@@ -2091,6 +2128,8 @@ class FeatureRanker:
         n_repeats = _plain_int(n_repeats)
         if not _is_positive_int(n_repeats):
             raise ValueError(N_REPEATS_MESSAGE)
+        if max_samples is not None:
+            _resolve_max_samples(max_samples, 1)
         (scorer, scoring_name), *secondary_scorers = _resolve_scorers(scoring)
 
         categorical = [
@@ -2314,6 +2353,7 @@ class FeatureRanker:
                 groups,
                 categorical,
                 columns,
+                self.user_models is None,
             )
             for name, entry in shap_models.items():
                 model_reports[name]["shap"] = entry
@@ -2363,6 +2403,18 @@ class FeatureRanker:
         never the final test set.
         """
         random_state = _seed(random_state, "random_state")
+        n_repeats, top_k = _plain_int(n_repeats), _plain_int(top_k)
+        if not _is_positive_int(n_repeats):
+            raise ValueError(N_REPEATS_MESSAGE)
+        if not _is_positive_int(top_k):
+            raise ValueError("[!] top_k must be a positive integer below 2**63.")
+        if max_samples is not None:
+            _resolve_max_samples(max_samples, 1)
+        if max_train_samples is not None:
+            _resolve_max_samples(max_train_samples, 1)
+        self._validate_assigned()
+        _resolve_scorers(scoring)
+        _check_cv(cv)
         categorical = _categorical_indices(X, self.categorical, feature_names)
         # Raw values: each split learns its own levels in fit().
         X_values, names = _validate_X(
@@ -2373,16 +2425,6 @@ class FeatureRanker:
         )
         y_values = _validate_y(y, len(X_values))
         weights = _validate_weights(sample_weight, len(X_values))
-        n_repeats, top_k = _plain_int(n_repeats), _plain_int(top_k)
-        if not _is_positive_int(n_repeats):
-            raise ValueError(N_REPEATS_MESSAGE)
-        if not _is_positive_int(top_k):
-            raise ValueError("[!] top_k must be a positive integer below 2**63.")
-        if max_samples is not None:
-            _resolve_max_samples(max_samples, len(X_values))
-        if max_train_samples is not None:
-            _resolve_max_samples(max_train_samples, len(X_values))
-        _resolve_scorers(scoring)
         _resolve_feature_groups(names, feature_groups)
         # Each split builds its own ranker; check the names once, up front.
         self._check_family_names(

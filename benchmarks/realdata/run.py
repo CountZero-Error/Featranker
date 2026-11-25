@@ -15,6 +15,7 @@ import importlib.metadata
 import re
 import json
 import math
+import os
 import platform
 import sys
 import time
@@ -300,6 +301,9 @@ def main() -> None:
     seeds = [int(s) for s in args.seeds.split(",")]
     by_id = {d["data_id"]: d for d in DATASETS}
     chosen = [int(i) for i in args.datasets.split(",")]
+    for what, values in (("seeds", seeds), ("datasets", chosen)):
+        if len(set(values)) != len(values):
+            parser.error(f"duplicate {what}: {values}")
     unknown = [i for i in chosen if i not in by_id]
     if unknown:
         parser.error(f"unknown data ids: {unknown}; choose from {list(by_id)}")
@@ -318,7 +322,9 @@ def main() -> None:
                          ("script sha256", (prev.get("script_sha256"), results["script_sha256"])),
                          ("prereg sha256", (prev["prereg_sha256"], results["prereg_sha256"])),
                          ("versions", (prev["versions"], results["versions"])),
-                         ("commit", (prev["featranker"].get("commit"), args.commit or prev["featranker"].get("commit")))):
+                         ("featranker version", (prev["featranker"].get("version"), results["featranker"]["version"])),
+                         ("commit", (prev["featranker"].get("commit"),
+                                     prev["featranker"].get("commit") if args.commit is None else args.commit))):
             if now[0] != now[1]:
                 parser.error(f"--resume refused: {key} differs from the stored run ({args.out})")
         results["featranker"]["commit"] = prev["featranker"].get("commit")
@@ -331,7 +337,15 @@ def main() -> None:
         results["ended"] = datetime.datetime.now().isoformat(timespec="seconds")
         results["wall_seconds"] = prior_wall + time.perf_counter() - t0
         args.out.parent.mkdir(parents=True, exist_ok=True)
-        args.out.write_text(json.dumps(results, indent=2, allow_nan=False))
+        text = json.dumps(results, indent=2, allow_nan=False)
+        target = args.out.resolve()  # a symlinked --out stays a link
+        tmp = target.with_name(f"{target.name}.{os.getpid()}.tmp")
+        try:
+            tmp.write_text(text)
+            os.replace(tmp, target)
+        except BaseException:
+            tmp.unlink(missing_ok=True)
+            raise
 
     for data_id in chosen:
         spec = by_id[data_id]
