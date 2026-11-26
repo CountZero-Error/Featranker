@@ -237,7 +237,7 @@ def test_lock_named_output_is_refused(bench, monkeypatch, capsys):  # noqa: F811
 
 
 def test_docs():
-    usage = (ROOT / "docs" / "usage.md").read_text(encoding="utf-8")
+    usage = (ROOT / "docs" / "guide" / "selection.md").read_text(encoding="utf-8")
     line = next(text for text in usage.splitlines() if "1.22" in text and "clone" in text)
     assert "user" in line
 

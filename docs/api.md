@@ -1,15 +1,15 @@
-# FEATRANKER ▍ API
+# API
 
-<sub><a href="../README.md">◂ README</a> &nbsp;│&nbsp; <a href="README.md">Docs</a> &nbsp;│&nbsp; <a href="usage.md">Usage</a> &nbsp;│&nbsp; <a href="report.md">Report</a> &nbsp;│&nbsp; <a href="models.md">Models</a> &nbsp;│&nbsp; <b>API</b></sub>
+[Manual](README.md) | [Getting started](getting-started.md) | [Reference](reference.md)
 
-## ▍ Public API
+## Public API
 
 From 1.0, these are FeatRanker's public API:
 
 | Kind | Public |
 |---|---|
 | Python names | Everything in `featranker.__all__`: `FeatureRanker`, `ConsensusSelector`, `Report`, `auto_groups`, `summarize`. Also `featranker.__version__`. |
-| Parameters and methods | The documented parameters, methods, and fitted attributes of those names (see [Usage](usage.md)). |
+| Parameters and methods | The documented parameters, methods, and fitted attributes of those names (see [Reference](reference.md)). |
 | Reports | The report keys and their meaning documented in [Report](report.md). |
 | Command line | The `featranker` command and its flags (`featranker --help`). |
 
@@ -17,11 +17,11 @@ Everything else is internal and can change in any release: modules other than `f
 
 <a id="report-schema"></a>
 
-## ▍ Report schema
+## Report schema
 
 Every report is described by `featranker/report.schema.json` (JSON Schema draft 2020-12, shipped in the package). It is loose: core keys and types only, unknown keys are allowed. Each model entry may carry `param_hashes` (strings); `ablate()` compares it. The stability promise covers reports made by 2.x from 2.x inputs. Every report carries `schema_version` (the integer `2` for all 2.x reports; the schema requires it), stamped by the generating code and independent of `provenance`. `ablate()` warns (`UserWarning`) when the report's `schema_version` is not 2 (an older, 1.x report has none), and its output may not validate against the schema. A 1.x report of built-in models with categorical columns is ablated with the dense one-hot preprocessing 1.x used. Seeds must be in 0..2**64 - 1, and `n_repeats`, `top_k`, `k`, `max_samples` and `max_train_samples` below 2**63; both are checked before any grouping or fitting.
 
-```python
+```text
 import json
 from importlib.resources import files
 from jsonschema import Draft202012Validator  # pip install jsonschema
@@ -32,7 +32,7 @@ Draft202012Validator(schema).validate(json.loads(json.dumps(report)))
 
 Promise for 2.x: every report validates against the shipped schema; minor releases add only optional keys; removing, renaming or retyping a required key needs a major release.
 
-## ▍ Stability policy
+## Stability policy
 
 FeatRanker follows [semantic versioning](https://semver.org) from 1.0.0:
 
@@ -40,23 +40,23 @@ FeatRanker follows [semantic versioning](https://semver.org) from 1.0.0:
 - **Minor** (1.x): adds features. Reports may gain new keys; code that reads reports should ignore keys it does not know. Built-in models and their families may be added, which can change rankings; the change is listed in the release notes.
 - **Patch** (1.x.y): fixes only.
 
-Before something public is removed, it is deprecated with a `DeprecationWarning` for at least one minor release; a deprecation end users of a script or CLI should see by default uses `FutureWarning` instead. Results are reproducible within a release given the seeds described in [Usage](usage.md#parallel-models); they can differ between releases when estimators or the registry change.
+Before something public is removed, it is deprecated with a `DeprecationWarning` for at least one minor release; a deprecation end users of a script or CLI should see by default uses `FutureWarning` instead. Results are reproducible within a release given the seeds described in [Parallel models](guide/custom-models.md#parallel-models); they can differ between releases when estimators or the registry change.
 
-## ▍ Deprecations
+## Deprecations
 
 None currently.
 
-## ▍ Removed
+## Removed
 
 | Deprecated in | Removed in | Name | Note |
 |---|---|---|---|
-| 1.1 | 2.0 | `to_prompt()`, `explain()` and the `featranker.interpret` module | Removed in 2.0, the major release under the policy above. The report [evidence](usage.md#evidence) replaces the need for an LLM reading. |
+| 1.1 | 2.0 | `to_prompt()`, `explain()` and the `featranker.interpret` module | Removed in 2.0, the major release under the policy above. The report [evidence](guide/noise-and-evidence.md#evidence) replaces the need for an LLM reading. |
 
-## ▍ Typing
+## Typing
 
 The package ships a `py.typed` marker, so type checkers such as mypy and Pyright read FeatRanker's annotations. `rank_features()`, `rank_resampled()`, and `ablate()` are annotated to return `Report`, so its helpers type-check. CI runs mypy on the package and on a small consumer file that uses the public API, on every push.
 
-## ▍ Releasing
+## Releasing
 
 Releases are published by `.github/workflows/release.yml` when a version tag is pushed. Its actions are pinned to full commit SHAs (with the version in a comment); update a pin only to a reviewed upstream release. It runs the tests and mypy, checks that the tag equals `v` plus the version in `pyproject.toml`, builds and checks the package, installs the built wheel in a fresh virtualenv outside the checkout and runs `tests/smoke_installed.py` on it (core-only, then with `[all,shap,plot]`), and uploads it with PyPI [trusted publishing](https://docs.pypi.org/trusted-publishers/), so no API token is stored anywhere.
 

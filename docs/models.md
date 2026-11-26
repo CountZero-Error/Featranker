@@ -1,12 +1,12 @@
-# FEATRANKER ▍ MODELS
+# Models
 
-<sub><a href="../README.md">◂ README</a> &nbsp;│&nbsp; <a href="README.md">Docs</a> &nbsp;│&nbsp; <a href="usage.md">Usage</a> &nbsp;│&nbsp; <a href="report.md">Report</a> &nbsp;│&nbsp; <b>Models</b> &nbsp;│&nbsp; <a href="api.md">API</a></sub>
+[Manual](README.md) | [Getting started](getting-started.md) | [Reference](reference.md)
 
-Model entries come from [`importance_config.yaml`](../featranker/importance_config.yaml). Names in the **Key** column appear in reports and structured failures. Select a **Group** with `group="linear"` (the Linear rows: linear, discriminant, naive Bayes, and kernel models), `group="tree"`, or `group="all"` (the default). `group="fast"` runs only the models marked in the **Fast** column: one representative per candidate family, 7 for classification and 5 for regression. Normally the same families vote as in `"all"`, but a representative can fail or score below the dummy baseline and then its family does not vote, while in `"all"` another member of that family might (see [Speed](usage.md#speed)). The **Family** column groups close variants; each family casts one vote in the consensus (see [Report](report.md#reading-the-report)).
+Model entries come from [`importance_config.yaml`](../featranker/importance_config.yaml). Names in the **Key** column appear in reports and structured failures. Select a **Group** with `group="linear"` (the Linear rows: linear, discriminant, naive Bayes, and kernel models), `group="tree"`, or `group="all"` (the default). `group="fast"` runs only the models marked in the **Fast** column: one representative per candidate family, 7 for classification and 5 for regression. Normally the same families vote as in `"all"`, but a representative can fail or score below the dummy baseline and then its family does not vote, while in `"all"` another member of that family might (see [Speed](guide/performance.md)). The **Family** column groups close variants; each family casts one vote in the consensus (see [Report](report.md#reading-the-report)).
 
-Built-in linear models are standardized internally (a `StandardScaler` fit on training data only, inside a pipeline); tree models are not. With `missing="impute"`, every built-in model also starts with a median `SimpleImputer`, even models that handle NaN natively; see [Missing values](usage.md#missing-values).
+Built-in linear models are standardized internally (a `StandardScaler` fit on training data only, inside a pipeline); tree models are not. With `missing="impute"`, every built-in model also starts with a median `SimpleImputer`, even models that handle NaN natively; see [Missing values](guide/data.md#missing-values).
 
-## ▍ Classification: 22 models
+## Classification: 22 models
 
 | Group | Family | Key | Estimator | Fast |
 |---|---|---|---|:---:|
@@ -33,7 +33,7 @@ Built-in linear models are standardized internally (a `StandardScaler` fit on tr
 | Tree | `boosting` | `xgboost` | `XGBClassifier` (optional) |  |
 | Tree | `boosting` | `catboost` | `CatBoostClassifier` (optional) |  |
 
-## ▍ Regression: 18 models
+## Regression: 18 models
 
 | Group | Family | Key | Estimator | Fast |
 |---|---|---|---|:---:|
@@ -56,7 +56,7 @@ Built-in linear models are standardized internally (a `StandardScaler` fit on tr
 | Tree | `boosting` | `xgboost_regressor` | `XGBRegressor` (optional) |  |
 | Tree | `boosting` | `catboost_regressor` | `CatBoostRegressor` (optional) |  |
 
-## ▍ Optional estimators
+## Optional estimators
 
 | Extra | Install | Default model configured? |
 |---|---|:---:|

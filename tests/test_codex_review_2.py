@@ -232,7 +232,7 @@ def test_no_unreleased_versions_in_user_docs():
 
 
 def test_usage_documents_sparse_limits():
-    usage = (ROOT / "docs" / "usage.md").read_text(encoding="utf-8").lower()
+    usage = (ROOT / "docs" / "guide" / "data.md").read_text(encoding="utf-8").lower()
     assert "same problem" in usage or "same optimisation problem" in usage or "same optimization problem" in usage
     assert "density" in usage
 

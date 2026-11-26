@@ -115,15 +115,46 @@ def auto_groups(
     categorical: Any = None,
 ) -> Dict[str, List[str]]:
     """
-    Propose feature_groups from X alone: columns clustered by Spearman correlation.
+    Propose ``feature_groups`` from ``X`` alone, by Spearman correlation.
 
-    Complete linkage on 1 - |rho|, cut so that every pair inside a group has
-    |rho| >= threshold. A constant column is uncorrelated with every other.
-    Only groups of two or more columns are returned; a group is named by its
-    members joined with "+". Uses no target. NaN is allowed: each pair is
-    correlated on the rows where both values are present. Categorical columns
-    (categorical as in FeatureRanker: "auto" or a list of names) are never
-    grouped.
+    Columns are clustered by complete linkage on 1 - |rho|, cut so that every
+    pair inside a group has |rho| at least ``threshold`` (up to a tolerance of
+    1e-12). A constant column is never grouped. Only groups of two or more
+    columns are returned, each named by its members joined with ``+``. No
+    target is used. With NaN, each pair is correlated on the rows where both
+    values are present.
+
+    Parameters
+    ----------
+    X : array-like or DataFrame
+        Features, validated like ``FeatureRanker.fit()`` input. Use enough
+        rows: with few rows the sample correlation is inflated.
+    threshold : float, default 0.7
+        The |rho| cut, above 0 and at most 1. Lower gives bigger groups.
+    feature_names : list of str, optional
+        Column names for non-DataFrame input; default ``x0``, ``x1``, ...
+    categorical : "auto" or list of str, optional
+        As in ``FeatureRanker``. These columns are accepted as text and never
+        grouped.
+
+    Returns
+    -------
+    dict
+        ``{group_name: [column, ...]}``, usable as ``feature_groups``.
+
+    Raises
+    ------
+    ValueError
+        For an invalid ``threshold`` or data, or a generated group name that
+        equals a column or another group name.
+
+    Examples
+    --------
+    >>> from sklearn.datasets import load_diabetes
+    >>> from featranker import auto_groups
+    >>> X, _ = load_diabetes(return_X_y=True, as_frame=True)
+    >>> auto_groups(X)
+    {'s1+s2': ['s1', 's2'], 's3+s4': ['s3', 's4']}
     """
     # Local import: importance imports this module.
     from .importance import _categorical_indices, _validate_X

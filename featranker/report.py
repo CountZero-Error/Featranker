@@ -9,15 +9,25 @@ from .summary import summarize
 
 class Report(dict):
     """
-    A FeatRanker report.
+    A FeatRanker report: a plain ``dict`` with three helpers.
 
-    It is a plain dict (indexing, json.dumps, pickling and dict equality all
-    work as before) with three helpers: summary(), to_frame(), and plot().
-    pandas and matplotlib are imported only when those helpers are called.
+    Indexing, ``json.dumps``, pickling and dict equality work as for any
+    dict. ``summary()`` lists the findings, ``to_frame()`` returns the ranking
+    table and ``plot()`` draws it. pandas and matplotlib are imported only
+    when those helpers are called. The keys are described in docs/report.md.
     """
 
     def summary(self) -> List[Dict[str, Any]]:
-        """The summarize() findings."""
+        """
+        Return the ``summarize()`` findings for this report.
+
+        Returns
+        -------
+        list of dict
+            One dict per finding, with ``code``, ``severity``, ``message``,
+            ``evidence``, ``basis`` and ``scoring``. Works for single-split
+            and resampled reports.
+        """
         return summarize(self)
 
     def _rows(self) -> Tuple[str, List[Dict[str, Any]]]:
@@ -26,7 +36,21 @@ class Report(dict):
         return "consensus", list(self.get("consensus", []))
 
     def to_frame(self) -> Any:
-        """The consensus (or, for resampled reports, stability) table as a DataFrame."""
+        """
+        Return the ranking table as a pandas DataFrame.
+
+        Returns
+        -------
+        pandas.DataFrame
+            The consensus table, or for a resampled report the stability
+            table, one row per feature group. The nested per-family or
+            per-split rank columns are left out.
+
+        Raises
+        ------
+        ImportError
+            If pandas is not installed.
+        """
         try:
             import pandas as pd
         except ImportError as error:
@@ -41,8 +65,24 @@ class Report(dict):
         """
         Plot the ranking and return the matplotlib Axes.
 
-        Single-split: each voting family's rank per group, median marked.
-        Resampled: each group's place range across splits, median marked.
+        Single-split report: each voting family's rank per group, with the
+        median marked. Resampled report: each group's range of places across
+        splits, with the median marked. The most important group is on top.
+
+        Parameters
+        ----------
+        ax : matplotlib.axes.Axes, optional
+            Axes to draw on. ``None`` creates a new figure.
+
+        Returns
+        -------
+        matplotlib.axes.Axes
+            The axes drawn on.
+
+        Raises
+        ------
+        ImportError
+            If matplotlib is not installed (``pip install 'featranker[plot]'``).
         """
         try:
             import matplotlib.pyplot as plt

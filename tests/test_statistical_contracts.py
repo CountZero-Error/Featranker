@@ -471,19 +471,19 @@ def test_summary_of_a_resampled_report_warns_about_constant_groups():
 
 # --- documented ablation example -------------------------------------------
 
-USAGE = Path(__file__).parents[1] / "docs" / "usage.md"
+USAGE = Path(__file__).parents[1] / "docs" / "guide" / "selection.md"
 NUMBER = re.compile(r"-?\d+\.\d+")
 
 
 def test_documented_ablation_example_runs_and_matches_its_output(capsys):
-    # The example lives in docs/usage.md (section "Ablation curve"); this runs it as shown.
-    section = USAGE.read_text(encoding="utf-8").split("## ▍ Ablation curve", 1)[1]
+    # The example lives in docs/guide/selection.md (section "Ablation curve"); this runs it as shown.
+    section = USAGE.read_text(encoding="utf-8").split("## Ablation curve", 1)[1]
     code = re.search(r"```python\n(.*?)```", section, re.S).group(1)
     shown = re.search(r"```text\n(.*?)```", section, re.S).group(1)
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        exec(compile(code, "docs/usage.md", "exec"), {})
+        exec(compile(code, "docs/guide/selection.md", "exec"), {})
     printed = capsys.readouterr().out.strip().splitlines()
     expected = shown.strip().splitlines()
 

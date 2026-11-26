@@ -1,6 +1,6 @@
-# FeatRanker ▍ Real-data study
+# Real-data study
 
-<sub><a href="README.md">◂ Back to docs</a></sub>
+[Manual](README.md) | [Getting started](getting-started.md) | [Reference](reference.md)
 
 Does FeatRanker's selection keep held-out performance close to using all features while dropping features, on real tabular data? This is a descriptive study, fixed in [`PREREG.md`](https://github.com/CountZero-Error/Featranker/blob/main/benchmarks/realdata/PREREG.md) on 2026-11-20 before any run: no significance test, and every dataset and outcome is reported, including where selection loses. The code is [`benchmarks/realdata/run.py`](https://github.com/CountZero-Error/Featranker/tree/main/benchmarks/realdata) (not part of the package, not run by CI). Every number below comes from `benchmarks/results/realdata/realdata-20261120-final.json` (rendered as `realdata-final.md`). FeatRanker 1.22.0 (an internal build; first released as part of 2.0), scikit-learn 1.5.1, NumPy 1.26.4.
 
@@ -109,7 +109,7 @@ Mean delta against `all` over 3 seeds, with [min, max]. Negative means the arm s
 ### What this means for users
 
 - `min_shadow_share=0.5` is a strict filter, and on real data it can keep far fewer features than the signal needs. Do not use it as a default way to shrink a feature set.
-- Choose the subset by held-out score instead: use the [ablation curve](usage.md#ablation-curve) to pick `k`, make that choice on training or validation rows only, and compare against all features once on rows nobody has touched (the [10-minute recipe](../README.md#-10-minute-recipe) does this; this study itself is an outer 70/30 train/test split per seed with `ConsensusSelector` cross-validating inside the training part, not nested cross-validation). Include all features (the largest `k`) in that curve, so the subset-versus-all decision is also made before the final held-out rows are used.
+- Choose the subset by held-out score instead: use the [ablation curve](guide/selection.md#ablation-curve) to pick `k`, make that choice on training or validation rows only, and compare against all features once on rows nobody has touched (the [10-minute recipe](../README.md#-10-minute-recipe) does this; this study itself is an outer 70/30 train/test split per seed with `ConsensusSelector` cross-validating inside the training part, not nested cross-validation). Include all features (the largest `k`) in that curve, so the subset-versus-all decision is also made before the final held-out rows are used.
 - Treat the shadow rule as evidence that a group is distinguishable from noise, not as proof that the groups it drops are useless.
 
 ### What this does not show

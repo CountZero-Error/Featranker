@@ -1775,6 +1775,116 @@ def _rank_model(
 
 
 class FeatureRanker:
+    """
+    Rank feature groups by permutation importance across many models.
+
+    Fit a set of models on training data with ``fit()``, then call
+    ``rank_features()`` on separate evaluation rows. Each model's score drop
+    when a feature group is shuffled is turned into a rank; models that beat a
+    dummy baseline vote, one vote per model family, and the votes give a
+    consensus ranking. Keeping the training and evaluation rows apart is up to
+    you; FeatureRanker cannot detect reuse.
+
+    Parameters
+    ----------
+    task : {"clf", "reg"}
+        ``"clf"`` for classification, ``"reg"`` for regression. Required.
+    group : {"all", "linear", "tree", "fast"}, default "all"
+        Built-in model group. ``"fast"`` runs one model per family. Cannot be
+        combined with ``models``.
+    models : dict, optional
+        ``{name: estimator}`` that replaces the built-in models. Estimators
+        are cloned at ``fit()``. A name must be a non-empty string other than
+        ``"dummy_baseline"``.
+    n_jobs : int, optional
+        Parallel workers over models. ``None`` or 1 is sequential, -1 uses all
+        cores.
+    verbose : bool, default True
+        Show progress bars. Warnings are always shown.
+    shadows : bool, default False
+        Also train and rank a shuffled shadow copy of every feature, to show
+        which groups beat noise.
+    shadow_seed : int, optional
+        Seed (0 to 2**64 - 1) of the shadow shuffles. ``None`` gives different
+        shadows on every run.
+    evidence : bool, default False
+        Keep a copy of the training data and add train scores, overfit gaps,
+        correlated groups and (with ``featranker[shap]``) a SHAP summary to
+        the report.
+    shadow_mode : {"joint", "independent"}, default "joint"
+        ``"joint"`` shuffles all shadow columns with one shared row order;
+        ``"independent"`` shuffles each column on its own. Used only with
+        ``shadows=True``.
+    missing : {"error", "impute"}, default "error"
+        ``"error"`` rejects NaN in the features. ``"impute"`` accepts NaN and
+        gives every built-in model a median imputer fit on its training rows
+        only; custom models receive NaN unchanged. Infinite values are always
+        rejected.
+    categorical : "auto" or list of str, optional
+        ``None`` accepts numeric features only. ``"auto"`` treats DataFrame
+        columns of object, string or category dtype as categorical; a list
+        names the columns. Levels are learned in each ``fit()`` from the
+        training rows only, and each column stays one feature.
+    model_input : {"array", "dataframe"}, default "array"
+        ``"array"`` gives models a float NumPy array. ``"dataframe"`` gives
+        every model a pandas DataFrame with the feature names (and
+        ``shadow__<name>`` columns with shadows). Needs pandas.
+    shuffle : {"rows", "within_groups", "circular"}, default "rows"
+        How permutations and shadows shuffle rows: freely, only among rows
+        with the same label in ``shuffle_groups``, or by a cyclic shift (rows
+        in time order).
+    families : dict, optional
+        ``{model_name: family}`` that sets the consensus family of custom or
+        built-in models. Models in one family cast one vote. Unmapped custom
+        models are separate families. A name that is not a configured model
+        raises ``ValueError`` in ``fit()``.
+    max_categories : int, optional
+        At least 2. Built-in linear models one-hot encode at most this many
+        levels per categorical column; the rest share one column. Trees and
+        custom models are unaffected.
+
+    Attributes
+    ----------
+    trained_models : dict
+        Fitted models by name, after ``fit()``.
+    feature_names_ : list of str
+        Feature names seen by ``fit()``.
+    label_encoder : LabelEncoder or None
+        For ``task="clf"``: ``label_encoder.classes_[i]`` is the label of code ``i``.
+    categorical_features_, categorical_levels_ : list, dict
+        Categorical columns and their learned levels.
+    fit_failures_, initialization_failures_ : list of dict
+        Models that failed to fit or to initialize.
+
+    Raises
+    ------
+    ValueError
+        For an invalid option, such as an unknown ``task`` or ``group``.
+    TypeError
+        For an option of the wrong type, such as a non-bool ``verbose``.
+    ImportError
+        If ``model_input="dataframe"`` and pandas is missing.
+
+    See Also
+    --------
+    ConsensusSelector : the same ranking as a scikit-learn pipeline step.
+
+    Examples
+    --------
+    >>> from sklearn.datasets import load_diabetes
+    >>> from sklearn.model_selection import train_test_split
+    >>> from featranker import FeatureRanker
+    >>> data = load_diabetes()
+    >>> X_train, X_eval, y_train, y_eval = train_test_split(
+    ...     data.data, data.target, test_size=0.3, random_state=0)
+    >>> ranker = FeatureRanker(task="reg", group="fast", verbose=False)
+    >>> ranker = ranker.fit(X_train, y_train, feature_names=list(data.feature_names))
+    >>> report = ranker.rank_features(
+    ...     X_eval, y_eval, scoring="r2", n_repeats=3, random_state=0)
+    >>> [row["feature_group"] for row in report["consensus"]][:2]  # doctest: +SKIP
+    ['s5', 'bmi']
+    """
+
     # Names of built-in models one-hot coded densely (ablate() on pre-2.0 reports sets it on its copy).
     _dense_one_hot: FrozenSet[str] = frozenset()
     # missing, model_input and max_categories as of the last successful fit() (None: not
@@ -1801,65 +1911,7 @@ class FeatureRanker:
         families: Optional[Mapping[str, str]] = None,
         max_categories: Optional[int] = None,
     ) -> None:
-        """
-        Initialize configured models without loading or fitting data.
-
-        Args:
-            task: Task type — "clf" for classification or "reg" for regression.
-            group: Built-in model group — "linear", "tree", "all" for both, or
-                "fast" for one representative model per family.
-            models: Optional name -> scikit-learn estimator mapping that
-                replaces the built-in registry. Estimators are cloned at fit().
-            n_jobs: Parallel workers over models in fit() and rank_features();
-                None means sequential, -1 means all cores.
-            verbose: Show progress bars during initialization, fit, and ranking.
-            shadows: Train and rank with a shuffled shadow copy of every
-                feature, to check which groups beat noise.
-            shadow_seed: Seed for the shadow shuffles; None draws fresh entropy.
-            evidence: Keep the training data so rank_features() can add
-                mechanism evidence: train score, overfit gap, correlated
-                groups, and (with the shap extra) a SHAP summary.
-            shadow_mode: "joint" shuffles all columns with one shared row
-                order (collinear columns stay collinear in the shadows);
-                "independent" shuffles each shadow column on its own.
-            missing: "error" rejects NaN in features. "impute" accepts NaN and
-                gives every built-in model a median imputer as its first
-                pipeline step, learned on each training split only; custom
-                models receive NaN unchanged and must handle it. Infinite
-                values are always rejected.
-            categorical: None (default) accepts numeric features only. "auto"
-                treats DataFrame columns of object, string, or category dtype
-                as categorical; a list of feature names marks those columns
-                (any dtype, NumPy included). Each categorical column is coded
-                inside fit() from the training rows only, ranked as one
-                feature, and one-hot encoded by built-in linear models; trees
-                and custom models receive the integer codes.
-            model_input: "array" (default) gives models a float NumPy array.
-                "dataframe" gives every model a pandas DataFrame whose columns
-                are the feature names, then "shadow__<name>" for each shadow
-                column, so custom pipelines can select columns by name.
-                Needs pandas.
-            shuffle: How permutations and shadow columns shuffle rows. "rows"
-                (default) shuffles freely. "within_groups" moves values only
-                among rows with the same label in shuffle_groups (passed to
-                fit() for shadows and to rank_features() for permutations).
-                "circular" shifts the rows cyclically by a random offset,
-                which keeps autocorrelation and assumes rows in time order.
-            families: Optional model name -> family mapping, for custom or
-                built-in models. Each family casts one vote in the consensus,
-                so map near-identical custom models to one family; unmapped
-                custom models are separate families. A name that is not a
-                configured model raises ValueError in fit().
-            max_categories: None (default) or an int of at least 2 and below 2**63. Built-in
-                linear models one-hot encode at most this many levels per
-                categorical column: the most frequent levels, with the rest
-                sharing one infrequent column. A level unseen in training
-                joins that column only when the column has at least
-                max_categories levels; with fewer it is all zeros, as without
-                the cap.
-                Bounds the dense one-hot matrix, which grows with the number
-                of levels; trees and custom models are unaffected.
-        """
+        """Create a ranker and set up its models; no data is read here."""
         if task not in {"clf", "reg"}:
             raise ValueError("[!] task must be 'clf' or 'reg'.")
         if group not in {"linear", "tree", "all", "fast"}:
@@ -1991,23 +2043,49 @@ class FeatureRanker:
         random_state: Optional[int] = None,
     ) -> "FeatureRanker":
         """
-        Fit configured models using training data only.
+        Fit every configured model on the training data.
 
-        max_samples: optional int (rows) or float in (0, 1] (share of rows).
-        Fit on one random subsample of the training rows, drawn with
-        random_state (None draws fresh entropy), which also bounds the
-        shadows and the evidence copy; whole groups are drawn under
-        shuffle="within_groups" and row order is kept. The run record's
-        train_data_sha256 still fingerprints every row passed here.
+        Parameters
+        ----------
+        X : array-like or DataFrame
+            Training features, at least one row and one column. Numeric, plus
+            the columns named by ``categorical``. Infinite values are
+            rejected, and so is NaN unless ``missing="impute"``.
+        y : array-like
+            Training target, one value per row. Classification labels may be
+            numbers or strings; regression targets must be numeric.
+        feature_names : list of str, optional
+            Unique, non-empty column names. Required for NumPy input; taken
+            from the columns of a DataFrame.
+        sample_weight : array-like, optional
+            Finite, non-negative training weights, one per row, with a
+            positive sum. Every model is fit with them. A model that cannot
+            take weights is recorded as a fit failure, not fit unweighted.
+        shuffle_groups : array-like, optional
+            One group label per training row. Required with
+            ``shuffle="within_groups"`` (shadows are shuffled within groups);
+            an error with another ``shuffle``.
+        max_samples : int or float, optional
+            Fit on a random subsample of the training rows: an int (rows) or a
+            float in (0, 1] (share of rows). Whole groups are drawn under
+            ``shuffle="within_groups"``; row order is kept. Shadows and the
+            evidence copy use the sample too.
+        random_state : int, optional
+            Seed (0 to 2**64 - 1) of the ``max_samples`` draw. ``None`` draws
+            fresh entropy. Unused without ``max_samples``.
 
-        shuffle_groups: with shuffle="within_groups", one group label per
-        training row; shadow columns are shuffled within each group. Not
-        allowed with another shuffle.
+        Returns
+        -------
+        FeatureRanker
+            The ranker itself, fitted.
 
-        sample_weight: optional 1-D non-negative weights, one per row. Every
-        model is fit with them (built-in pipelines pass them to the final
-        estimator); a model that cannot take weights is recorded as a fit
-        failure, not fit unweighted.
+        Raises
+        ------
+        ValueError
+            For invalid data or options, or a subsample that misses a class
+            of a classification target.
+        RuntimeError
+            If no model fits.
         """
         random_state = _seed(random_state, "random_state")
         if max_samples is not None:
@@ -2250,20 +2328,48 @@ class FeatureRanker:
         shuffle_groups: Any = None,
     ) -> Report:
         """
-        Rank feature groups on explicitly supplied evaluation data.
+        Rank feature groups on evaluation data that ``fit()`` did not see.
 
-        shuffle_groups: with shuffle="within_groups", one group label per
-        evaluation row; permuted and shadow columns are shuffled within each
-        group (after max_samples, the sampled rows' labels are used). Not
-        allowed with another shuffle.
+        Parameters
+        ----------
+        X_eval : array-like or DataFrame
+            Evaluation features with the same columns, in the same order, as
+            ``fit()``.
+        y_eval : array-like
+            Evaluation target. Class labels must have appeared in training.
+        scoring : str, callable or list
+            scikit-learn scorer name, a callable ``(estimator, X, y) -> float``
+            where higher is better, or a non-empty list of them (the first is
+            primary and decides the ranking). Keyword-only.
+        feature_groups : dict, optional
+            ``{group_name: [feature, ...]}`` of columns to shuffle together.
+            Ungrouped features are ranked on their own.
+        n_repeats : int, default 10
+            Shuffles per feature group; a positive integer.
+        random_state : int, optional
+            Seed (0 to 2**64 - 1) of the permutation shuffles.
+        sample_weight : array-like, optional
+            Finite, non-negative evaluation weights, one per row, with a
+            positive sum. The baseline, permuted and dummy scores use them.
+        max_samples : int or float, optional
+            Score on one random subsample of the evaluation rows: an int
+            (rows) or a float in (0, 1] (share of rows).
+        shuffle_groups : array-like, optional
+            One group label per evaluation row. Required with
+            ``shuffle="within_groups"``; an error with another ``shuffle``.
 
-        sample_weight: optional 1-D non-negative weights, one per evaluation
-        row; the baseline, permuted and dummy scores are weighted with them.
+        Returns
+        -------
+        Report
+            A dict subclass; see docs/report.md for its structure.
 
-        max_samples: optional int (rows) or float in (0, 1] (share of rows).
-        One random subsample, drawn with random_state, is used for the
-        baseline, dummy and every permuted score; evidence is unchanged, except
-        that overfit_gap compares the train score with the subsampled baseline.
+        Raises
+        ------
+        RuntimeError
+            If ``fit()`` was not called, or every model fails ranking.
+        ValueError
+            For invalid data or options, or if the columns differ from
+            ``fit()``.
         """
         if not self.is_fitted_:
             raise RuntimeError("[!] Call fit() before rank_features().")
@@ -2527,24 +2633,62 @@ class FeatureRanker:
         max_train_samples: Any = None,
     ) -> Report:
         """
-        Fit and rank on every cv split of X/y and report rank stability.
+        Fit and rank on every cross-validation split and report how stable
+        the ranking is.
 
-        groups: also the group labels of shuffle="within_groups" (required
-        then), sliced per split into training and evaluation labels.
+        Parameters
+        ----------
+        X : array-like or DataFrame
+            All development data, with the same rules as ``fit()``. Each split
+            takes its own training and evaluation rows from it. Keep your final
+            test set out.
+        y : array-like
+            Target, one value per row.
+        scoring : str, callable or list
+            As in ``rank_features()``; stability uses the primary scorer.
+            Keyword-only.
+        cv : int, splitter or iterable, default 5
+            Number of folds (shuffled; stratified for classification), a
+            scikit-learn splitter such as ``RepeatedKFold`` or
+            ``GroupKFold``, or a list of ``(train_indices, eval_indices)``.
+        groups : array-like, optional
+            Passed to the splitter's ``split()``. With
+            ``shuffle="within_groups"`` they are also the shuffle groups and
+            are required.
+        feature_names : list of str, optional
+            As in ``fit()``.
+        feature_groups : dict, optional
+            As in ``rank_features()``.
+        n_repeats : int, default 10
+            Shuffles per feature group in each split.
+        random_state : int, optional
+            Seeds integer-``cv`` shuffling. Split ``i`` uses seed
+            ``(random_state + i)`` modulo 2**64.
+        top_k : int, default 5
+            A group is "top" in a split when its place is at most ``top_k``;
+            used for ``top_k_share``.
+        sample_weight : array-like, optional
+            Weights for all rows of ``X``, sliced per split.
+        max_samples : int or float, optional
+            As in ``rank_features()``, applied to each split's evaluation rows.
+        max_train_samples : int or float, optional
+            As ``fit()``'s ``max_samples``, applied to each split's training
+            rows.
 
-        max_samples: as in rank_features(), applied to each split's evaluation
-        rows.
+        Returns
+        -------
+        Report
+            A resampled report with a ``stability`` table and one report per
+            split. This ranker's own fitted state is not changed.
 
-        max_train_samples: as fit()'s max_samples, applied to each split's
-        training rows and drawn with the split's random state.
-
-        sample_weight: optional 1-D non-negative weights, one per row; each
-        split trains with its training rows' weights and scores with its
-        evaluation rows' weights.
-
-        Each split uses a fresh ranker with this ranker's settings; this
-        ranker's own fitted state is not changed. Pass development data only,
-        never the final test set.
+        Raises
+        ------
+        ValueError
+            For an invalid ``cv``, ``top_k``, scorer, ``n_repeats`` or group
+            before any model is fit.
+        RuntimeError
+            If no split ranks. A split that fails alone is recorded in
+            ``failures``.
         """
         random_state = _seed(random_state, "random_state")
         n_repeats, top_k = _plain_int(n_repeats), _plain_int(top_k)
@@ -2737,18 +2881,51 @@ class FeatureRanker:
         eval_sample_weight: Any = None,
     ) -> Report:
         """
-        A copy of a held-out report with an "ablation" block: for each k, the
-        report's voting models are refit on the columns of the top-k consensus
-        groups and scored on X_eval.
+        Refit the voting models on the top-k groups to check the ranking.
 
-        X and y must be the training data this ranker was fit on (checked
-        against the report's train_data_sha256 when it has one). ks defaults
-        to 1, 2, 3, 5, 10, 20, 50, ... up to the number of consensus groups,
-        plus that number. scoring is a scorer name or callable and defaults to
-        the report's scorer name. sample_weight and eval_sample_weight weight
-        the refits and the scores. Raises ValueError for an unfitted ranker, a
-        resampled report, an empty consensus, bad ks, or other training data.
-        The report is not modified. Costs len(ks) refits of every voting model.
+        For each ``k``, every model that voted in ``report`` is fit again on
+        the columns of the top-``k`` consensus groups and scored on
+        ``X_eval``. Costs ``len(ks)`` refits of every voting model.
+
+        Parameters
+        ----------
+        X : array-like or DataFrame
+            The training data this ranker was fit on (checked against the
+            report's ``run["train_data_sha256"]`` when present).
+        y : array-like
+            The training target.
+        X_eval : array-like or DataFrame
+            Data to score the refit models on, with the same columns as
+            ``fit()``. Every row is scored.
+        y_eval : array-like
+            Target of ``X_eval``.
+        report : Report
+            A held-out report from this ranker's ``rank_features()``.
+        ks : list of int, optional
+            Numbers of top groups to keep, from 1 to the number of consensus
+            groups. Default: 1, 2, 3, 5, 10, 20, 50, ... up to that number,
+            plus that number. Keyword-only.
+        scoring : str or callable, optional
+            Defaults to the report's scorer name; pass it when the report was
+            ranked with a callable.
+        sample_weight : array-like, optional
+            Training weights; pass the ones used for ``fit()``.
+        eval_sample_weight : array-like, optional
+            Evaluation weights; pass the ones used for ``rank_features()``.
+
+        Returns
+        -------
+        Report
+            A copy of ``report`` plus an ``ablation`` block. ``report`` is not
+            modified.
+
+        Raises
+        ------
+        ValueError
+            For an unfitted ranker, a resampled report, an empty consensus,
+            bad ``ks``, other training data or weights than the report was
+            made with, or a voting model whose class or parameters differ from
+            the ranker's.
         """
         from .ablation import ablate
 

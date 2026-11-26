@@ -1,14 +1,14 @@
-# FEATRANKER ▍ REPORT
+# Report
 
-<sub><a href="../README.md">◂ README</a> &nbsp;│&nbsp; <a href="README.md">Docs</a> &nbsp;│&nbsp; <a href="usage.md">Usage</a> &nbsp;│&nbsp; <b>Report</b> &nbsp;│&nbsp; <a href="models.md">Models</a> &nbsp;│&nbsp; <a href="api.md">API</a></sub>
+[Manual](README.md) | [Getting started](getting-started.md) | [Reference](reference.md)
 
-`rank_features()` returns a [`Report`](usage.md#working-with-reports), a `dict` subclass, that keeps the raw evidence from each model and builds the consensus from ranks only. The CLI writes the same structure as JSON.
+`rank_features()` returns a [`Report`](reference.md#report), a `dict` subclass, that keeps the raw evidence from each model and builds the consensus from ranks only. The CLI writes the same structure as JSON.
 
 <a id="reading-the-report"></a>
 
-## ▍ Reading the report
+## Reading the report
 
-Check these in order. `featranker.summarize(report)` runs the same checks and returns them as structured findings; see [Summarize a report](usage.md#summarize).
+Check these in order. `featranker.summarize(report)` runs the same checks and returns them as structured findings; see [Summarize a report](guide/selection.md#summarize-a-report).
 
 **1. Was the dummy gate active?** `baseline_score` is the score of a dummy model that ignores the features. If it is `None` and `failures` has an entry for `dummy_baseline`, the gate was off: every model that ranked has `in_consensus: True`, whether or not it beat the dummy. Treat that consensus with extra caution.
 
@@ -18,7 +18,7 @@ Check these in order. `featranker.summarize(report)` runs the same checks and re
 
 **4. Read the consensus.** `consensus` is sorted from most to least important. Rank 1 is the most important.
 
-Each model family casts one vote. Voting models are grouped by `family` (for example, the four logistic regressions form one family). A family's rank for a group is the median of its members' ranks, and the consensus combines those family ranks. A family with five members therefore counts as much as a family with one. Your own models are each their own family unless `FeatureRanker(families=...)` maps them (see [Your own models](usage.md#your-own-models)); near-identical custom models left unmapped therefore outvote other model types.
+Each model family casts one vote. Voting models are grouped by `family` (for example, the four logistic regressions form one family). A family's rank for a group is the median of its members' ranks, and the consensus combines those family ranks. A family with five members therefore counts as much as a family with one. Your own models are each their own family unless `FeatureRanker(families=...)` maps them (see [Your own models](guide/custom-models.md#your-own-models)); near-identical custom models left unmapped therefore outvote other model types.
 
 | Field | How to read it |
 |---|---|
@@ -28,8 +28,8 @@ Each model family casts one vote. Voting models are grouped by `family` (for exa
 | `n_families` | How many families voted. With fewer than 3, the consensus rests on very few independent views. |
 | `family_ranks` | Each voting family's rank for this group. Use it to see which families drive or disagree with the consensus. |
 | `n_models` | How many models voted. Every voting model ranks every group, so it is the same for all groups. It measures coverage, not confidence; `n_families` is the better count of independent views. |
-| `above_shadow_share` | Only with [shadows](usage.md#shadow-features) on. Each voting family contributes its fraction of members whose mean importance beat that model's strongest shadow group; this is their average. Near 1 means it beats the shuffled reference almost everywhere. It is relative and descriptive, not a p-value or proof of useful signal. |
-| `family_above_shadow` | Only with shadows on: family name to the fraction of that family's voting members that beat their model's strongest shadow, with keys sorted by family. `above_shadow_share` is the mean of these values. See [family evidence](usage.md#family-evidence). |
+| `above_shadow_share` | Only with [shadows](guide/noise-and-evidence.md#shadow-features) on. Each voting family contributes its fraction of members whose mean importance beat that model's strongest shadow group; this is their average. Near 1 means it beats the shuffled reference almost everywhere. It is relative and descriptive, not a p-value or proof of useful signal. |
+| `family_above_shadow` | Only with shadows on: family name to the fraction of that family's voting members that beat their model's strongest shadow, with keys sorted by family. `above_shadow_share` is the mean of these values. See [family evidence](guide/noise-and-evidence.md#family-evidence). |
 
 **5. Look at the importances behind a rank.** A rank is relative: it says a group's shuffle hurt the score more than other groups' shuffles did, not that it hurt a lot. For a group you care about, open `models[<name>]["importance"][<group>]` for a few models:
 
@@ -45,11 +45,11 @@ Each model family casts one vote. Voting models are grouped by `family` (for exa
 
 <a id="resampled-reports"></a>
 
-## ▍ Resampled reports
+## Resampled reports
 
-[`rank_resampled()`](usage.md#resampled-ranking) returns a report with `evaluation_mode: "resampled"`:
+[`rank_resampled()`](guide/validation.md#resampled-ranking) returns a report with `evaluation_mode: "resampled"`:
 
-```python
+```text
 {
     "schema_version": 2,
     "evaluation_mode": "resampled",
@@ -86,7 +86,7 @@ Each model family casts one vote. Voting models are grouped by `family` (for exa
 }
 ```
 
-Each `splits[i]["report"]` is an ordinary report for that split; read it with the guide above or [`summarize()`](usage.md#summarize). `summarize(report)` on the resampled report itself lists the [split-level findings](usage.md#summarize-resampled): failed splits, splits without a gate or a consensus, groups below their shadows, and too few splits for the shadow test.
+Each `splits[i]["report"]` is an ordinary report for that split; read it with the guide above or [`summarize()`](guide/selection.md#summarize-a-report). `summarize(report)` on the resampled report itself lists the [split-level findings](guide/selection.md#summarizing-a-resampled-report): failed splits, splits without a gate or a consensus, groups below their shadows, and too few splits for the shadow test.
 
 How to read `stability`, which is sorted by `median_rank`, then `top_k_share` (higher first), then name:
 
@@ -99,7 +99,7 @@ How to read `stability`, which is sorted by `median_rank`, then `top_k_share` (h
 | `n_splits_ranked` | How many splits produced a consensus. It is the same for every group. |
 | `above_shadow_share` | Only with shadows on: the sum of the group's per-split `above_shadow_share` divided by `n_splits`. A split that failed, had an empty consensus, or has no consensus row for the group counts as 0 (as for `shadow_hits`), so one lucky split out of ten gives at most 0.1. When every split has a consensus, this is the mean over splits. |
 | `shadow_hits` | Only with shadows on: the number of splits in which the group's consensus `above_shadow_share` was above 0.5. A split with no consensus row for the group is a non-hit. |
-| `shadow_p_value` | Only with shadows on: the one-sided binomial probability of at least `shadow_hits` hits in `n_splits` trials at probability 0.5. An uncalibrated reference value: splits overlap and the 0.5 null is not established for arbitrary estimators. See [the hits test](usage.md#shadow-test). |
+| `shadow_p_value` | Only with shadows on: the one-sided binomial probability of at least `shadow_hits` hits in `n_splits` trials at probability 0.5. An uncalibrated reference value: splits overlap and the 0.5 null is not established for arbitrary estimators. See [the hits test](guide/noise-and-evidence.md#shadow-hits-test). |
 | `shadow_q_value` | Only with shadows on: `shadow_p_value` adjusted with Benjamini-Hochberg across all groups. Also a reference value, not a calibrated false-discovery rate. |
 | `family_above_shadow_share` | Only with shadows on: family name to the sum of that family's per-split `family_above_shadow` divided by `n_splits`, for each family that voted in at least one split. A split in which it did not vote, failed, or was empty counts as 0 (as for `shadow_hits`). Keys are sorted by family. Unlike in a consensus row, the mean of these values equals the stability `above_shadow_share` only when the same families vote in every split. |
 | `shadow_families` | Only with shadows on: the number of families whose `family_above_shadow_share` is strictly above 0.5. `ConsensusSelector(min_shadow_families=N)` keeps groups with at least `N`. |
@@ -116,7 +116,7 @@ Within each split, `rank_std` still measures disagreement between model families
 
 Every `summarize()` finding has `basis` and `scoring` (the report's scorer name). Rankings, family support, ablation curves and the findings built on them are `"descriptive"`: they describe these models on these rows. Findings that rest on the shadow p- and q-values are `"experimental"`: those values are uncalibrated and not a significance test (today only `insufficient_splits`). Each entry of `models` records `"class"`, the fitted estimator's class name (for example `"Ridge"`), which `ablate()` checks against the ranker's model of that name.
 
-## ▍ Structure
+## Structure
 
 Every report has a top-level `schema_version`, `2` for all 2.x reports. The code that makes the report stamps it, so it does not depend on `provenance`; `ablate()` warns when it is not 2, and ablates a 1.x report of built-in models with categorical columns using the dense one-hot preprocessing 1.x used.
 
@@ -124,31 +124,31 @@ A JSON Schema for these keys ships as `featranker/report.schema.json`; see [Repo
 
 `evaluation_mode` is always `"held_out"`. It names the workflow (scoring on data passed to `rank_features()`); FeatRanker cannot check that this data is really separate from the training data.
 
-Every report has a `run` block (after `provenance`): `task`, `group`, `fingerprint_scheme` (`2`; integer and boolean columns are hashed exactly, and `ablate()` treats a report without the key as scheme 1), `data_sha256`, and, for `rank_features()`, `train_data_sha256` (`null` for a ranker pickled before 1.12); for `rank_resampled()`, `cv` and `splits_sha256` instead, with each split's report carrying its own `run`. When `feature_groups="auto"` chose the groups (`ConsensusSelector`, `--feature-groups auto`), `run["auto_groups"]` is `{"threshold": ..., "method": "spearman-complete-linkage"}`; otherwise the key is absent. See [Comparing runs](usage.md#comparing-runs).
+Every report has a `run` block (after `provenance`): `task`, `group`, `fingerprint_scheme` (`2`; integer and boolean columns are hashed exactly, and `ablate()` treats a report without the key as scheme 1), `data_sha256`, and, for `rank_features()`, `train_data_sha256` (`null` for a ranker pickled before 1.12); for `rank_resampled()`, `cv` and `splits_sha256` instead, with each split's report carrying its own `run`. When `feature_groups="auto"` chose the groups (`ConsensusSelector`, `--feature-groups auto`), `run["auto_groups"]` is `{"threshold": ..., "method": "spearman-complete-linkage"}`; otherwise the key is absent. See [Comparing runs](guide/selection.md#comparing-runs).
 
 With `shadows=True`, the report also has top-level `shadows: true`, `shadow_seed`, and `shadow_mode` (`"joint"` or `"independent"`; resampled reports add the `shadow_test` block, and their stability rows gain `shadow_hits`, `shadow_p_value`, `shadow_q_value`, `family_above_shadow_share`, and `shadow_families`); each model gains `shadow_importance` and `shadow_max`; each importance entry gains `above_shadow`; and each consensus row gains `above_shadow_share` and `family_above_shadow`. Without shadows, none of these keys appear.
 
-With `missing="impute"`, the report has a top-level `missing` block: `policy` (`"impute"`), `strategy` (`"median"`), and `train_counts` (every feature name to the number of its missing training values). Resampled reports carry it in each split's report, counted on that split's training rows. With the default `missing="error"` there is no `missing` key. See [Missing values](usage.md#missing-values).
+With `missing="impute"`, the report has a top-level `missing` block: `policy` (`"impute"`), `strategy` (`"median"`), and `train_counts` (every feature name to the number of its missing training values). Resampled reports carry it in each split's report, counted on that split's training rows. With the default `missing="error"` there is no `missing` key. See [Missing values](guide/data.md#missing-values).
 
-When the data has categorical columns (`categorical="auto"` or a list of names), the report has a top-level `categorical` block: `columns` (the categorical feature names), `train_levels` (name to the number of levels learned from the training rows, the missing-value level included), and `unseen_eval` (name to the number of evaluation values that got the shared "unseen" code). Resampled reports carry it in each split's report, learned on that split's training rows. Without categorical columns there is no `categorical` key. See [Categorical features](usage.md#categorical-features).
+When the data has categorical columns (`categorical="auto"` or a list of names), the report has a top-level `categorical` block: `columns` (the categorical feature names), `train_levels` (name to the number of levels learned from the training rows, the missing-value level included), and `unseen_eval` (name to the number of evaluation values that got the shared "unseen" code). Resampled reports carry it in each split's report, learned on that split's training rows. Without categorical columns there is no `categorical` key. See [Categorical features](guide/data.md#categorical-features).
 
-With `model_input="dataframe"` the report (and each resampled split report) has `"model_input": "dataframe"`; in the default `"array"` mode the key is absent. See [Columns by name](usage.md#columns-by-name).
+With `model_input="dataframe"` the report (and each resampled split report) has `"model_input": "dataframe"`; in the default `"array"` mode the key is absent. See [Columns by name](guide/custom-models.md#columns-by-name).
 
-When any [sample weights](usage.md#sample-weights) are used, the report (and each resampled split report) has `"sample_weight": {"train": bool, "eval": bool}`, saying whether training and evaluation weights were given; without weights the key is absent. A model that cannot take weights has a `failures` entry with stage `"fit"` and `error_type` `"SampleWeightNotSupported"`. Correlation evidence and the SHAP summary stay unweighted.
+When any [sample weights](guide/data.md#sample-weights) are used, the report (and each resampled split report) has `"sample_weight": {"train": bool, "eval": bool}`, saying whether training and evaluation weights were given; without weights the key is absent. A model that cannot take weights has a `failures` entry with stage `"fit"` and `error_type` `"SampleWeightNotSupported"`. Correlation evidence and the SHAP summary stay unweighted.
 
-With [`max_samples`](usage.md#fewer-evaluation-rows-max_samples), the report has top-level `max_samples` (as given) and, for `rank_features()` (and each resampled split report), `n_eval_rows`, the number of evaluation rows actually scored; without it neither key appears. `run["data_sha256"]` still covers all the evaluation rows passed.
+With [`max_samples`](guide/performance.md#fewer-evaluation-rows-max_samples), the report has top-level `max_samples` (as given) and, for `rank_features()` (and each resampled split report), `n_eval_rows`, the number of evaluation rows actually scored; without it neither key appears. `run["data_sha256"]` still covers all the evaluation rows passed.
 
-With [`max_samples` on `fit()`](usage.md#large-data) (or `max_train_samples` on `rank_resampled()`, `ConsensusSelector` and the CLI), the `run` block gains `n_train_rows` (the number of training rows the models were fit on), `train_max_samples` (as given, a plain number), `train_random_state` (when a seed was given) and `train_rows_sha256` (a SHA-256 of the sorted row indices; `ablate()` refuses a ranker whose rows hash differently). A `rank_resampled()` split report's `run` has them too (seeded with the split's seed); the resampled report itself has top-level `max_train_samples`, as given. With `max_categories`, `run` gains `max_categories` (also in a resampled report's `run`). Without these options none of these keys appears; `run["train_data_sha256"]` always covers every training row passed to `fit()`, so `ablate()` accepts the report and refits on the same sampled rows. With `fit(max_samples=)`, `missing.train_counts` and `categorical.train_levels` are counted on the sample, not on every row passed.
+With [`max_samples` on `fit()`](guide/performance.md#large-data) (or `max_train_samples` on `rank_resampled()`, `ConsensusSelector` and the CLI), the `run` block gains `n_train_rows` (the number of training rows the models were fit on), `train_max_samples` (as given, a plain number), `train_random_state` (when a seed was given) and `train_rows_sha256` (a SHA-256 of the sorted row indices; `ablate()` refuses a ranker whose rows hash differently). A `rank_resampled()` split report's `run` has them too (seeded with the split's seed); the resampled report itself has top-level `max_train_samples`, as given. With `max_categories`, `run` gains `max_categories` (also in a resampled report's `run`). Without these options none of these keys appears; `run["train_data_sha256"]` always covers every training row passed to `fit()`, so `ablate()` accepts the report and refits on the same sampled rows. With `fit(max_samples=)`, `missing.train_counts` and `categorical.train_levels` are counted on the sample, not on every row passed.
 
-With `shuffle="within_groups"` or `"circular"` (see [Shuffling dependent rows](usage.md#shuffling-dependent-rows)), the report (and each resampled split report) has top-level `"shuffle"` with that value; with the default `"rows"` the key is absent.
+With `shuffle="within_groups"` or `"circular"` (see [Shuffling dependent rows](guide/validation.md#shuffling-dependent-rows)), the report (and each resampled split report) has top-level `"shuffle"` with that value; with the default `"rows"` the key is absent.
 
-With `shuffle="within_groups"`, `rank_features()` also records `constant_within_groups`, placed after `shuffle`: the sorted names of the feature groups whose every column is constant (a missing value counts as a value) within every shuffle group on the scored rows, after `max_samples`. Their importance is 0 by construction under that shuffle. The list is empty when none qualify, and a non-empty list also raises a `UserWarning`. The key is absent with the other modes. Each split report of a resampled run carries its own list, and the resampled report itself has a top-level `constant_within_groups` after `shuffle` (with `shuffle="within_groups"` only): the sorted union of the split lists, `[]` when none. `summarize()` adds a `constant_within_groups` warning for a held-out or a resampled report whose list is non-empty; for a resampled report it names the splits in which each group was constant. See [Shuffling dependent rows](usage.md#shuffling-dependent-rows).
+With `shuffle="within_groups"`, `rank_features()` also records `constant_within_groups`, placed after `shuffle`: the sorted names of the feature groups whose every column is constant (a missing value counts as a value) within every shuffle group on the scored rows, after `max_samples`. Their importance is 0 by construction under that shuffle. The list is empty when none qualify, and a non-empty list also raises a `UserWarning`. The key is absent with the other modes. Each split report of a resampled run carries its own list, and the resampled report itself has a top-level `constant_within_groups` after `shuffle` (with `shuffle="within_groups"` only): the sorted union of the split lists, `[]` when none. `summarize()` adds a `constant_within_groups` warning for a held-out or a resampled report whose list is non-empty; for a resampled report it names the splits in which each group was constant. See [Shuffling dependent rows](guide/validation.md#shuffling-dependent-rows).
 
 <a id="ablation"></a>
 
-A report returned by [`FeatureRanker.ablate()`](usage.md#ablation-curve) (or written by the CLI with `--ablate`) has one more top-level key, `ablation`; every other key is a copy of the report it was made from, and without `ablate()` the key is absent.
+A report returned by [`FeatureRanker.ablate()`](guide/selection.md#ablation-curve) (or written by the CLI with `--ablate`) has one more top-level key, `ablation`; every other key is a copy of the report it was made from, and without `ablate()` the key is absent.
 
-```python
+```text
 "ablation": {
     "scoring": "r2",                  # scorer used for the curve
     "models": ["ridge", "random_forest"],   # the voting models that were refit
@@ -179,11 +179,11 @@ Scores are the models' scores on the data passed as `X_eval`, higher is better. 
 
 <a id="several-scorers"></a>
 
-With [several scorers](usage.md#several-metrics) (`scoring=["r2", "neg_mean_absolute_error"]`), `scoring` names the primary scorer, and the report adds `secondary_scoring` (the other names, in order) and `secondary_baseline_scores` (name to the fitted dummy's score, or `null` if it could not be scored). Each model gains `secondary`: per secondary scorer, `{"evaluation_score": ..., "importance": {group: {"mean": ..., "std": ...}}}` computed on the same permuted copies as the primary `importance`, or `null` if that scorer failed for the model (the model stays ranked, with a `failures` entry at stage `"evidence"` naming the scorer). `consensus`, `stability`, shadows, and everything else use the primary scorer only. Resampled reports have `secondary_scoring` at the top and `secondary` in each split's models. With one scorer none of these keys appear.
+With [several scorers](guide/models-and-scoring.md#several-metrics) (`scoring=["r2", "neg_mean_absolute_error"]`), `scoring` names the primary scorer, and the report adds `secondary_scoring` (the other names, in order) and `secondary_baseline_scores` (name to the fitted dummy's score, or `null` if it could not be scored). Each model gains `secondary`: per secondary scorer, `{"evaluation_score": ..., "importance": {group: {"mean": ..., "std": ...}}}` computed on the same permuted copies as the primary `importance`, or `null` if that scorer failed for the model (the model stays ranked, with a `failures` entry at stage `"evidence"` naming the scorer). `consensus`, `stability`, shadows, and everything else use the primary scorer only. Resampled reports have `secondary_scoring` at the top and `secondary` in each split's models. With one scorer none of these keys appear.
 
-With `evidence=True`, each model also has `train_score` and `overfit_gap` (`null` if the training score could not be computed, with a `failures` entry at stage `"evidence"`), the report has a top-level `evidence` block, and models SHAP can explain have `shap`. Without `evidence`, none of these keys appear. See [Evidence](usage.md#evidence).
+With `evidence=True`, each model also has `train_score` and `overfit_gap` (`null` if the training score could not be computed, with a `failures` entry at stage `"evidence"`), the report has a top-level `evidence` block, and models SHAP can explain have `shap`. Without `evidence`, none of these keys appear. See [Evidence](guide/noise-and-evidence.md#evidence).
 
-```python
+```text
 {
     "models": {
         "ridge": {
@@ -217,7 +217,7 @@ With `evidence=True`, each model also has `train_score` and `overfit_gap` (`null
 
 `mean_abs` is on the explainer's output scale, which may be a link scale rather than the prediction scale (a linear model's linear predictor, for example log units for `PoissonRegressor`), so compare it between groups of one model, not across models. `direction` is `null` for multi-column groups, constant features, and multiclass models; for binary classification the explained output is the positive class (the second label in sorted order). For linear models `direction` is the coefficient's sign (+1 or -1) when the coefficient is not zero, even when `mean_abs` is near 0, and `null` when it is zero.
 
-```python
+```text
 {
     "schema_version": 2,
     "evaluation_mode": "held_out",
@@ -273,7 +273,7 @@ With `evidence=True`, each model also has `train_score` and `overfit_gap` (`null
 }
 ```
 
-## ▍ Ranking
+## Ranking
 
 - Raw importance values stay model-specific and are never averaged into the primary consensus.
 - Exactly equal mean importances share the minimum rank. Group names give a deterministic output order.
@@ -281,23 +281,23 @@ With `evidence=True`, each model also has `train_score` and `overfit_gap` (`null
 - Built-in families are listed in [Models](models.md). Each model passed through `models=` is its own family unless `families={model_name: family}` maps it, so with your own models every unmapped model votes separately and several near-identical ones can outvote other model types. The `family` field of each model in the report holds the family used.
 - The consensus sorts by `median_rank`, then `mean_rank`, then group name.
 
-## ▍ Dummy baseline
+## Dummy baseline
 
 - `baseline_score` is the evaluation score of a default `DummyClassifier()` or `DummyRegressor()` fit on the same training data and scored with the same scorer.
 - A model has `in_consensus: True` only if its `evaluation_score` is strictly greater than `baseline_score` (scikit-learn scorers are higher-is-better). Models at or below the baseline stay in `models` but do not vote in `consensus`.
 - If no model beats the baseline, `consensus` is an empty list and a `UserWarning` is emitted; nothing is raised.
 - If the baseline cannot be fit or scored, `baseline_score` is `None`, every model has `in_consensus: True`, and `failures` gains an entry for model `dummy_baseline`.
 
-## ▍ Failures
+## Failures
 
-- Failures contain `model`, `stage`, `error_type`, and `message`. The stages are `initialization`, `fit`, `ranking`, (with `evidence=True`) `evidence`, and (with `shadows=True`) `shadows`. An `evidence` failure leaves the model's ranking untouched. A `shadows` failure (`error_type` `ShadowColumnsDropped`) means a `ColumnTransformer` in a custom model (also nested in a `Pipeline` or another `ColumnTransformer`) ignores some shadow columns, or which columns the model uses could not be verified (scikit-learn's private attributes are not as expected, a meta-estimator wraps a column selector, or a `FunctionTransformer` with a function or a transformer scikit-learn does not define may drop columns): the model keeps its importances and ranking vote but has no shadow evidence in that report (see [Columns by name](usage.md#columns-by-name)).
+- Failures contain `model`, `stage`, `error_type`, and `message`. The stages are `initialization`, `fit`, `ranking`, (with `evidence=True`) `evidence`, and (with `shadows=True`) `shadows`. An `evidence` failure leaves the model's ranking untouched. A `shadows` failure (`error_type` `ShadowColumnsDropped`) means a `ColumnTransformer` in a custom model (also nested in a `Pipeline` or another `ColumnTransformer`) ignores some shadow columns, or which columns the model uses could not be verified (scikit-learn's private attributes are not as expected, a meta-estimator wraps a column selector, or a `FunctionTransformer` with a function or a transformer scikit-learn does not define may drop columns): the model keeps its importances and ranking vote but has no shadow evidence in that report (see [Columns by name](guide/custom-models.md#columns-by-name)).
 - Failed models get no zero placeholder and do not enter the consensus.
 - `fit()` raises if no model fits; `rank_features()` raises if every model fails ranking.
 
-## ▍ Provenance and reproducibility
+## Provenance and reproducibility
 
 - `provenance` records the installed `featranker` version (`None` if the package is not installed), plus the Python, NumPy, and scikit-learn versions.
-- `run` records the preset and fingerprints of the data and splits, so two reports can be checked for the same inputs; see [Comparing runs](usage.md#comparing-runs).
+- `run` records the preset and fingerprints of the data and splits, so two reports can be checked for the same inputs; see [Comparing runs](guide/selection.md#comparing-runs).
 - Each model's `params` is its fitted estimator's `get_params(deep=True)`, limited to strings, integers, booleans, `None`, and finite floats. Nested estimator objects are left out, while pipeline entries such as `ridge__alpha` remain. NumPy number and bool scalars, subclasses and enums are recorded as the plain Python type (`ablate()` compares both type and value, so `1` and `1.0` differ); other values (lists, arrays, callables, such as the column selectors of a `ColumnTransformer`) are left to `param_hashes`.
 - Each model's `param_hashes` maps each `get_params(deep=True)` parameter that `params` does not hold to a SHA-256 of a canonical description of its value (lists in order, dicts and sets by sorted items, arrays of any subclass by dtype (native byte order), shape and bytes (a masked array also by its mask and fill value; a record by its fields), sparse matrices by their CSR data, indices and indptr (other than 2-D: coordinates and data), pandas objects by values, labels and index, dicts of any subclass alike, callables (functions, methods, ufuncs) by module and qualified name, estimators by class (inside a list, dict or partial also by their own `get_params(deep=False)`; `__mp_main__` is written `__main__`); other objects, and values that cannot be described, by type only). `ablate()` compares it like `params`, so a reordered pipeline step, other `ColumnTransformer` selectors or another `class_weight` raises `ValueError`. Reports without it are not checked on these values.
 - Each model's `components` maps the name of each estimator-valued entry of `get_params(deep=True)` to its class name (`{"ridge": "Ridge"}`; `{}` if there are none), so `ablate()` can tell a replaced component from the same parameters.

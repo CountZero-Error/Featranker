@@ -45,54 +45,112 @@ def _string_columns(X: Any) -> Any:
 
 class ConsensusSelector(SelectorMixin, BaseEstimator):
     """
-    Select feature groups by resampled consensus ranking, inside fit().
+    Select feature groups by a resampled consensus ranking, inside ``fit()``.
 
-    Use it as a Pipeline step: under cross_val_score or GridSearchCV the
-    ranking is redone on each training fold, so selection never sees the
-    rows it is scored on.
+    Use it as a ``Pipeline`` step. Under ``cross_val_score`` or
+    ``GridSearchCV`` the ranking is redone on each training fold, so the
+    selection never sees the rows it is scored on. Set at least one of ``k``,
+    ``min_shadow_share``, ``max_shadow_q`` and ``min_shadow_families``; the
+    shadow filters apply first, then the first ``k`` groups that pass.
+    Invalid rules raise ``ValueError`` in ``fit()``, not here, following the
+    scikit-learn convention that ``__init__`` only stores parameters.
 
-    Args:
-        task: "clf" or "reg".
-        scoring: scikit-learn scorer name or callable, or a list of them: the
-            first selects, the others are only reported (secondary results).
-        k: Keep the first k groups in the stability order.
-        min_shadow_share: Keep groups whose above_shadow_share is at least
-            this (turns shadow features on). With k too, filter then take k.
-        max_shadow_q: Keep groups whose shadow_q_value (Benjamini-Hochberg
-            adjusted shadow hits test across splits) is at most this, in
-            (0, 1]. A heuristic filter: the values are uncalibrated reference
-            values, not significance levels. Turns shadow features on;
-            combines with the other rules like min_shadow_share. Needs about
-            10 or more splits to have power.
-        min_shadow_families: Keep groups for which at least this many model
-            families (a positive int) are above their shadows in a majority
-            of splits (stability shadow_families; splits where a family did
-            not vote count as not above). 1 asks whether any one family
-            finds signal; 2 is a heuristic starting point, since one family
-            fitting noise can pass alone. Its false-selection rate is not
-            yet measured (see the calibration study). Turns shadow features
-            on; combines with the other rules.
-        group, models, families, n_jobs, shadow_seed, shadow_mode, missing, categorical,
-        model_input:
-            As in FeatureRanker. With missing="impute", NaN is accepted in
-            fit() and transform() (the selector only picks columns), so put an
-            imputer after it in a Pipeline for the final model. With
-            categorical, selected raw columns come back as given (use an
-            encoder after it in a Pipeline for the final model).
-        max_categories: As in FeatureRanker.
-        feature_groups, cv, n_repeats, random_state, max_samples: As in
-            rank_resampled().
-        max_train_samples: As rank_resampled()'s max_train_samples: fit each
-            split's models on a random subsample of its training rows.
-            feature_groups="auto" groups correlated columns with auto_groups()
-            on the X given to fit(), so inside a Pipeline from the training
-            fold only; the groups used are in report_["feature_groups"] and
-            the threshold in report_["run"]["auto_groups"].
-        auto_groups_threshold: The |rho| threshold of feature_groups="auto"
-            (see auto_groups()); ignored for other feature_groups.
-        shuffle: As in FeatureRanker. With "within_groups" the groups passed
-            to fit() are the shuffle groups (and cv's), so they are required.
-        verbose: Show progress bars (off by default; pipelines fit often).
+    Parameters
+    ----------
+    task : {"clf", "reg"}
+        As in ``FeatureRanker``. Required.
+    scoring : str, callable or list
+        As in ``FeatureRanker.rank_features()``. With a list, the first scorer
+        selects and the rest are reported in ``report_``. Required.
+    k : int, optional
+        Keep the first ``k`` groups in stability order (all if fewer).
+    min_shadow_share : float, optional
+        Keep groups whose stability ``above_shadow_share`` is at least this
+        (0 to 1). Turns shadow features on.
+    max_shadow_q : float, optional
+        Keep groups whose ``shadow_q_value`` is at most this (above 0, at most
+        1). A heuristic filter on uncalibrated values; experimental, so
+        ``fit()`` warns. Turns shadows on. Use 10 or more splits.
+    min_shadow_families : int, optional
+        Keep groups that at least this many model families put above their
+        shadows in most splits (a positive integer). A heuristic. Turns
+        shadows on.
+    group : {"all", "linear", "tree", "fast"}, default "all"
+        As in ``FeatureRanker``.
+    models : dict, optional
+        As in ``FeatureRanker``.
+    feature_groups : dict or "auto", optional
+        As in ``rank_resampled()``. ``"auto"`` groups correlated columns with
+        ``auto_groups()`` on the data given to ``fit()``; the groups used are
+        in ``report_["feature_groups"]``. Any other string raises
+        ``ValueError`` in ``fit()``.
+    auto_groups_threshold : float, default 0.7
+        The |rho| cut of ``feature_groups="auto"`` (above 0, at most 1).
+        Ignored for other ``feature_groups``.
+    cv : int, splitter or iterable, default 5
+        As in ``rank_resampled()``.
+    n_repeats : int, default 10
+        As in ``rank_resampled()``.
+    random_state : int, optional
+        As in ``rank_resampled()``.
+    max_samples : int or float, optional
+        As in ``rank_resampled()``.
+    shadow_seed : int, optional
+        As in ``FeatureRanker``.
+    shadow_mode : {"joint", "independent"}, default "joint"
+        As in ``FeatureRanker``.
+    missing : {"error", "impute"}, default "error"
+        As in ``FeatureRanker``. With ``"impute"`` NaN is accepted in ``fit()``
+        and ``transform()``; put an imputer after the selector in a pipeline.
+    categorical : "auto" or list of str, optional
+        As in ``FeatureRanker``. Selected raw columns come back as given; put
+        an encoder after the selector in a pipeline.
+    model_input : {"array", "dataframe"}, default "array"
+        As in ``FeatureRanker``.
+    shuffle : {"rows", "within_groups", "circular"}, default "rows"
+        As in ``FeatureRanker``. With ``"within_groups"`` the ``groups`` given
+        to ``fit()`` are the shuffle groups and are required.
+    families : dict, optional
+        As in ``FeatureRanker``.
+    max_categories : int, optional
+        As in ``FeatureRanker``.
+    max_train_samples : int or float, optional
+        As in ``rank_resampled()``: each split's models are fit on a random
+        subsample of its training rows.
+    n_jobs : int, optional
+        As in ``FeatureRanker``.
+    verbose : bool, default False
+        Show progress bars. Off by default because pipelines fit often.
+
+    Attributes
+    ----------
+    selected_groups_ : list of str
+        The groups kept, in stability order.
+    report_ : Report
+        The resampled report of the last ``fit()``.
+    n_features_in_ : int
+        Number of columns seen by ``fit()``.
+    feature_names_in_ : ndarray
+        Column names, for DataFrame input.
+
+    See Also
+    --------
+    FeatureRanker.rank_resampled : the ranking this selector runs.
+
+    Examples
+    --------
+    >>> from sklearn.datasets import load_diabetes
+    >>> from sklearn.linear_model import Ridge
+    >>> from sklearn.pipeline import Pipeline
+    >>> from featranker import ConsensusSelector
+    >>> X, y = load_diabetes(return_X_y=True, as_frame=True)
+    >>> pipe = Pipeline([
+    ...     ("select", ConsensusSelector("reg", "r2", k=3, group="fast", cv=3,
+    ...                                  n_repeats=3, random_state=0)),
+    ...     ("model", Ridge()),
+    ... ]).fit(X, y)
+    >>> len(pipe.named_steps["select"].selected_groups_)
+    3
     """
 
     def __init__(
@@ -196,12 +254,35 @@ class ConsensusSelector(SelectorMixin, BaseEstimator):
         self, X: Any, y: Any, groups: Any = None, sample_weight: Any = None
     ) -> "ConsensusSelector":
         """
-        Rank on X/y only (resampled) and keep the groups the rule selects.
+        Rank on ``X`` and ``y`` only (resampled) and keep the selected groups.
 
-        groups: row groups for a group-aware cv (e.g. GroupKFold); in a
-        Pipeline pass it as select__groups. sample_weight: row weights, as in
-        rank_resampled(); in a Pipeline, enable scikit-learn metadata routing
-        and call set_fit_request(sample_weight=True) on the selector.
+        Parameters
+        ----------
+        X : array-like or DataFrame
+            Training features. Feature names come from DataFrame columns; for
+            arrays they are ``x0``, ``x1``, and so on.
+        y : array-like
+            Training target.
+        groups : array-like, optional
+            Row groups for a group-aware ``cv`` such as ``GroupKFold``. In a
+            pipeline pass ``select__groups=...``. With
+            ``shuffle="within_groups"`` they also confine the shuffles.
+        sample_weight : array-like, optional
+            Row weights, as in ``rank_resampled()``. In a pipeline, enable
+            scikit-learn metadata routing and call
+            ``set_fit_request(sample_weight=True)`` on the selector.
+
+        Returns
+        -------
+        ConsensusSelector
+            The fitted selector. A failed ``fit()`` clears earlier fitted
+            state.
+
+        Raises
+        ------
+        ValueError
+            For an invalid rule or option, or if every model dropped the
+            shadow columns in every split while a shadow rule is set.
         """
         # A failed refit must not leave the previous fit's state behind.
         for attribute in FITTED_ATTRIBUTES:
@@ -345,6 +426,21 @@ class ConsensusSelector(SelectorMixin, BaseEstimator):
         return self
 
     def transform(self, X: Any) -> Any:
+        """
+        Keep the columns of the selected groups, in their original order.
+
+        Parameters
+        ----------
+        X : array-like or DataFrame
+            Data with the same columns as ``fit()``. DataFrame column labels
+            are compared as strings.
+
+        Returns
+        -------
+        array-like
+            ``X`` with only the selected columns. If no group was selected,
+            zero columns (``fit()`` warned).
+        """
         # Match fit(): DataFrame column labels are compared as strings.
         return super().transform(_string_columns(X))
 

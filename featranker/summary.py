@@ -365,12 +365,40 @@ RESAMPLED_RULES = (
 
 def summarize(report: Any) -> List[Dict[str, Any]]:
     """
-    Return structured findings for a report from FeatureRanker.rank_features()
-    or rank_resampled().
+    Return structured findings that apply the reading guide to a report.
 
-    Each finding is a dict with code, severity ("info" or "warning"), message,
-    JSON-safe evidence, basis ("descriptive", or "experimental" when the finding
-    rests on shadow p-/q-values) and scoring (the report's scorer name or None). The report is not modified.
+    Works on the report from ``rank_features()``, on one loaded from the CLI's
+    JSON, and on a resampled report (which has its own findings; summarize
+    ``report["splits"][i]["report"]`` for one split). The report is not
+    modified.
+
+    Parameters
+    ----------
+    report : dict
+        A report from ``FeatureRanker.rank_features()`` or
+        ``rank_resampled()``.
+
+    Returns
+    -------
+    list of dict
+        Findings in a fixed order. Each has ``code``, ``severity`` (``"info"``
+        or ``"warning"``), ``message``, JSON-safe ``evidence``, ``basis``
+        (``"descriptive"``, or ``"experimental"`` when it rests on shadow p- or
+        q-values) and ``scoring`` (the report's scorer name, or ``None``). An
+        empty list means nothing stood out, not that the ranking is proven.
+
+    Raises
+    ------
+    TypeError
+        If ``report`` is not a dict.
+    ValueError
+        If ``report`` lacks the keys of a report.
+
+    Examples
+    --------
+    >>> from featranker import summarize
+    >>> [f["code"] for f in summarize(report)]  # doctest: +SKIP
+    ['few_families', 'tied_groups']
     """
     if not isinstance(report, dict):
         raise TypeError("[!] summarize() expects a report dict.")

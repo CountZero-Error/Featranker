@@ -1,6 +1,6 @@
-# FeatRanker ▍ Benchmark
+# Benchmark
 
-<sub><a href="README.md">◂ Back to docs</a></sub>
+[Manual](README.md) | [Getting started](getting-started.md) | [Reference](reference.md)
 
 A reproducible comparison of FeatRanker's selector against common feature selectors on synthetic data where the true signal is known. It is a check of the claim that a multi-family, held-out, shadow-checked ranking is more trustworthy than a single-model selector, and it reports where the claim fails as well as where it holds.
 
