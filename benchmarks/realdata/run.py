@@ -293,10 +293,9 @@ def _featranker_info(commit: Optional[str]) -> Dict[str, Any]:
 
 @contextlib.contextmanager
 def _locked(out: Path, parser: argparse.ArgumentParser) -> Iterator[None]:
-    """An exclusive lock file beside the resolved output; removed on exit, only if this run made it."""
-    target = out.resolve()
-    lock = target.with_name(f"{target.name}.lock")
-    target.parent.mkdir(parents=True, exist_ok=True)
+    """An exclusive lock file beside the (resolved) output; removed on exit, only if this run made it."""
+    lock = out.with_name(f"{out.name}.lock")
+    out.parent.mkdir(parents=True, exist_ok=True)
     try:
         os.close(os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
     except FileExistsError:
@@ -322,6 +321,9 @@ def main() -> None:
     if args.render:
         print(render(json.loads(args.render.read_text())))
         return
+    if args.out.suffix == ".lock":
+        parser.error(f"--out {args.out} ends in .lock, the name of the lock file")
+    args.out = args.out.resolve()  # a symlinked --out stays a link; it is read, locked and written as resolved now
     seeds = [int(s) for s in args.seeds.split(",")]
     by_id = {d["data_id"]: d for d in DATASETS}
     chosen = [int(i) for i in args.datasets.split(",")]
@@ -368,11 +370,10 @@ def _run(args: argparse.Namespace, parser: argparse.ArgumentParser, seeds: List[
         results["wall_seconds"] = prior_wall + time.perf_counter() - t0
         args.out.parent.mkdir(parents=True, exist_ok=True)
         text = json.dumps(results, indent=2, allow_nan=False)
-        target = args.out.resolve()  # a symlinked --out stays a link
-        tmp = target.with_name(f"{target.name}.{os.getpid()}.tmp")
+        tmp = args.out.with_name(f"{args.out.name}.{os.getpid()}.tmp")
         try:
             tmp.write_text(text)
-            os.replace(tmp, target)
+            os.replace(tmp, args.out)
         except BaseException:
             tmp.unlink(missing_ok=True)
             raise

@@ -639,8 +639,13 @@ def _json_params(model: Any, *, legacy: bool = False) -> Dict[str, Any]:
 MAX_DESCRIBE_DEPTH = 20
 
 
+def _module_name(name: Any) -> Any:
+    """A spawned process runs the main script as __mp_main__; it is the same __main__ to a report."""
+    return "__main__" if name == "__mp_main__" else name
+
+
 def _type_name(value: Any) -> str:
-    return f"{type(value).__module__}.{type(value).__qualname__}"
+    return f"{_module_name(type(value).__module__)}.{type(value).__qualname__}"
 
 
 def _array_text(array: Any, inner: int, path: FrozenSet[int]) -> str:
@@ -670,6 +675,8 @@ def _describe(value: Any, depth: int = 0, path: FrozenSet[int] = frozenset()) ->
         value = _python_scalar(value)
         if value is None or isinstance(value, (bool, int, float, str, bytes, complex, range)):
             return f"{_type_name(value)}:{value!r}"
+        if isinstance(value, np.void):  # a record: a 0-d structured array; bytes if unstructured
+            return _array_text(np.asarray(value), inner, path) if value.dtype.names else f"{kind}:{value.tobytes()!r}"
         if isinstance(value, np.generic):
             return f"{kind}:{value}"  # str, not repr: NumPy 1 and 2 differ
         if isinstance(value, slice):
@@ -685,24 +692,30 @@ def _describe(value: Any, depth: int = 0, path: FrozenSet[int] = frozenset()) ->
         if isinstance(value, np.ndarray):
             text = _array_text(value, inner, path)
             if np.ma.isMaskedArray(value):
-                text += _array_text(np.ma.getmaskarray(value), inner, path)
+                fill = getattr(value, "fill_value")
+                text += _array_text(np.ma.getmaskarray(value), inner, path) + _array_text(fill, inner, path)
             return text
         if scipy.sparse.issparse(value):
-            matrix = value.tocsr(copy=True)
+            matrix = value.tocsr(copy=True) if value.ndim == 2 else value.tocoo(copy=True)
             matrix.sum_duplicates()
-            parts = (matrix.data, matrix.indices, matrix.indptr)
+            parts = (matrix.data, matrix.indices, matrix.indptr) if value.ndim == 2 else (
+                matrix.data, *matrix.coords)
             return f"sparse{matrix.shape}{','.join(_array_text(part, inner, path) for part in parts)}"
         if kind.startswith("pandas."):
+            is_index = kind.endswith("Index")
             names = list(value.columns) if hasattr(value, "columns") else getattr(value, "name", None)
-            return f"{kind}[{_describe(value.to_numpy(), inner, path)},{_describe(names, inner, path)}]"
+            labels = (value.names, None) if is_index else (names, getattr(value, "index", None))
+            return f"{kind}[{_describe(value.to_numpy(), inner, path)},{_describe(labels, inner, path)}]"
         if isinstance(value, functools.partial):
             parts = (value.func, value.args, value.keywords)
             return f"{kind}[{','.join(_describe(part, inner, path) for part in parts)}]"
+        if depth and hasattr(value, "get_params") and not isinstance(value, type):
+            return f"{kind}[{_describe(value.get_params(deep=False), inner, path)}]"
         name = getattr(value, "__qualname__", None) or getattr(value, "__name__", None)
         if callable(value) and name and (isinstance(value, type) or not hasattr(value, "get_params")):
             # np.ufunc names vary in module; method descriptors only know their class.
             owner_class = getattr(value, "__objclass__", None)
-            home = getattr(value, "__module__", None) or getattr(owner_class, "__module__", None)
+            home = _module_name(getattr(value, "__module__", None) or getattr(owner_class, "__module__", None))
             module = "" if isinstance(value, np.ufunc) else home
             owner = getattr(value, "__self__", None)
             bound = "" if owner is None or isinstance(owner, (types.ModuleType, type)) else _describe(
@@ -717,8 +730,10 @@ def _param_hashes(model: Any) -> Dict[str, str]:
     """sha256 of the described value of each get_params(deep=True) parameter that _json_params leaves out."""
     params = model.get_params(deep=True) if hasattr(model, "get_params") else {}
     held = _json_params(model)
+    # An estimator that is itself a deep parameter is described by its type: its params are keys of their own.
+    path = frozenset(id(v) for v in params.values() if hasattr(v, "get_params") and not isinstance(v, type))
     return {
-        key: hashlib.sha256(_describe(value).encode("utf-8", "backslashreplace")).hexdigest()
+        key: hashlib.sha256(_describe(value, 0, path).encode("utf-8", "backslashreplace")).hexdigest()
         for key, value in params.items()
         if key not in held
     }
@@ -1765,6 +1780,8 @@ class FeatureRanker:
     # missing, model_input and max_categories as of the last successful fit() (None: not
     # recorded, as in a pickle from before 2.0; ablate() then uses the current attributes).
     _fit_settings: Optional[Dict[str, Any]] = None
+    # `missing` as of the last init_models() (None: not recorded; the built-in pipelines carry an imputer or not).
+    _built_missing: Optional[str] = None
 
     def __init__(
         self,
@@ -1996,6 +2013,7 @@ class FeatureRanker:
         if max_samples is not None:
             _resolve_max_samples(max_samples, 1)
         self._validate_assigned()
+        self._check_built_missing()
         self.is_fitted_ = False
         categorical = _categorical_indices(X, self.categorical, feature_names)
         X_values, names = _validate_X(
@@ -2189,8 +2207,15 @@ class FeatureRanker:
             "shuffle": self.shuffle,
         }
 
+    def _check_built_missing(self) -> None:
+        if self._built_missing is not None and self._built_missing != self.missing:
+            raise ValueError(
+                "[!] missing was changed after the built-in models were made; make a new FeatureRanker."
+            )
+
     def _check_fit_options(self) -> None:
         """Raise when an option that shaped the fit was assigned since; pickles without a record pass."""
+        self._check_built_missing()
         current = {
             "missing": self.missing,
             "model_input": self.model_input,
@@ -2306,7 +2331,7 @@ class FeatureRanker:
                 "shuffle_groups_sha256",
                 _labels_fingerprint(shuffle_labels, self.fingerprint_scheme_),
             ),
-            ("max_categories", self.max_categories),
+            ("max_categories", _plain_int(self.max_categories)),
             ("n_train_rows", self.train_n_rows_),
         ):
             if value is not None:
@@ -2431,7 +2456,7 @@ class FeatureRanker:
             }
         if self.shadows:
             report["shadows"] = True
-            report["shadow_seed"] = self.shadow_seed
+            report["shadow_seed"] = _plain_int(self.shadow_seed)
             report["shadow_mode"] = self.shadow_mode
         if self.shuffle != "rows":
             report["shuffle"] = self.shuffle
@@ -2580,7 +2605,7 @@ class FeatureRanker:
                     verbose=self.verbose,
                     shadows=self.shadows,
                     shadow_seed=(
-                        None if self.shadow_seed is None else (self.shadow_seed + index) % 2**64
+                        None if self.shadow_seed is None else (_plain_int(self.shadow_seed) + index) % 2**64
                     ),
                     evidence=self.evidence,
                     shadow_mode=self.shadow_mode,
@@ -2645,7 +2670,7 @@ class FeatureRanker:
         if shuffle_labels is not None:
             run["shuffle_groups_sha256"] = _labels_fingerprint(shuffle_labels)
         if self.max_categories is not None:
-            run["max_categories"] = self.max_categories
+            run["max_categories"] = _plain_int(self.max_categories)
         result = {
             "schema_version": REPORT_SCHEMA_VERSION,
             "evaluation_mode": "resampled",
@@ -2671,7 +2696,7 @@ class FeatureRanker:
             result["max_train_samples"] = _plain_number(max_train_samples)
         if self.shadows:
             result["shadows"] = True
-            result["shadow_seed"] = self.shadow_seed
+            result["shadow_seed"] = _plain_int(self.shadow_seed)
             result["shadow_mode"] = self.shadow_mode
             result["shadow_test"] = {
                 "method": "binomial",
@@ -2764,6 +2789,7 @@ class FeatureRanker:
         Returns:
             Nested dict keyed by [task][group][model_name] → model instance.
         """
+        self._built_missing = self.missing
         # Load the YAML config that ships alongside this module.
         with CONFIG_PATH.open("r", encoding="utf-8") as config_file:
             config = yaml.safe_load(config_file) or {}

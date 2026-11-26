@@ -157,30 +157,32 @@ def _voters(ranker: FeatureRanker, report: Dict[str, Any], stacklevel: int = 3) 
                 f"[!] The ranker's model '{name}' has other components than the report's; "
                 "use the ranker the report was made with."
             )
-        pairs = []
         recorded = report["models"][name].get("params")  # older reports have none
+        hashes = report["models"][name].get("param_hashes")  # reports before 2.0 have none
+        if recorded is None and hashes is None:
+            continue
+        current = {}
         if recorded is not None:
             current = _json_params(model, legacy=report.get("schema_version") != REPORT_SCHEMA_VERSION)
             if name in dense:  # 1.x recorded the dense threshold as 0 (or nothing)
                 recorded, current = ({**p, _THRESHOLD: 0} for p in (recorded, current))
-            pairs.append((recorded, current))
-        hashes = report["models"][name].get("param_hashes")  # reports before 2.0 have none
-        if hashes is not None:
-            pairs.append((hashes, _param_hashes(model)))
-        for recorded, current in pairs:
-            if different_version:
-                # Parameter names differ between scikit-learn versions: compare the shared ones.
-                shared = recorded.keys() & current.keys()
-                recorded, current = ({k: p[k] for k in shared} for p in (recorded, current))
-            if _params_equal(current, recorded):
-                continue
-            if not different_version:
-                raise ValueError(
-                    f"[!] The ranker's model '{name}' has other parameters than the report's; "
-                    "use the ranker the report was made with."
-                )
-            if name not in changed:
-                changed.append(name)
+        if hashes is not None:  # tagged, so a hash never equals a scalar; one dictionary because a
+            # parameter may move between params and param_hashes across scikit-learn versions
+            recorded = {**(recorded or {}), **{k: ("hash", v) for k, v in hashes.items()}}
+            current = {**current, **{k: ("hash", v) for k, v in _param_hashes(model).items()}}
+        if different_version:
+            # Parameter names differ between scikit-learn versions: compare the shared ones.
+            shared = recorded.keys() & current.keys()
+            recorded, current = ({k: p[k] for k in shared} for p in (recorded, current))
+        if _params_equal(current, recorded):
+            continue
+        if not different_version:
+            raise ValueError(
+                f"[!] The ranker's model '{name}' has other parameters than the report's; "
+                "use the ranker the report was made with."
+            )
+        if name not in changed:
+            changed.append(name)
     if changed:
         # Another scikit-learn version may change defaults, so this cannot be told from a real change.
         warnings.warn(
