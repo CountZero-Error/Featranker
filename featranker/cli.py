@@ -6,6 +6,7 @@ import argparse
 import csv
 import json
 import math
+import os
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
@@ -624,7 +625,20 @@ def _write_report(results: Dict[str, Any], output_path: Optional[Path]) -> None:
     if output_path is None:
         print(output)
         return
-    _output_file(output_path).write_text(output, encoding="utf-8")
+    target = _output_file(output_path).resolve()  # a symlinked --output stays a link
+    tmp = target.with_name(f".{target.name}.{os.getpid()}.tmp")
+    try:
+        handle = tmp.open("x", encoding="utf-8")
+    except OSError:  # e.g. a read-only folder around a writable file: write it in place
+        target.write_text(output, encoding="utf-8")
+        return
+    try:
+        with handle:
+            handle.write(output)
+        os.replace(tmp, target)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
 
 
 def main() -> int:

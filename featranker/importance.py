@@ -2123,6 +2123,8 @@ class FeatureRanker:
                 self.fit_models_[name] = clone(template, safe=False)
             except Exception:
                 pass  # that model's fit fails and is recorded below
+        if self.user_models is not None:  # train what ablate() refits: a shared RandomState gives one seed
+            candidates = {name: self.fit_models_.get(name, model) for name, model in candidates.items()}
         self.fit_failures_ = []
         # Models see the shadow block too; the dummy below sees real columns only.
         X_models = (

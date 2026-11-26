@@ -445,7 +445,8 @@ def _group_summary(
         # Codes are labels, so a correlation with the SHAP values means nothing.
         if len(columns) == 1 and len(classes) == 1 and columns[0] not in categorical:
             pair = np.column_stack([X[:, columns[0]], per_row[0]])
-            rho = _spearman_matrix(pair)[0, 1]
+            pair = pair[~np.isnan(pair).any(axis=1)]  # the rows where the feature is present
+            rho = _spearman_matrix(pair)[0, 1] if len(pair) > 1 else np.nan
             direction = None if np.isnan(rho) else float(rho)
         summary[group] = {
             "mean_abs": _finite_mean_abs(per_row),

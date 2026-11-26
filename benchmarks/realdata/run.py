@@ -319,6 +319,8 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.render:
+        if hasattr(sys.stdout, "reconfigure"):  # a narrow console must not lose the tables
+            sys.stdout.reconfigure(errors="backslashreplace")
         print(render(json.loads(args.render.read_text())))
         return
     if args.out.suffix == ".lock":
