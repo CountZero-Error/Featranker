@@ -22,6 +22,7 @@ from .importance import (
     _params_equal,
     _labels_fingerprint,
     _resolve_scorer,
+    _type_name,
     _validate_X,
     _validate_weights,
     _validate_y,
@@ -151,6 +152,12 @@ def _voters(ranker: FeatureRanker, report: Dict[str, Any], stacklevel: int = 3) 
                 f"[!] The ranker's model '{name}' is a {type(model).__name__}, but the report's "
                 f"is a {recorded_class}; use the ranker the report was made with."
             )
+        qualified_class = report["models"][name].get("qualified_class")
+        if qualified_class is not None and _type_name(model) != qualified_class:
+            raise ValueError(
+                f"[!] The ranker's model '{name}' is a {_type_name(model)}, "
+                f"but the report's is a {qualified_class}."
+            )
         components = report["models"][name].get("components")  # older reports have none
         if components is not None and components != _components(model):
             raise ValueError(
@@ -235,10 +242,20 @@ def _prepare(
     scheme = run.get("fingerprint_scheme", 1)
     expected = run.get("train_data_sha256")
     if expected is not None:
-        if _fingerprint(names, X_values, y_values, scheme) != expected:
+        supplied = _fingerprint(names, X_values, y_values, scheme)
+        if supplied != expected:
             raise ValueError("[!] X and y are not the training data this report was ranked from.")
         # The run block leaves the weights key out when there were none.
-        _check_weights(weights[0], len(X_values), run.get("train_weights_sha256"), "sample_weight")
+        expected_weights = run.get("train_weights_sha256")
+        _check_weights(weights[0], len(X_values), expected_weights, "sample_weight")
+        if ranker.train_data_sha256_ is not None:
+            fit_scheme = ranker.fingerprint_scheme_
+            if fit_scheme != scheme:
+                supplied = _fingerprint(names, X_values, y_values, fit_scheme)
+            if supplied != ranker.train_data_sha256_ or expected_weights != ranker.train_weights_sha256_:
+                raise ValueError(
+                    "[!] The ranker's latest fit used other training data or weights than the report."
+                )
     # No version before 1.21 could subsample training rows, so a missing hash means every row;
     # the ranker must have fit on the same rows (None being every row) in both directions.
     expected_rows = run.get("train_rows_sha256")

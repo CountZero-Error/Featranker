@@ -206,8 +206,6 @@ cython_debug/
 /.codegraph/
 /_legacy/
 /docs/superpowers/
-/CHANGELOG.md
-/MANIFEST.in
 /openspec/
 .cursorignore
 .cursorindexingignore

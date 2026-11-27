@@ -136,7 +136,7 @@ Both models vote in the consensus, but only `keeps_shadows` supplies shadow evid
 
 > [!WARNING]
 > The check cannot see every way of dropping columns.
-> - A `FunctionTransformer` with a function, and any transformer scikit-learn does not define (it has `transform` and no `predict`), is opaque wherever it sits. It may drop columns, so the model counts as unverified.
+> - A `FunctionTransformer` with a function, or a custom transformer used to transform input columns, is opaque. An intermediate pipeline step still acts as a transformer when it also exposes `predict()`. It may drop columns, so the model counts as unverified.
 > - A selector, `FeatureUnion` or `ColumnTransformer` wrapped in a meta-estimator (`TransformedTargetRegressor`, `BaggingRegressor`, `GridSearchCV`, ...) is unverified.
 > - scikit-learn's own transformers (scalers, encoders, imputers) and final predictors from any library are assumed to use every column they receive. Any other estimator that ignores some inputs is assumed to use all of them, and is your responsibility.
 > - XGBoost rejects feature names containing `[`, `]` or `<` in dataframe mode; those fit failures appear in `failures`. Rename the columns or use array mode.

@@ -16,6 +16,7 @@ import re
 import types
 import warnings
 from collections.abc import Mapping
+from fractions import Fraction
 from pathlib import Path
 from typing import Any, Callable, Dict, FrozenSet, List, Literal, Optional, Sequence, Union
 
@@ -28,10 +29,11 @@ from scipy.stats import binom
 from sklearn.base import clone, is_regressor
 from sklearn.compose import ColumnTransformer, TransformedTargetRegressor
 from sklearn.dummy import DummyClassifier, DummyRegressor
+from sklearn.ensemble import StackingClassifier, StackingRegressor, VotingClassifier, VotingRegressor
 from sklearn.feature_selection import SelectorMixin
 from sklearn.impute import SimpleImputer
 from sklearn.metrics import get_scorer
-from sklearn.model_selection import KFold, StratifiedKFold
+from sklearn.model_selection import GridSearchCV, KFold, RandomizedSearchCV, StratifiedKFold
 from sklearn.pipeline import FeatureUnion, Pipeline, make_pipeline
 from sklearn.preprocessing import (
     FunctionTransformer,
@@ -242,9 +244,10 @@ def _validate_X(
         # to_numpy turns pandas NA (nullable dtypes) into NaN; np.array would raise.
         values = X.to_numpy(dtype=target_dtype, na_value=np.nan, copy=True)
     else:
-        if isinstance(X, np.ndarray) and X.dtype.kind in {"M", "m"}:
+        raw = X if isinstance(X, np.ndarray) else np.asarray(X, dtype=object)
+        if raw.dtype.kind in {"M", "m"} or (raw.dtype.kind == "O" and _has_dates(raw.flat)):
             raise ValueError(NOT_NUMERIC)
-        values = np.array(X, dtype=target_dtype)
+        values = np.array(raw, dtype=target_dtype)
     if values.ndim != 2:
         raise ValueError("[!] X must be a two-dimensional feature matrix.")
     numeric = values
@@ -682,6 +685,10 @@ def _describe(value: Any, depth: int = 0, path: FrozenSet[int] = frozenset()) ->
         if isinstance(value, slice):
             parts = (value.start, value.stop, value.step)
             return f"{kind}[{','.join(_describe(part, inner, path) for part in parts)}]"
+        if isinstance(value, np.random.RandomState):
+            return f"{kind}[{_describe(value.get_state(), inner, path)}]"
+        if isinstance(value, np.random.Generator):
+            return f"{kind}[{_describe(value.bit_generator.state, inner, path)}]"
         if isinstance(value, (list, tuple)):
             return f"{kind}[{','.join(_describe(item, inner, path) for item in value)}]"
         if isinstance(value, (set, frozenset)):
@@ -1005,7 +1012,12 @@ def _resolve_splits(
     if _is_int(cv):
         # Shuffled folds: unshuffled KFold on sorted data gives misleading splits.
         splitter = StratifiedKFold if task == "clf" else KFold
-        cv = splitter(n_splits=int(cv), shuffle=True, random_state=random_state)
+        # sklearn uses RandomState. Keep historical folds for 32-bit seeds;
+        # mix both halves of wider seeds for a reproducible splitter seed.
+        fold_seed = random_state
+        if random_state is not None and random_state >= 2**32:
+            fold_seed = int(np.random.SeedSequence(random_state).generate_state(1)[0])
+        cv = splitter(n_splits=int(cv), shuffle=True, random_state=fold_seed)
         if task == "clf":
             # Stratify on class codes: fit() accepts any labels (even 0.1/0.2),
             # but StratifiedKFold rejects numeric labels it reads as continuous.
@@ -1164,6 +1176,20 @@ def _run_models(
     return Parallel(n_jobs=n_jobs)(delayed(_unrouted)(worker, *job) for job in jobs)
 
 
+def _python_group_label(value: Any) -> Any:
+    """Compare mixed numeric labels without NumPy rounding integers to floats."""
+    if isinstance(value, (complex, np.complexfloating)):
+        raise ValueError("[!] Complex object labels are not sortable.")
+    if isinstance(value, np.number) and not isinstance(value, np.timedelta64):
+        scalar = value.item()
+        if isinstance(scalar, np.floating):  # longdouble can exceed Python float precision
+            if np.isfinite(scalar):
+                return Fraction(*scalar.as_integer_ratio())
+            return float(scalar)
+        return scalar
+    return value
+
+
 def _shuffle_labels(
     shuffle: str,
     labels: Any,
@@ -1184,10 +1210,27 @@ def _shuffle_labels(
     if labels is None:
         raise ValueError(f"[!] shuffle='within_groups' needs {name}, one label per row.")
     values = np.asarray(labels)
+    if values.ndim == 1 and values.size and not hasattr(labels, "dtype"):
+        # A Python sequence can lose label identity when NumPy infers a
+        # common string, floating or complex dtype. Keep heterogeneous values
+        # as Python objects so validation and permutation use their own order.
+        first = next(iter(labels))
+        # Fixed-width strings use trailing NULs as padding.
+        has_trailing_nul = values.dtype.kind in "US" and any(
+            (isinstance(item, str) and item.endswith("\0"))
+            or (isinstance(item, bytes) and item.endswith(b"\0"))
+            for item in labels
+        )
+        if (any(type(item) is not type(first) for item in labels)
+                or (_is_int(first) and values.dtype.kind == "f")
+                or has_trailing_nul):
+            values = np.asarray(labels, dtype=object)
     if values.shape != (n_rows,):
         raise ValueError(
             f"[!] {name} needs one label per row: {n_rows} rows, got shape {values.shape}."
         )
+    if values.dtype.kind == "O":
+        values = np.fromiter((_python_group_label(v) for v in values), dtype=object, count=n_rows)
     if any(item is None or item != item for item in values.tolist()):
         raise ValueError(f"[!] {name} must not contain None or NaN.")
     try:
@@ -1293,31 +1336,49 @@ def _keeps_columns(step: Any) -> bool:
     return False
 
 
-def _is_column_aware(estimator: Any) -> bool:
+def _is_column_aware(estimator: Any, *, transforming: bool = False) -> bool:
     """
     Whether the estimator is, or contains at any depth, a selector, FeatureUnion,
     ColumnTransformer or opaque transformer (see _is_opaque_transformer). A target transformer of a
     TransformedTargetRegressor is not counted.
     """
-    parts = [estimator]
-    if hasattr(estimator, "get_params"):
-        params = estimator.get_params(deep=True)
-        # A TransformedTargetRegressor's transformer sees y only, never the columns.
-        owners = [""] if isinstance(estimator, TransformedTargetRegressor) else []
-        owners += [
-            f"{key}__" for key, value in params.items()
-            if isinstance(value, TransformedTargetRegressor)
-        ]
-        target_only = tuple(f"{owner}transformer" for owner in owners)
-        parts.extend(
-            value for key, value in params.items()
-            if not any(key == name or key.startswith(f"{name}__") for name in target_only)
+    if isinstance(estimator, (SelectorMixin, FeatureUnion, ColumnTransformer)):
+        return True
+    if _is_opaque_transformer(estimator, transforming=transforming):
+        return True
+    if isinstance(estimator, Pipeline):
+        last = len(estimator.steps) - 1
+        return any(
+            _is_column_aware(step, transforming=transforming or index < last)
+            for index, (_, step) in enumerate(estimator.steps)
         )
-    return any(
-        isinstance(part, (SelectorMixin, FeatureUnion, ColumnTransformer))
-        or _is_opaque_transformer(part)
-        for part in parts
-    )
+    if isinstance(estimator, (GridSearchCV, RandomizedSearchCV)):
+        selected = getattr(estimator, "best_estimator_", estimator.estimator)
+        return _is_column_aware(selected, transforming=transforming)
+    if isinstance(estimator, TransformedTargetRegressor):
+        # Only the regressor sees X. The fitted transformer sees y.
+        return _is_column_aware(getattr(estimator, "regressor_", estimator.regressor))
+    if isinstance(estimator, (VotingClassifier, VotingRegressor, StackingClassifier, StackingRegressor)):
+        # The fitted members can contain a different preprocessing pipeline
+        # from their templates, for example after an inner parameter search.
+        members = getattr(estimator, "estimators_", estimator.estimators)
+        if isinstance(estimator, (StackingClassifier, StackingRegressor)):
+            # The final estimator can discard member predictions or,
+            # with passthrough, original input columns.
+            final = getattr(estimator, "final_estimator_", estimator.final_estimator)
+            if _is_column_aware(final):
+                return True
+        return any(_is_column_aware(member) for member in members)
+    if isinstance(estimator, Mapping):
+        return any(_is_column_aware(value, transforming=transforming) for value in estimator.values())
+    if isinstance(estimator, (list, tuple)):
+        return any(_is_column_aware(value, transforming=transforming) for value in estimator)
+    if hasattr(estimator, "get_params"):
+        return any(
+            _is_column_aware(value, transforming=transforming)
+            for value in estimator.get_params(deep=False).values()
+        )
+    return False
 
 
 def _step_used(step: Any, columns: List[int]) -> set:
@@ -1326,10 +1387,10 @@ def _step_used(step: Any, columns: List[int]) -> set:
         return set()
     if _is_string(step, "passthrough"):
         return set(columns)
-    return _kept_inputs(step, columns)
+    return _kept_inputs(step, columns, transforming=True)
 
 
-def _pipeline_kept(pipeline: Pipeline, columns: List[int]) -> set:
+def _pipeline_kept(pipeline: Pipeline, columns: List[int], transforming: bool) -> set:
     """
     The columns of a Pipeline's first step, narrowed by later steps that still see them.
 
@@ -1341,33 +1402,32 @@ def _pipeline_kept(pipeline: Pipeline, columns: List[int]) -> set:
         step for _, step in pipeline.steps
         if step is not None and not _is_string(step, "passthrough")
     ]
-    if not steps:
-        return set(columns)
-    kept = _kept_inputs(steps[0], columns)
-    preserved = _keeps_columns(steps[0])
-    for later in steps[1:]:
+    kept = set(columns)
+    preserved = True
+    for index, step in enumerate(steps):
+        transforms = transforming or index < len(steps) - 1
         if preserved:
-            kept &= _kept_inputs(later, columns)
-        elif _is_column_aware(later):
+            kept &= _kept_inputs(step, columns, transforming=transforms)
+        elif _is_column_aware(step, transforming=transforms):
             raise ValueError("a column-aware or opaque step follows a step that may change the columns")
-        preserved = preserved and _keeps_columns(later)
+        preserved = preserved and _keeps_columns(step)
     return kept
 
 
-def _is_opaque_transformer(estimator: Any) -> bool:
-    """A transformer (transform, no predict) whose column use cannot be assumed."""
-    if hasattr(estimator, "predict") or not hasattr(estimator, "transform"):
+def _is_opaque_transformer(estimator: Any, *, transforming: bool = False) -> bool:
+    """A transformer whose column use is unknown in the role where it is used."""
+    if not hasattr(estimator, "transform") or (not transforming and hasattr(estimator, "predict")):
         return False
-    if isinstance(estimator, FunctionTransformer):
+    if type(estimator) is FunctionTransformer:
         # func=None is the identity: a fitted ColumnTransformer stores "passthrough" this way.
         return estimator.func is not None
     # FeatRanker's own one-hot encoder subclass lives outside sklearn but keeps every column.
     return not (
-        type(estimator).__module__.startswith("sklearn.") or isinstance(estimator, _FeatRankerOneHot)
+        type(estimator).__module__.startswith("sklearn.") or type(estimator) is _FeatRankerOneHot
     )
 
 
-def _kept_inputs(estimator: Any, columns: List[int]) -> set:
+def _kept_inputs(estimator: Any, columns: List[int], *, transforming: bool = False) -> set:
     """
     The model-input columns `estimator` uses, given that it receives `columns`.
 
@@ -1379,14 +1439,16 @@ def _kept_inputs(estimator: Any, columns: List[int]) -> set:
     affected), which cannot be followed. Raises when the columns
     cannot be determined; the caller treats that as unverifiable.
     """
+    if _is_opaque_transformer(estimator, transforming=transforming):
+        raise ValueError("an opaque transformer may drop columns")
     if isinstance(estimator, Pipeline):
-        return _pipeline_kept(estimator, columns)
+        return _pipeline_kept(estimator, columns, transforming)
     if isinstance(estimator, FeatureUnion):
         return set().union(*(_step_used(part, columns) for _, part in estimator.transformer_list))
     if isinstance(estimator, SelectorMixin):
         return {columns[i] for i in estimator.get_support(indices=True)}
     if not isinstance(estimator, ColumnTransformer):
-        if _is_column_aware(estimator):
+        if _is_column_aware(estimator, transforming=transforming):
             raise ValueError(
                 "an opaque transformer, or a meta-estimator wrapping a selector, "
                 "FeatureUnion, ColumnTransformer or opaque transformer"
@@ -1720,6 +1782,7 @@ def _rank_model(
         report = {
             "family": family,
             "class": type(model).__name__,
+            "qualified_class": _type_name(model),
             "evaluation_score": baseline,
             "in_consensus": baseline_score is None or baseline > baseline_score,
             "params": _json_params(model),
@@ -2093,6 +2156,8 @@ class FeatureRanker:
         self._validate_assigned()
         self._check_built_missing()
         self.is_fitted_ = False
+        for attribute in ("train_X_", "train_y_", "train_weight_"):
+            self.__dict__.pop(attribute, None)
         categorical = _categorical_indices(X, self.categorical, feature_names)
         X_values, names = _validate_X(
             X,
@@ -2311,6 +2376,7 @@ class FeatureRanker:
 
     def _validate_assigned(self) -> None:
         """Options that may have been assigned, or unpickled, since __init__."""
+        self.shadow_seed = _seed(self.shadow_seed, "shadow_seed")
         _validate_n_jobs(self.n_jobs)
         self.max_categories = _validate_max_categories(self.max_categories)
 
@@ -2373,7 +2439,10 @@ class FeatureRanker:
         """
         if not self.is_fitted_:
             raise RuntimeError("[!] Call fit() before rank_features().")
+        self._validate_assigned()
         self._check_fit_options()
+        if self.evidence and not hasattr(self, "train_X_"):
+            raise ValueError("[!] Training evidence requires fit() with evidence=True.")
         random_state = _seed(random_state, "random_state")
         n_repeats = _plain_int(n_repeats)
         if not _is_positive_int(n_repeats):
@@ -2732,9 +2801,8 @@ class FeatureRanker:
             len(X_values),
             "groups",
         )
-        splits = _resolve_splits(
-            cv, X_values, y_values, groups, self.task, random_state
-        )
+        split_groups = groups if shuffle_labels is None else shuffle_labels
+        splits = _resolve_splits(cv, X_values, y_values, split_groups, self.task, random_state)
         if self.shuffle == "circular":
             # Splitters may give unordered indices; a cyclic shift needs time order.
             splits = [(np.sort(train), np.sort(test)) for train, test in splits]

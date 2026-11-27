@@ -164,9 +164,8 @@ def test_good_seeds(seed):
     assert report["random_state"] is None or type(report["random_state"]) is int
     assert report["random_state"] == seed
     FeatureRanker("reg", models={"m": Ridge()}, verbose=False, shadow_seed=seed)
-    resampled = seed_calls(seed)["rank_resampled"]() if seed is None or int(seed) < 2 ** 32 - 10 else None
-    if resampled is not None:
-        json.dumps(resampled, allow_nan=False)
+    resampled = seed_calls(seed)["rank_resampled"]()
+    json.dumps(resampled, allow_nan=False)
 
 
 def test_bad_seed_is_refused_before_scoring_and_by_the_selector():

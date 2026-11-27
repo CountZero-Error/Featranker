@@ -30,6 +30,7 @@
               "required": ["family", "evaluation_score", "importance", "components"],
               "properties": {
                 "family": {"type": "string"},
+                "qualified_class": {"type": "string"},
                 "importance": {"type": "object"},
                 "components": {"type": "object", "additionalProperties": {"type": "string"}},
                 "param_hashes": {"type": "object", "additionalProperties": {"type": "string"}},

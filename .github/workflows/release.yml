@@ -33,6 +33,15 @@ jobs:
       - run: python -m pytest -q
       - run: python -m mypy featranker tests/typing/consumer.py
       - run: python -m build
+      - name: Check the source distribution contents
+        shell: python
+        run: |
+          import pathlib, tarfile
+          archive, = pathlib.Path("dist").glob("*.tar.gz")
+          with tarfile.open(archive) as source:
+              paths = {pathlib.PurePosixPath(name).parts[1:] for name in source.getnames()}
+          assert ("CHANGELOG.md",) in paths and ("MANIFEST.in",) in paths
+          assert not any(path[:1] == ("tests",) for path in paths)
       - run: python -m twine check --strict dist/*
       - name: Smoke-test the built wheel in a fresh virtualenv outside the checkout
         run: |

@@ -323,9 +323,11 @@ def main() -> None:
             sys.stdout.reconfigure(errors="backslashreplace")
         print(render(json.loads(args.render.read_text())))
         return
-    if args.out.suffix == ".lock":
-        parser.error(f"--out {args.out} ends in .lock, the name of the lock file")
-    args.out = args.out.resolve()  # a symlinked --out stays a link; it is read, locked and written as resolved now
+    resolved_output = args.out.resolve()
+    for path in (args.out, resolved_output):
+        if path.name.casefold().endswith(".lock"):
+            parser.error(f"--out {path} ends in .lock, the name of the lock file")
+    args.out = resolved_output  # a symlinked --out stays a link; it is read, locked and written as resolved now
     seeds = [int(s) for s in args.seeds.split(",")]
     by_id = {d["data_id"]: d for d in DATASETS}
     chosen = [int(i) for i in args.datasets.split(",")]

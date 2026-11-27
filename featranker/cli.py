@@ -7,7 +7,9 @@ import csv
 import json
 import math
 import os
+import stat
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
@@ -620,25 +622,109 @@ def _check_output(output_path: Path) -> Optional[str]:
     return None
 
 
+def _clear_staging_acl(folder: Path) -> None:
+    """Remove inherited macOS ACLs before placing report content in the directory."""
+    import ctypes
+
+    libc = ctypes.CDLL(None, use_errno=True)
+    libc.acl_init.restype = ctypes.c_void_p
+    empty_acl = libc.acl_init(0)
+    if not empty_acl:
+        error = ctypes.get_errno()
+        raise OSError(error, os.strerror(error), str(folder))
+    acl = ctypes.c_void_p(empty_acl)
+    try:
+        acl_type_extended = 0x100
+        if libc.acl_set_file(os.fsencode(folder), acl_type_extended, acl):
+            error = ctypes.get_errno()
+            raise OSError(error, os.strerror(error), str(folder))
+    finally:
+        libc.acl_free(acl)
+
+
+def _preserve_report_access(target: Path, tmp: Path, original: os.stat_result) -> None:
+    """Give the staged POSIX file the destination's owner, group, ACL and mode."""
+    current = tmp.stat()
+    if (current.st_uid, current.st_gid) != (original.st_uid, original.st_gid):
+        os.chown(tmp, original.st_uid, original.st_gid)
+    if sys.platform == "darwin":
+        import ctypes
+
+        # COPYFILE_ACL copies access rules via file descriptors. A write-only
+        # report can supply a descriptor without granting read access.
+        libc = ctypes.CDLL(None, use_errno=True)
+        try:
+            source_fd = os.open(target, os.O_RDONLY)
+        except PermissionError:
+            source_fd = os.open(target, os.O_WRONLY)
+        try:
+            destination_fd = os.open(tmp, os.O_WRONLY)
+            try:
+                if libc.fcopyfile(source_fd, destination_fd, None, 1):
+                    error = ctypes.get_errno()
+                    raise OSError(error, os.strerror(error), str(target))
+            finally:
+                os.close(destination_fd)
+        finally:
+            os.close(source_fd)
+    else:
+        import shutil
+
+        shutil.copystat(target, tmp)  # includes extended attributes on Linux
+        if sys.platform.startswith("linux"):
+            # copystat skips unavailable attributes and leaves inherited ACLs.
+            acl = "system.posix_acl_access"
+            if acl in os.listxattr(target):
+                os.setxattr(tmp, acl, os.getxattr(target, acl))
+            elif acl in os.listxattr(tmp):
+                os.removexattr(tmp, acl)
+
+    # Changing ownership or writing can clear set-ID bits. Apply the final
+    # mode after the content, ownership, and ACL have all been set.
+    tmp.chmod(stat.S_IMODE(original.st_mode))
+    current = tmp.stat()
+    if (current.st_uid, current.st_gid, stat.S_IMODE(current.st_mode)) != (
+        original.st_uid, original.st_gid, stat.S_IMODE(original.st_mode)
+    ):
+        raise PermissionError(f"could not preserve report permissions for {target}")
+
+
 def _write_report(results: Dict[str, Any], output_path: Optional[Path]) -> None:
     output = json.dumps(results, indent=2)
     if output_path is None:
         print(output)
         return
     target = _output_file(output_path).resolve()  # a symlinked --output stays a link
-    tmp = target.with_name(f".{target.name}.{os.getpid()}.tmp")
     try:
-        handle = tmp.open("x", encoding="utf-8")
-    except OSError:  # e.g. a read-only folder around a writable file: write it in place
+        original = target.stat()
+    except FileNotFoundError:
+        original = None
+    if original is not None and os.name == "posix":
+        # Rename checks the directory permissions. Preserve the existing
+        # behavior of also requiring write access to the original file.
+        os.close(os.open(target, os.O_WRONLY | os.O_NONBLOCK))
+    try:
+        staging = tempfile.TemporaryDirectory(dir=target.parent)
+    except PermissionError:  # e.g. a read-only folder around a writable file
         target.write_text(output, encoding="utf-8")
         return
-    try:
-        with handle:
+    with staging as folder:
+        if sys.platform == "darwin":
+            _clear_staging_acl(Path(folder))
+        tmp = Path(folder) / "report"
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
             handle.write(output)
-        os.replace(tmp, target)
-    except BaseException:
-        tmp.unlink(missing_ok=True)
-        raise
+        if original is not None and os.name == "posix":
+            _preserve_report_access(target, tmp, original)
+        if original is not None and sys.platform == "win32":
+            import ctypes
+
+            # ReplaceFileW retains the destination DACL and other security metadata.
+            if not ctypes.windll.kernel32.ReplaceFileW(str(target), str(tmp), None, 0, None, None):
+                raise ctypes.WinError()
+        else:
+            os.replace(tmp, target)
 
 
 def main() -> int:

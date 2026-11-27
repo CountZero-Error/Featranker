@@ -227,9 +227,10 @@ def test_repointed_symlink_keeps_the_target(bench):  # noqa: F811
     assert {p.name for p in out.parent.iterdir()} == {"run.json", "a.json", "b.json"}
 
 
-def test_lock_named_output_is_refused(bench, monkeypatch, capsys):  # noqa: F811
+@pytest.mark.parametrize("name", ["run.json.lock", ".lock", "run.json.LOCK"])
+def test_lock_named_output_is_refused(bench, monkeypatch, capsys, name):  # noqa: F811
     run, out, *_ = bench
-    lock = out.with_name(out.name + ".lock")
+    lock = out.with_name(name)
     monkeypatch.setattr(sys, "argv", ["run.py", "--datasets", "1510", "--seeds", "0", "--out", str(lock)])
     with pytest.raises(SystemExit):
         run.main()
@@ -274,3 +275,22 @@ def test_pandas_values_without_an_index_are_compared():
              (pd.Categorical([1.0]), pd.Categorical([9.0])), (pd.Timedelta(1, "D"), pd.Timedelta(2, "D"))]
     for one, other in pairs:
         assert odd(one) != odd(other)
+
+
+def test_symlink_to_active_lock_is_refused(bench, monkeypatch, capsys):  # noqa: F811
+    run, out, *_ = bench
+    lock = out.with_name(out.name + ".lock")
+    alias = out.with_name("alias.json")
+    with run._locked(out, None):
+        try:
+            alias.symlink_to(lock)
+        except OSError:
+            pytest.skip("symlinks are not available")
+        monkeypatch.setattr(sys, "argv", [
+            "run.py", "--datasets", "1510", "--seeds", "0", "--out", str(alias),
+        ])
+        with pytest.raises(SystemExit) as exc:
+            run.main()
+        assert exc.value.code == 2
+        assert ".lock" in capsys.readouterr().err
+        assert lock.read_bytes() == b""
