@@ -650,7 +650,7 @@ def _clear_staging_acl(folder: Path) -> None:
 def _preserve_report_access(target: Path, tmp: Path, original: os.stat_result) -> None:
     """Give the staged POSIX file the destination's owner, group, ACL and mode."""
     current = tmp.stat()
-    if (current.st_uid, current.st_gid) != (original.st_uid, original.st_gid):
+    if sys.platform != "win32" and (current.st_uid, current.st_gid) != (original.st_uid, original.st_gid):
         os.chown(tmp, original.st_uid, original.st_gid)
     if sys.platform == "darwin":
         import ctypes
@@ -709,7 +709,7 @@ def _write_report(results: Dict[str, Any], output_path: Optional[Path]) -> None:
         original = target.stat()
     except FileNotFoundError:
         original = None
-    if original is not None and os.name == "posix":
+    if sys.platform != "win32" and original is not None and os.name == "posix":
         # Rename checks the directory permissions. Preserve the existing
         # behavior of also requiring write access to the original file.
         os.close(os.open(target, os.O_WRONLY | os.O_NONBLOCK))
