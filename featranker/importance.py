@@ -1373,6 +1373,9 @@ def _is_column_aware(estimator: Any, *, transforming: bool = False) -> bool:
         return any(_is_column_aware(value, transforming=transforming) for value in estimator.values())
     if isinstance(estimator, (list, tuple)):
         return any(_is_column_aware(value, transforming=transforming) for value in estimator)
+    fitted = [*getattr(estimator, "estimators_", ()), *([estimator.estimator_] if hasattr(estimator, "estimator_") else [])]
+    if any(_is_column_aware(member) for member in fitted):
+        return True
     if hasattr(estimator, "get_params"):
         return any(
             _is_column_aware(value, transforming=transforming)
@@ -2151,13 +2154,13 @@ class FeatureRanker:
             If no model fits.
         """
         random_state = _seed(random_state, "random_state")
+        self.is_fitted_ = False
+        for attribute in ("train_X_", "train_y_", "train_weight_"):
+            self.__dict__.pop(attribute, None)
         if max_samples is not None:
             _resolve_max_samples(max_samples, 1)
         self._validate_assigned()
         self._check_built_missing()
-        self.is_fitted_ = False
-        for attribute in ("train_X_", "train_y_", "train_weight_"):
-            self.__dict__.pop(attribute, None)
         categorical = _categorical_indices(X, self.categorical, feature_names)
         X_values, names = _validate_X(
             X,

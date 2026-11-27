@@ -4,6 +4,7 @@ Command-line interface: rank features from separate train and evaluation CSVs.
 
 import argparse
 import csv
+import errno
 import json
 import math
 import os
@@ -622,6 +623,9 @@ def _check_output(output_path: Path) -> Optional[str]:
     return None
 
 
+_UNSUPPORTED = (errno.ENOTSUP, errno.EOPNOTSUPP)  # the volume has no ACLs or xattrs to keep
+
+
 def _clear_staging_acl(folder: Path) -> None:
     """Remove inherited macOS ACLs before placing report content in the directory."""
     import ctypes
@@ -637,7 +641,8 @@ def _clear_staging_acl(folder: Path) -> None:
         acl_type_extended = 0x100
         if libc.acl_set_file(os.fsencode(folder), acl_type_extended, acl):
             error = ctypes.get_errno()
-            raise OSError(error, os.strerror(error), str(folder))
+            if error not in _UNSUPPORTED:
+                raise OSError(error, os.strerror(error), str(folder))
     finally:
         libc.acl_free(acl)
 
@@ -662,7 +667,8 @@ def _preserve_report_access(target: Path, tmp: Path, original: os.stat_result) -
             try:
                 if libc.fcopyfile(source_fd, destination_fd, None, 1):
                     error = ctypes.get_errno()
-                    raise OSError(error, os.strerror(error), str(target))
+                    if error not in _UNSUPPORTED:
+                        raise OSError(error, os.strerror(error), str(target))
             finally:
                 os.close(destination_fd)
         finally:
@@ -674,10 +680,14 @@ def _preserve_report_access(target: Path, tmp: Path, original: os.stat_result) -
         if sys.platform.startswith("linux"):
             # copystat skips unavailable attributes and leaves inherited ACLs.
             acl = "system.posix_acl_access"
-            if acl in os.listxattr(target):
-                os.setxattr(tmp, acl, os.getxattr(target, acl))
-            elif acl in os.listxattr(tmp):
-                os.removexattr(tmp, acl)
+            try:
+                if acl in os.listxattr(target):
+                    os.setxattr(tmp, acl, os.getxattr(target, acl))
+                elif acl in os.listxattr(tmp):
+                    os.removexattr(tmp, acl)
+            except OSError as error:
+                if error.errno not in _UNSUPPORTED:
+                    raise
 
     # Changing ownership or writing can clear set-ID bits. Apply the final
     # mode after the content, ownership, and ACL have all been set.
@@ -717,7 +727,11 @@ def _write_report(results: Dict[str, Any], output_path: Optional[Path]) -> None:
             handle.write(output)
         if original is not None and os.name == "posix":
             _preserve_report_access(target, tmp, original)
-        if original is not None and sys.platform == "win32":
+        if original is None and os.name == "posix":
+            umask = os.umask(0)
+            os.umask(umask)
+            tmp.chmod(0o666 & ~umask)
+        if sys.platform == "win32" and original is not None:
             import ctypes
 
             # ReplaceFileW retains the destination DACL and other security metadata.

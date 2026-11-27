@@ -4,6 +4,8 @@
 
 Versions 1.22, 1.23 and 1.24 were never released; their entries below are folded into 2.0.0.
 
+Review fixes (rc-fixes): a meta-estimator whose fitted members contain a selector (bagging over a grid search that picks one) counts as unverified for shadow evidence; a refit refused for anything but the seed leaves the ranker unfitted; a new CLI report follows the umask, and volumes without ACL or xattr support still receive it; the Windows report branch type-checks on every platform.
+
 Release review fixes:
 
 - Grouped permutations preserve the types of Python labels. Mixed, unsortable labels raise an error. Object-array date features follow the same validation as date arrays.
