@@ -118,10 +118,14 @@ def test_windows_output_keeps_protected_dacl(tmp_path):
     target.write_text("{}")
     subprocess.run(["icacls", str(target), "/inheritance:d"], check=True)
 
+    # A PowerShell 7 parent (the GitHub Actions shell) leaks its PSModulePath, and
+    # Windows PowerShell 5.1 then cannot autoload Get-Acl; let it use its own path.
+    env = {key: value for key, value in os.environ.items() if key.upper() != "PSMODULEPATH"}
+
     def security_descriptor():
         return subprocess.check_output(
             ["powershell", "-NoProfile", "-Command", "(Get-Acl -LiteralPath $env:REPORT_PATH).Sddl"],
-            env={**os.environ, "REPORT_PATH": str(target)}, text=True,
+            env={**env, "REPORT_PATH": str(target)}, text=True,
         ).strip()
 
     before = security_descriptor()
