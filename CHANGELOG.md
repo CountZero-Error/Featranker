@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2.0.1 - 2026-11-28
 
 Polish: `--output` writes a report with other hard links, or whose owner or group cannot be copied, in place; a new report follows the umask without reading it; on Windows a report open in another program raises a clear error. A non-iterable `estimators_` counts as one member, unhashable index labels warn instead of crashing, and the selector docs and constants match the code.
 
