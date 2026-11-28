@@ -16,7 +16,7 @@ import platform
 import re
 import types
 import warnings
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from fractions import Fraction
 from pathlib import Path
 from typing import Any, Callable, Dict, FrozenSet, List, Literal, Optional, Sequence, Union
@@ -477,7 +477,11 @@ def _check_index(X: Any, value: Any, name: str) -> None:
     mine, theirs = _normalised_labels(value.index), _normalised_labels(X.index)
     if mine == theirs:
         return
-    if len(mine) == len(theirs) and Counter(mine) == Counter(theirs):
+    try:
+        same_labels = len(mine) == len(theirs) and Counter(mine) == Counter(theirs)
+    except TypeError:  # unhashable labels cannot be counted; warn instead
+        same_labels = False
+    if same_labels:
         raise ValueError(
             f"[!] {name} has the same index labels as X in another order; it would be "
             f"used by position. Align it with {name}.loc[X.index] or pass {name}.to_numpy()."
@@ -1247,7 +1251,7 @@ def _run_models(
     desc: str,
     verbose: bool,
 ) -> List[tuple]:
-    """Run one worker per model, in order; sequentially unless n_jobs > 1 or -1."""
+    """Run one worker per model, in order; sequentially only when n_jobs is None or 1."""
     if n_jobs is None or n_jobs == 1:
         return [_unrouted(worker, *job) for job in tqdm(jobs, desc=desc, disable=not verbose)]
     return Parallel(n_jobs=n_jobs)(delayed(_unrouted)(worker, *job) for job in jobs)
@@ -1450,7 +1454,10 @@ def _is_column_aware(estimator: Any, *, transforming: bool = False) -> bool:
         return any(_is_column_aware(value, transforming=transforming) for value in estimator.values())
     if isinstance(estimator, (list, tuple)):
         return any(_is_column_aware(value, transforming=transforming) for value in estimator)
-    fitted = [*getattr(estimator, "estimators_", ()), *([estimator.estimator_] if hasattr(estimator, "estimator_") else [])]
+    members = getattr(estimator, "estimators_", ())
+    if not isinstance(members, Iterable):  # a single fitted estimator, not a collection
+        members = (members,)
+    fitted = [*members, *([estimator.estimator_] if hasattr(estimator, "estimator_") else [])]
     if any(_is_column_aware(member) for member in fitted):
         return True
     if hasattr(estimator, "get_params"):

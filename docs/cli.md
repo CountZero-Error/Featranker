@@ -77,7 +77,7 @@ segment:
 | `--n-jobs` | sequential | Parallel workers over models; `-1` uses all cores. |
 | `--evidence` | off | Add [evidence](guide/noise-and-evidence.md#evidence) to the report: train score, overfit gap, correlated groups and SHAP when `shap` is installed. |
 | `--quiet` | off | Hide progress bars. Warnings and errors are still shown. |
-| `--output` | stdout | Write the JSON report to this path. A `.json` extension is appended if missing. An existing report is replaced once the new one is complete (written in place only when its folder is read-only) and keeps its owner, group, mode and access rules; on Linux and macOS it is refused without write access to it. A new report gets your default permissions (umask). |
+| `--output` | stdout | Write the JSON report to this path. A `.json` extension is appended if missing. An existing report is replaced once the new one is complete (written in place when its folder is read-only) and keeps its owner, group, mode and access rules; on Linux and macOS it is refused without write access to it. A report with other hard links, or whose owner or group cannot be copied, is overwritten in place (a failed write can then leave it partly written). A new report gets your default permissions (umask). On Windows, a report that is open in another program (or read-only) raises an error and stays unchanged. |
 
 ## Feature groups
 

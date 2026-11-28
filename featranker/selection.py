@@ -14,6 +14,7 @@ from sklearn.utils.validation import check_is_fitted
 
 from .evidence import _check_threshold, auto_groups, auto_groups_record
 from .importance import (
+    BASELINE_NAME,
     N_REPEATS_MESSAGE,
     FeatureRanker,
     MAX_COUNT,
@@ -282,7 +283,9 @@ class ConsensusSelector(SelectorMixin, BaseEstimator):
         ------
         ValueError
             For an invalid rule or option, or if every model dropped the
-            shadow columns in every split while a shadow rule is set.
+            shadow columns in every split while a shadow rule is set, or if
+            the dummy baseline could not be scored and the consensus gate is
+            therefore off.
         """
         # A failed refit must not leave the previous fit's state behind.
         for attribute in FITTED_ATTRIBUTES:
@@ -373,7 +376,7 @@ class ConsensusSelector(SelectorMixin, BaseEstimator):
                 f"{f['error_type']}: {f['message']}"
                 for s in ungated
                 for f in s["report"]["failures"]
-                if f["model"] == "dummy_baseline"
+                if f["model"] == BASELINE_NAME
             }
             raise ValueError(
                 "[!] The dummy baseline could not be scored in split(s) "

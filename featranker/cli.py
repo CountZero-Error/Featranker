@@ -713,6 +713,9 @@ def _write_report(results: Dict[str, Any], output_path: Optional[Path]) -> None:
         # Rename checks the directory permissions. Preserve the existing
         # behavior of also requiring write access to the original file.
         os.close(os.open(target, os.O_WRONLY | os.O_NONBLOCK))
+    if original is not None and os.name == "posix" and original.st_nlink > 1:
+        target.write_text(output, encoding="utf-8")  # a replacement would orphan the other links
+        return
     try:
         staging = tempfile.TemporaryDirectory(dir=target.parent)
     except PermissionError:  # e.g. a read-only folder around a writable file
@@ -722,21 +725,27 @@ def _write_report(results: Dict[str, Any], output_path: Optional[Path]) -> None:
         if sys.platform == "darwin":
             _clear_staging_acl(Path(folder))
         tmp = Path(folder) / "report"
-        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666 if original is None else 0o600)
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             handle.write(output)
         if original is not None and os.name == "posix":
-            _preserve_report_access(target, tmp, original)
-        if original is None and os.name == "posix":
-            umask = os.umask(0)
-            os.umask(umask)
-            tmp.chmod(0o666 & ~umask)
+            try:
+                _preserve_report_access(target, tmp, original)
+            except PermissionError as denied:
+                if denied.errno != errno.EPERM:
+                    raise
+                # The owner or group cannot be copied; keep them by writing in place.
+                target.write_text(output, encoding="utf-8")
+                return
         if sys.platform == "win32" and original is not None:
             import ctypes
 
             # ReplaceFileW retains the destination DACL and other security metadata.
             if not ctypes.windll.kernel32.ReplaceFileW(str(target), str(tmp), None, 0, None, None):
-                raise ctypes.WinError()
+                failure = ctypes.WinError()
+                if failure.winerror in (5, 32):  # access denied or sharing violation
+                    raise PermissionError(f"could not replace the report {target}: it may be open in another program or read-only; close it or check its permissions and retry.") from failure
+                raise failure
         else:
             os.replace(tmp, target)
 

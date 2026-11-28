@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+Polish: `--output` writes a report with other hard links, or whose owner or group cannot be copied, in place; a new report follows the umask without reading it; on Windows a report open in another program raises a clear error. A non-iterable `estimators_` counts as one member, unhashable index labels warn instead of crashing, and the selector docs and constants match the code.
+
 Review 18 fixes: the index check tells NumPy datetime64 and timedelta64 NaT labels of different units apart, as `.loc` does.
 
 Review 17 fixes: the index check tells different missing labels apart (NaN, None, NaT, pd.NA), as `.loc` does, so swapping rows labelled with different missing values is refused instead of passing silently.
