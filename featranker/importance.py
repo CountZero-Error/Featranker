@@ -442,7 +442,11 @@ def _normalised_labels(index: Any) -> list:
         if not (_pd.api.types.is_scalar(label) and _pd.isna(label)):
             return label
         # float NaNs are one key; None, pd.NA, NaT ... each get their own (.loc tells them apart)
-        return _Missing("float" if isinstance(label, (float, np.floating)) else type(label).__name__)
+        if isinstance(label, (float, np.floating)):
+            return _Missing("float")
+        # NumPy NaT: units differ (datetime64[D] vs [s]) and .loc tells them apart
+        unit = label.dtype.str if isinstance(label, np.generic) else ""
+        return _Missing(type(label).__name__ + unit)
 
     return [one(label) for label in index]
 

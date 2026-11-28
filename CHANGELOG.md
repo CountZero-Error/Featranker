@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+Review 18 fixes: the index check tells NumPy datetime64 and timedelta64 NaT labels of different units apart, as `.loc` does.
+
 Review 17 fixes: the index check tells different missing labels apart (NaN, None, NaT, pd.NA), as `.loc` does, so swapping rows labelled with different missing values is refused instead of passing silently.
 
 Review 16 fixes: an index whose tuple labels hold missing values in the same order as X (for example `(nan, 1)`) is no longer refused as reordered.
