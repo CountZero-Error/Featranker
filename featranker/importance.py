@@ -424,12 +424,11 @@ def _validate_n_jobs(n_jobs: Any) -> None:
 def _label_counts(index: Any) -> Counter:
     """Label multiset with every missing label (also inside tuples) as one sentinel."""
     def one(label: Any) -> Any:
+        if isinstance(label, tuple):
+            return tuple(one(part) for part in label)
         return None if _pd.api.types.is_scalar(label) and _pd.isna(label) else label
 
-    return Counter(
-        tuple(one(part) for part in label) if isinstance(label, tuple) else one(label)
-        for label in index
-    )
+    return Counter(one(label) for label in index)
 
 
 def _check_index(X: Any, value: Any, name: str) -> None:
@@ -1552,7 +1551,13 @@ def _fit_model(
 
 def _fresh(X: Any) -> Any:
     """A DataFrame gets its own shallow wrapper per scorer call; arrays pass through."""
-    return X.copy(deep=False) if _pd is not None and isinstance(X, _pd.DataFrame) else X
+    if _pd is None or not isinstance(X, _pd.DataFrame):
+        return X
+    fresh = X.copy(deep=False)
+    # Own Index objects too, so a scorer that edits the axes cannot touch the next call's.
+    fresh.columns = X.columns.copy(deep=True)
+    fresh.index = X.index.copy(deep=True)
+    return fresh
 
 
 def _call_scorer(scorer: Any, model: Any, X: Any, y: np.ndarray, kwargs: Dict[str, Any]) -> Any:

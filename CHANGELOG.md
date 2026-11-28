@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+Review 15 fixes: each scorer call also gets its own column and row Index objects, and the index check treats missing labels as equal at any tuple depth.
+
 Review 14 fixes: the dummy baseline is scored on the models' columns, shadow columns included (a scorer that reads a shadow column no longer disables the gate); `ConsensusSelector.fit()` raises `ValueError` when the dummy could not be scored in a split, instead of selecting without the gate (`rank_features()` and `rank_resampled()` still report `gate_off`); the index check treats missing labels (NaN, None, also inside a MultiIndex) as equal; each scorer call during baseline scoring gets its own DataFrame, so one scorer replacing a column cannot change what the next sees. Documentation: a DataFrame keeps its index through `set_output(transform="pandas")`; only a NumPy input gets a new `RangeIndex`.
 
 Review 13 fixes: the dummy baseline is scored on the same input form and read-only views as the models (a DataFrame-aware scorer no longer disables the dummy gate, and a scorer cannot change `y` through the dummy); a pandas `y`, `y_eval`, `sample_weight`, `eval_sample_weight`, `groups` or `shuffle_groups` is checked against the index of a DataFrame `X` (same labels in another order raise `ValueError`, other labels warn and are used by position); an integer `cv` with `groups` warns that `GroupKFold` is needed. Documentation: zero-weight rows still donate values to permutations; `same_holdout` false means not identical, not new rows.
