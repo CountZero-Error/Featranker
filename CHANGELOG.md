@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+Review 16 fixes: an index whose tuple labels hold missing values in the same order as X (for example `(nan, 1)`) is no longer refused as reordered.
+
 Review 15 fixes: each scorer call also gets its own column and row Index objects, and the index check treats missing labels as equal at any tuple depth.
 
 Review 14 fixes: the dummy baseline is scored on the models' columns, shadow columns included (a scorer that reads a shadow column no longer disables the gate); `ConsensusSelector.fit()` raises `ValueError` when the dummy could not be scored in a split, instead of selecting without the gate (`rank_features()` and `rank_resampled()` still report `gate_off`); the index check treats missing labels (NaN, None, also inside a MultiIndex) as equal; each scorer call during baseline scoring gets its own DataFrame, so one scorer replacing a column cannot change what the next sees. Documentation: a DataFrame keeps its index through `set_output(transform="pandas")`; only a NumPy input gets a new `RangeIndex`.

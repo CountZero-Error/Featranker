@@ -421,14 +421,14 @@ def _validate_n_jobs(n_jobs: Any) -> None:
         raise ValueError("[!] n_jobs must be None or a non-zero int.")
 
 
-def _label_counts(index: Any) -> Counter:
-    """Label multiset with every missing label (also inside tuples) as one sentinel."""
+def _normalised_labels(index: Any) -> list:
+    """Index labels with every missing label (also inside tuples) as one sentinel."""
     def one(label: Any) -> Any:
         if isinstance(label, tuple):
             return tuple(one(part) for part in label)
         return None if _pd.api.types.is_scalar(label) and _pd.isna(label) else label
 
-    return Counter(one(label) for label in index)
+    return [one(label) for label in index]
 
 
 def _check_index(X: Any, value: Any, name: str) -> None:
@@ -441,7 +441,10 @@ def _check_index(X: Any, value: Any, name: str) -> None:
         return
     if not isinstance(value, (_pd.Series, _pd.DataFrame)) or value.index.equals(X.index):
         return
-    if len(value) == len(X) and _label_counts(value.index) == _label_counts(X.index):
+    mine, theirs = _normalised_labels(value.index), _normalised_labels(X.index)
+    if mine == theirs:
+        return
+    if len(mine) == len(theirs) and Counter(mine) == Counter(theirs):
         raise ValueError(
             f"[!] {name} has the same index labels as X in another order; it would be "
             f"used by position. Align it with {name}.loc[X.index] or pass {name}.to_numpy()."
