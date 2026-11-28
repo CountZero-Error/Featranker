@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+Documentation: a banner and a consensus chart (made by `docs/assets/make_consensus.py` from the quick-start example) in the README; a Simplified Chinese README (`README.zh-CN.md`) and manual (`docs/zh-CN/`), with language switches on every translated page; the manual index's broken navigation row is fixed.
+
 ## 2.0.0 - 2026-11-22
 
 Versions 1.22, 1.23 and 1.24 were never released; their entries below are folded into 2.0.0.

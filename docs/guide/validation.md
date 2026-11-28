@@ -1,5 +1,7 @@
 # Validation
 
+English · [简体中文](../zh-CN/guide/validation.md)
+
 This page shows how to check how stable a ranking is, how to rank time-ordered and grouped rows, and how to keep selection honest with nested validation.
 
 [Manual](../README.md) | [Data](data.md) | [Noise and evidence](noise-and-evidence.md) | [Selection](selection.md) | [Reference](../reference.md)

@@ -1,5 +1,7 @@
 # Troubleshooting
 
+English · [简体中文](zh-CN/troubleshooting.md)
+
 This page lists common errors and warnings, what they mean and what to do, followed by short answers to frequent questions.
 
 [Manual](README.md) | [Getting started](getting-started.md) | [Report](report.md) | [Reference](reference.md)

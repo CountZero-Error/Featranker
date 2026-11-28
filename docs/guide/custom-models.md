@@ -1,5 +1,7 @@
 # Custom models
 
+English · [简体中文](../zh-CN/guide/custom-models.md)
+
 This page shows how to rank with your own estimators and pipelines, group them into families, select columns by name, and run models in parallel.
 
 [Manual](../README.md) | [Models and scoring](models-and-scoring.md) | [Data](data.md) | [Reference](../reference.md)

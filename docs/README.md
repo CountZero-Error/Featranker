@@ -1,12 +1,14 @@
 # Manual
 
+English · [简体中文](zh-CN/README.md)
+
 This is the FeatRanker manual. Start with Getting started, then pick the guide that matches your task.
 
-[README](../README.md) | [10-minute recipe](../README.md#-10-minute-recipe) and [When to use FeatRanker](../README.md#-when-to-use-featranker) | Rank, check support, choose a subset and validate it on untouched rows; and when not to use FeatRanker |
-| [Getting started](getting-started.md) | [Reference](reference.md)
+[README](../README.md) | [Getting started](getting-started.md) | [Reference](reference.md)
 
 | Page | Contents |
 |---|---|
+| [10-minute recipe](../README.md#-10-minute-recipe) and [When to use FeatRanker](../README.md#-when-to-use-featranker) | Rank, check support, choose a subset and validate it on untouched rows; and when not to use FeatRanker |
 | [Getting started](getting-started.md) | Install, rank your first data set, read the result |
 | [Concepts](concepts.md) | How the ranking is decided and what each number means |
 | [Models and scoring](guide/models-and-scoring.md) | Task, group, scorers, several metrics |

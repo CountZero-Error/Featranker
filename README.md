@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="https://raw.githubusercontent.com/CountZero-Error/Featranker/main/docs/assets/featranker-banner.svg" alt="FEATRANKER: Feature ranking you can check" width="100%">
+
 # FEATRANKER
 
 <p><b>Rank the feature groups your models rely on, checked on held-out data against a dummy baseline and, optionally, shuffled shadow features.</b></p>
@@ -21,6 +23,8 @@
   <a href="https://github.com/CountZero-Error/Featranker#-10-minute-recipe"><b>Recipe</b></a> &nbsp;│&nbsp;
   <a href="https://github.com/CountZero-Error/Featranker/releases"><b>Releases</b></a>
 </p>
+
+English · [简体中文](https://github.com/CountZero-Error/Featranker/blob/main/README.zh-CN.md)
 
 </div>
 
@@ -130,6 +134,10 @@ for row in report["consensus"]:
    sex  median rank 4.0  (7 models)
    age  median rank 5.0  (7 models)
 ```
+
+![Consensus plot for the quick-start example](https://raw.githubusercontent.com/CountZero-Error/Featranker/main/docs/assets/consensus.png)
+
+The plot shows each voting family's rank for every feature group, with the median marked and the most important group on top.
 
 Output shown with the `xgboost` and `catboost` extras installed; a core-only install has fewer tree models, so `n_models` is lower. The six blood-serum columns are ranked as one group, and the decision tree scored worse than the dummy baseline, so it stays in the report without a vote. See [Reading the report](https://github.com/CountZero-Error/Featranker/blob/main/docs/report.md#reading-the-report) for what to do next.
 

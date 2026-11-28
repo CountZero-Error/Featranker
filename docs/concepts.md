@@ -1,5 +1,7 @@
 # Concepts
 
+English · [简体中文](zh-CN/concepts.md)
+
 This page explains how FeatRanker decides a ranking, and what each number in a report means.
 
 [Manual](README.md) | [Getting started](getting-started.md) | [Report](report.md) | [Reference](reference.md)

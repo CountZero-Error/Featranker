@@ -1,5 +1,7 @@
 # Data
 
+English · [简体中文](../zh-CN/guide/data.md)
+
 This page covers missing values, categorical features, sample weights, and how FeatRanker treats labels and your arrays.
 
 [Manual](../README.md) | [Custom models](custom-models.md) | [Validation](validation.md) | [Reference](../reference.md)

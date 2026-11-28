@@ -1,5 +1,7 @@
 # Reference
 
+English · [简体中文](zh-CN/reference.md)
+
 This page lists every public name in FeatRanker with its signature, parameters, return value and errors. The same text is in `help()`.
 
 [Manual](README.md) | [Getting started](getting-started.md) | [Report](report.md) | [Input rules](#input-rules)

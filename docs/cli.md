@@ -1,5 +1,7 @@
 # Command line
 
+English · [简体中文](zh-CN/cli.md)
+
 This page documents the `featranker` command: what it reads, every flag, and examples.
 
 [Manual](README.md) | [Getting started](getting-started.md) | [Report](report.md) | [Reference](reference.md)

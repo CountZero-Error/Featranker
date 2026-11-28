@@ -1,5 +1,7 @@
 # Models and scoring
 
+English · [简体中文](../zh-CN/guide/models-and-scoring.md)
+
 This page covers how to choose the task, the built-in model group and the scorer, and how to check a ranking under several metrics.
 
 [Manual](../README.md) | [Concepts](../concepts.md) | [Models list](../models.md) | [Reference](../reference.md)

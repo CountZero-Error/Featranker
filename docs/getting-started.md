@@ -1,5 +1,7 @@
 # Getting started
 
+English · [简体中文](zh-CN/getting-started.md)
+
 This page installs FeatRanker, ranks the features of a small data set, and shows you how to read the result.
 
 [Manual](README.md) | [Concepts](concepts.md) | [Reference](reference.md) | [Troubleshooting](troubleshooting.md)

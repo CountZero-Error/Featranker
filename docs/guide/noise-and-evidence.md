@@ -1,5 +1,7 @@
 # Noise and evidence
 
+English · [简体中文](../zh-CN/guide/noise-and-evidence.md)
+
 This page shows how to tell signal from noise with shadow features, the shadow hits test and family evidence, and how to see why a ranking looks the way it does with evidence and SHAP.
 
 [Manual](../README.md) | [Validation](validation.md) | [Selection](selection.md) | [Report](../report.md) | [Reference](../reference.md)

@@ -1,5 +1,7 @@
 # Performance
 
+English · [简体中文](../zh-CN/guide/performance.md)
+
 This page shows how to make a run faster and keep its memory in check: a smaller model set, fewer evaluation rows, a training subsample, a one-hot cap and parallel models.
 
 [Manual](../README.md) | [Models and scoring](models-and-scoring.md) | [Custom models](custom-models.md) | [Reference](../reference.md)

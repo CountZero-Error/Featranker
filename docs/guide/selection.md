@@ -1,5 +1,7 @@
 # Selection
 
+English · [简体中文](../zh-CN/guide/selection.md)
+
 This page shows how to turn a ranking into a feature subset: `ConsensusSelector` in a pipeline, the ablation curve, `summarize()`, comparing runs, and grouped permutation with `auto_groups()`.
 
 [Manual](../README.md) | [Validation](validation.md) | [Noise and evidence](noise-and-evidence.md) | [Report](../report.md) | [Reference](../reference.md)
