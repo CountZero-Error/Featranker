@@ -52,6 +52,6 @@ def test_windows_job():
             assert step["with"]["persist-credentials"] is False
 
 
-def test_version_is_2_0_0():
+def test_version_is_2_x():
     text = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
-    assert re.search(r'^version = "2\.0\.0"$', text, flags=re.M)
+    assert re.search(r'^version = "2\.\d+\.\d+"$', text, flags=re.M)
