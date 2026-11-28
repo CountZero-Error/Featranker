@@ -14,6 +14,7 @@ from .importance import (
     FINGERPRINT_SCHEME,
     REPORT_SCHEMA_VERSION,
     FeatureRanker,
+    _check_index,
     _fingerprint,
     _components,
     _is_int,
@@ -236,6 +237,8 @@ def _prepare(
         "categorical": categorical,
     }
     X_values, _ = _validate_X(X, **options)
+    _check_index(X, y, "y")
+    _check_index(X, weights[0], "sample_weight")
     y_values = _validate_y(y, len(X_values))
     run = report.get("run", {})
     # Reports from before scheme 2 carry no key and were fingerprinted with scheme 1.
@@ -266,6 +269,8 @@ def _prepare(
             "(fit it with the same max_samples and random_state)."
         )
     eval_values, _ = _validate_X(X_eval, **options)
+    _check_index(X_eval, y_eval, "y_eval")
+    _check_index(X_eval, weights[1], "eval_sample_weight")
     y_eval_values = _validate_y(y_eval, len(eval_values))
     same_data = _fingerprint(names, eval_values, y_eval_values, scheme) == run.get("data_sha256")
     if same_data:  # the report's rows with other weights are refused, not recorded

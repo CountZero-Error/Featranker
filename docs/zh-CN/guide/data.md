@@ -136,7 +136,7 @@ for row in report["consensus"]:
 
 **不能接受权重的模型。** 如果某个模型的最终估计器的 `fit()` 没有 `sample_weight`，它不会以不加权方式拟合，因为它的重要性回答的是另一个问题。它会以阶段 `"fit"` 和 `error_type` `"SampleWeightNotSupported"` 记录在 `failures` 中。内置模型中有 `lda` 和 `qda`（分类）以及 `pls_regression`。你自己的模型也是如此，无论是单独的估计器还是 `Pipeline` 的最后一步。`fit` 接受 `**kwargs` 的估计器视为支持权重，嵌套的 `Pipeline` 会一路追踪到其最后一步。
 
-**置换的供体不加权。** 供体是被评分的行（在 `max_samples` 之后，包括零权重行），权重对谁来充当供体不起作用。在 `shuffle="rows"` 下，每次置换都随机重排被评分的行，因此无论权重多大，每一行都恰好供体一次。影子列是对每一行的打乱副本，同样不加权。只有得分被加权。因此，置换后的数据遵循评估行的不加权分布，而基线是加权的。
+**置换的供体不加权。** 供体是被评分的行（在 `max_samples` 之后，包括零权重行），权重对谁来充当供体不起作用。在 `shuffle="rows"` 下，每次置换都随机重排被评分的行，因此无论权重多大，每一行都恰好供体一次。影子列是对每一行的打乱副本，同样不加权。只有得分被加权。因此，置换后的数据遵循评估行的不加权分布，而基线是加权的。零权重行仍然会把它的值贡献给置换，因此重要性可能变化很大，而加权得分却不变。
 
 > [!NOTE]
 > 这适用于代价权重或重要性权重（“这些行上的错误代价更高”）。对于调查权重或频数权重，加权行代表一个总体，权重大的行并不比权重小的行更有可能贡献出它的值。如果你关心的是总体，请删除零权重行，或按权重对评估行重采样并且不再为它们传入 `sample_weight`，然后比较结果。FeatRanker 没有按权重抽取供体的选项。
@@ -182,6 +182,10 @@ weighted {'train': True, 'eval': True} {'x1': 1.44, 'x2': 0.02}
 在权重很大的行中，`x1` 驱动目标；在几乎没有权重的行中，驱动目标的是 `x2`。不加权时两者看起来相近；加权后，`x2` 几乎消失。
 
 **选择器、管道和命令行。** `ConsensusSelector.fit(X, y, groups=None, sample_weight=None)` 会把权重传给它的重采样排名。在 `Pipeline` 中，请使用 scikit-learn 的元数据路由：`sklearn.set_config(enable_metadata_routing=True)`、`ConsensusSelector(...).set_fit_request(sample_weight=True)`，然后 `pipeline.fit(X, y, sample_weight=w)`。命令行接受 `--sample-weight COLUMN`：该列必须同时存在于两个 CSV 文件中，会被读作权重，且不会作为特征参与排名。
+
+## pandas 索引
+
+当 `X` 是 DataFrame 时，pandas 的 `y`、`y_eval`、`sample_weight`、`eval_sample_weight`、`groups` 或 `shuffle_groups` 在使用前会与 `X` 的索引核对。取值始终按位置使用。索引相同则通过。标签相同但顺序不同会抛出 `ValueError`，因为这些值会与错误的行配对；请用 `.loc[X.index]` 对齐，或传入 `.to_numpy()`。任何其他标签（例如全新的 `RangeIndex`）会发出指明索引的 `UserWarning`，并按位置使用这些值。NumPy 的 `X` 和非 pandas 的值不检查。带有 `set_output(transform="pandas")` 的管道步骤会给 `X` 一个新的 `RangeIndex`，因此索引被打乱的 `y`（例如经过 `df.sample(frac=1)`）在那里会被拒绝；请传入 `y.to_numpy()` 或 `y.reset_index(drop=True)`。
 
 ## 标签与数据处理
 

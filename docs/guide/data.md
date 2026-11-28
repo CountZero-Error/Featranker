@@ -136,7 +136,7 @@ Survey data, imbalanced classes and aggregated rows come with sample weights. Pa
 
 **Models that cannot take weights.** A model whose final estimator has no `sample_weight` in `fit()` is not fit unweighted, because its importances would answer a different question. It is recorded in `failures` with stage `"fit"` and `error_type` `"SampleWeightNotSupported"`. Among the built-in models these are `lda` and `qda` (classification) and `pls_regression`. The same holds for your own models, bare or as the last step of a `Pipeline`. An estimator whose `fit` takes `**kwargs` counts as weight-capable, and a nested `Pipeline` is followed to its last step.
 
-**Shuffle donors are not weighted.** The donors are the scored rows (after `max_samples`, zero-weight rows included), and weights play no part in who donates. With `shuffle="rows"` each permutation reorders the scored rows at random, so every row donates once whatever its weight. Shadow columns are shuffled copies of every row, also unweighted. Only the scores are weighted. The permuted data therefore follows the unweighted distribution of the evaluation rows, while the baseline is weighted.
+**Shuffle donors are not weighted.** The donors are the scored rows (after `max_samples`, zero-weight rows included), and weights play no part in who donates. With `shuffle="rows"` each permutation reorders the scored rows at random, so every row donates once whatever its weight. Shadow columns are shuffled copies of every row, also unweighted. Only the scores are weighted. The permuted data therefore follows the unweighted distribution of the evaluation rows, while the baseline is weighted. A zero-weight row still donates its values to the permutations, so an importance can change a lot while the weighted score does not.
 
 > [!NOTE]
 > This suits cost or importance weights ("a mistake on these rows costs more"). For survey or frequency weights, where weighted rows stand for a population, a heavy row is no more likely to donate its value than a light one. If the population is your target, drop zero-weight rows, or resample the evaluation rows by weight and pass no `sample_weight` for them, and compare the results. FeatRanker has no option that draws donors by weight.
@@ -182,6 +182,10 @@ weighted {'train': True, 'eval': True} {'x1': 1.44, 'x2': 0.02}
 `x1` drives the target in the heavily weighted rows and `x2` in the nearly weightless ones. Unweighted, the two look alike; weighted, `x2` all but disappears.
 
 **Selector, pipelines and CLI.** `ConsensusSelector.fit(X, y, groups=None, sample_weight=None)` passes the weights to its resampled ranking. Inside a `Pipeline`, use scikit-learn metadata routing: `sklearn.set_config(enable_metadata_routing=True)`, `ConsensusSelector(...).set_fit_request(sample_weight=True)`, then `pipeline.fit(X, y, sample_weight=w)`. The command line takes `--sample-weight COLUMN`: the column must exist in both CSV files, is read as the weights and is not ranked as a feature.
+
+## Pandas indexes
+
+When `X` is a DataFrame, a pandas `y`, `y_eval`, `sample_weight`, `eval_sample_weight`, `groups` or `shuffle_groups` is checked against the index of `X` before it is used. Values are always used by position. An equal index passes. The same labels in another order raise `ValueError`, because the values would pair with the wrong rows; align with `.loc[X.index]` or pass `.to_numpy()`. Any other labels (for example a fresh `RangeIndex`) raise a `UserWarning` naming the index, and the values are used by position. NumPy `X` and non-pandas values are not checked. A pipeline step with `set_output(transform="pandas")` gives `X` a new `RangeIndex`, so a `y` whose index was shuffled (for example after `df.sample(frac=1)`) is refused there; pass `y.to_numpy()` or `y.reset_index(drop=True)`.
 
 ## Labels and data handling
 

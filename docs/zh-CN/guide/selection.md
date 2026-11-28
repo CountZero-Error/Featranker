@@ -130,7 +130,7 @@ k=10  validation 0.44  test 0.15  added sex
 - **开销。** 每个投票模型重新拟合 `len(ks)` 次。更短的 `ks` 列表可以节省时间。
 - **失败。** 在某个 `k` 上拟合或评分失败的模型，在该处得到 `null`，并在 `ablation["failures"]` 中增加一条记录；其他模型和其他 k 继续进行。无法在很少的列上拟合的模型（内置的 `pls_regression` 只有一列时）会在较小的 `k` 上以这种方式失败。`median_score` 是未失败模型的中位数，如果全部失败则为 `null`。
 - **配对中位数。** 失败的模型可能随 `k` 而变化，因此即使没有任何模型的得分改变，`median_score` 也可能变化。所以每一行还带有 `n_models_scored` 和 `paired_median_score`，后者是 `paired_models`（在每个 `k` 上都有得分的模型）的中位数（如果没有则为 `null`）。当 `n_models_scored` 变化时，请优先使用 `paired_median_score`。
-- **来源。** 该块记录 `data_sha256`（`X_eval` 和 `y_eval` 的[指纹](#比较运行)）、`weights_sha256`（没有权重时为 `null`）、`n_eval_rows` 以及 `same_holdout`：当该数据和权重就是报告排名时所用的数据和权重时为 `true`。
+- **来源。** 该块记录 `data_sha256`（`X_eval` 和 `y_eval` 的[指纹](#比较运行)）、`weights_sha256`（没有权重时为 `null`）、`n_eval_rows` 以及 `same_holdout`：当该数据和权重就是报告排名时所用的数据和权重时为 `true`。`false` 表示不完全相同（行顺序也算在内），并不表示这些行是新的。
 - **基线。** `baseline_score` 是重新拟合本身得到的哑基线（dummy baseline）得分（相同的训练行和权重、每个 `X_eval` 行、所用的评分器），因此它与曲线可比。它可能与报告的 `baseline_score` 不同，后者使用的是报告自己的行、评分器和 `max_samples`。只有没有任何重新拟合得到评分时，它才为 `null`。
 - **汇总。** `summarize()` 会增加一条 `ablation_curve` 发现，并且当各行中被评分的模型集合不同时，增加一条 `ablation_cohort_changed` 警告。
 - **权重。** 排名器不记得权重，因此请再次传入 `sample_weight` 和 `eval_sample_weight`；它们会与报告的 `run["train_weights_sha256"]` 和 `run["weights_sha256"]` 核对。第三个数据集可以使用任何权重。

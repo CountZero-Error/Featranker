@@ -158,7 +158,7 @@ A report returned by [`FeatureRanker.ablate()`](guide/selection.md#ablation-curv
     "data_sha256": "9f2c...",         # fingerprint of X_eval and y_eval
     "weights_sha256": None,           # of eval_sample_weight; null without
     "n_eval_rows": 133,
-    "same_holdout": True,             # X_eval, y_eval (and weights) are the ranking's own
+    "same_holdout": True,             # X_eval, y_eval (and weights) identical to the ranking's, row order included; false is not "new rows"
     "paired_models": ["ridge", "random_forest"],   # scored at every k, in report order
     "curve": [
         {

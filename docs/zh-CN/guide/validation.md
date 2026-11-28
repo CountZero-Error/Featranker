@@ -60,7 +60,7 @@ for row in report["stability"][:4]:
 
 ## 时间序列与分组数据
 
-对于有顺序或成簇的行，请传入与模型实际使用方式相匹配的划分器。`TimeSeriesSplit` 用于按时间顺序排列的行，带 `groups=` 的 `GroupKFold` 用于属于同一整体的行，例如每位患者有多行。这样，模型就不会在早于其训练行或与训练行同组的行上被评估。
+对于有顺序或成簇的行，请传入与模型实际使用方式相匹配的划分器。`TimeSeriesSplit` 用于按时间顺序排列的行，带 `groups=` 的 `GroupKFold` 用于属于同一整体的行，例如每位患者有多行。这样，模型就不会在早于其训练行或与训练行同组的行上被评估。整数 `cv` 搭配 `groups` 并不会按组划分：它使用打乱的 `KFold` 或 `StratifiedKFold`，并发出提及 `GroupKFold` 的 `UserWarning`，折不变。
 
 ```python
 import numpy as np

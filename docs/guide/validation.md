@@ -60,7 +60,7 @@ A group's place in a split is its position in that split's sorted consensus. Eac
 
 ## Time series and grouped data
 
-For ordered or clustered rows, pass the splitter that matches how the model will be used. `TimeSeriesSplit` is for rows in time order, and `GroupKFold` with `groups=` is for rows that belong together, such as several rows per patient. A model is then never evaluated on rows from before its training rows or from the same group.
+For ordered or clustered rows, pass the splitter that matches how the model will be used. `TimeSeriesSplit` is for rows in time order, and `GroupKFold` with `groups=` is for rows that belong together, such as several rows per patient. A model is then never evaluated on rows from before its training rows or from the same group. An integer `cv` with `groups` does not group rows: it uses shuffled `KFold` or `StratifiedKFold` and raises a `UserWarning` naming `GroupKFold`. The folds are unchanged.
 
 ```python
 import numpy as np

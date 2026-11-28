@@ -3,6 +3,7 @@ Feature importance ranking via permutation importance across multiple ML models.
 """
 
 import datetime
+from collections import Counter
 import functools
 import hashlib
 import importlib
@@ -418,6 +419,28 @@ def _with_one_hot(
 def _validate_n_jobs(n_jobs: Any) -> None:
     if n_jobs is not None and (not _is_int(n_jobs) or n_jobs == 0):
         raise ValueError("[!] n_jobs must be None or a non-zero int.")
+
+
+def _check_index(X: Any, value: Any, name: str) -> None:
+    """Refuse or flag a pandas `value` whose index does not match the DataFrame X.
+
+    Values are used by position, so a reordered Series would silently pair
+    with the wrong rows.
+    """
+    if _pd is None or not isinstance(X, _pd.DataFrame):
+        return
+    if not isinstance(value, (_pd.Series, _pd.DataFrame)) or value.index.equals(X.index):
+        return
+    if len(value) == len(X) and Counter(value.index) == Counter(X.index):
+        raise ValueError(
+            f"[!] {name} has the same index labels as X in another order; it would be "
+            f"used by position. Align it with {name}.loc[X.index] or pass {name}.to_numpy()."
+        )
+    warnings.warn(
+        f"{name} has a different index from X; it is used by position, not by index label.",
+        UserWarning,
+        stacklevel=3,
+    )
 
 
 def _validate_y(y: Any, n_rows: int) -> np.ndarray:
@@ -1010,6 +1033,14 @@ def _resolve_splits(
     _check_cv(cv)
     split_y = y_values
     if _is_int(cv):
+        if groups is not None:
+            warnings.warn(
+                "groups is not used for splitting by an integer cv (shuffled KFold or "
+                "StratifiedKFold); pass a group splitter such as GroupKFold to keep "
+                "groups together.",
+                UserWarning,
+                stacklevel=3,
+            )
         # Shuffled folds: unshuffled KFold on sorted data gives misleading splits.
         splitter = StratifiedKFold if task == "clf" else KFold
         # sklearn uses RandomState. Keep historical folds for 32-bit seeds;
@@ -2175,6 +2206,8 @@ class FeatureRanker:
                     f"[!] Feature names {clashing} start with 'shadow__', which "
                     "model_input='dataframe' reserves for shadow columns."
                 )
+        for label, value in (("y", y), ("sample_weight", sample_weight), ("shuffle_groups", shuffle_groups)):
+            _check_index(X, value, label)
         y_values = _validate_y(y, len(X_values))
         weights = _validate_weights(sample_weight, len(X_values))
         shuffle_labels = _shuffle_labels(
@@ -2471,6 +2504,10 @@ class FeatureRanker:
             X_values, unseen = _encode_categorical(
                 X_values, categorical, self.feature_names_, self.categorical_levels_
             )
+        for label, value in (
+            ("y_eval", y_eval), ("sample_weight", sample_weight), ("shuffle_groups", shuffle_groups)
+        ):
+            _check_index(X_eval, value, label)
         y_values = _validate_y(y_eval, len(X_values))
         weights = _validate_weights(sample_weight, len(X_values))
         shuffle_labels = _shuffle_labels(self.shuffle, shuffle_groups, len(X_values))
@@ -2532,14 +2569,17 @@ class FeatureRanker:
         # Scores use the subsample; the shadows and the evidence see every row.
         y_scored = y_values[rows]
         weights_scored = None if weights is None else weights[rows]
+        # The dummy sees the models' input form and read-only views (no shadows).
+        baseline_X = _model_X(
+            X_values[rows], self.feature_names_ if self.model_input == "dataframe" else None
+        )
+        baseline_y, baseline_w = _read_only(y_scored), _read_only(weights_scored)
         baseline_score = self._score_baseline(
-            scorer, X_values[rows], y_scored, ranking_failures, weights_scored
+            scorer, baseline_X, baseline_y, ranking_failures, baseline_w
         )
         # The dummy is not ranked, so a failure here is null, not a failure entry.
         secondary_baselines = {
-            other_name: self._score_baseline(
-                other, X_values[rows], y_scored, [], weights_scored
-            )
+            other_name: self._score_baseline(other, baseline_X, baseline_y, [], baseline_w)
             for other, other_name in secondary_scorers
         }
         X_models, shadow_groups = X_values, None
@@ -2783,6 +2823,8 @@ class FeatureRanker:
             allow_nan=self.missing == "impute",
             categorical=categorical,
         )
+        for label, value in (("y", y), ("sample_weight", sample_weight), ("groups", groups)):
+            _check_index(X, value, label)
         y_values = _validate_y(y, len(X_values))
         weights = _validate_weights(sample_weight, len(X_values))
         _resolve_feature_groups(names, feature_groups)

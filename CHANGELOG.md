@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+Review 13 fixes: the dummy baseline is scored on the same input form and read-only views as the models (a DataFrame-aware scorer no longer disables the dummy gate, and a scorer cannot change `y` through the dummy); a pandas `y`, `y_eval`, `sample_weight`, `eval_sample_weight`, `groups` or `shuffle_groups` is checked against the index of a DataFrame `X` (same labels in another order raise `ValueError`, other labels warn and are used by position); an integer `cv` with `groups` warns that `GroupKFold` is needed. Documentation: zero-weight rows still donate values to permutations; `same_holdout` false means not identical, not new rows.
+
 Documentation: a banner and a consensus chart (made by `docs/assets/make_consensus.py` from the quick-start example) in the README; a Simplified Chinese README (`README.zh-CN.md`) and manual (`docs/zh-CN/`), with language switches on every translated page; the manual index's broken navigation row is fixed.
 
 ## 2.0.0 - 2026-11-22
