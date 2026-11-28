@@ -69,6 +69,7 @@ print(selector.selected_groups_)
 - `report_` 只反映本次 fit 所见的数据。要得到整个开发集的排名，请直接调用 `rank_resampled()`。
 - 如果有任何划分失败或没有共识，`fit()` 会警告有多少个划分没有投票。这些划分在各项占比中已经算作未命中；请查看 `report_["failures"]` 和 `report_["splits"]` 了解原因。
 - 如果没有特征组通过，`fit()` 会发出警告，选择器不保留任何列，与 scikit-learn 自带的选择器一样。此后大多数下游估计器会因零列而失败。请放宽影子规则，或只使用正的 `k`。
+- 任一划分中无法给哑基线评分时，`fit()` 会抛出 `ValueError`，指明相关划分和失败原因，因为没有哑基线时每个模型都会投票。`rank_resampled()` 仍返回带有 `gate_off` 的报告。
 - 使用影子规则时，如果在任何划分中都没有模型保留影子列，`fit()` 会抛出 `ValueError`，而不是在没有影子证据的情况下做出选择。
 - 无效的规则会在 `fit()` 中抛出 `ValueError`，而不是在 `__init__` 中，因此 `clone`、`set_params` 和对 `select__k` 的 `GridSearchCV` 都能工作。
 - 对于感知分组的内层 `cv`（如 `GroupKFold`），请传入 `fit(X, y, groups=...)`；在 `Pipeline` 中则传入 `select__groups=...`（例如 `cross_val_score(..., params={"select__groups": groups})`）。使用 `shuffle="within_groups"` 时，同样的分组也会限定打乱的范围。

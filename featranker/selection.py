@@ -367,6 +367,21 @@ class ConsensusSelector(SelectorMixin, BaseEstimator):
             max_train_samples=self.max_train_samples,
         )
 
+        ungated = [s for s in report["splits"] if "baseline_score" in s["report"] and s["report"]["baseline_score"] is None]
+        if ungated:
+            reasons = {
+                f"{f['error_type']}: {f['message']}"
+                for s in ungated
+                for f in s["report"]["failures"]
+                if f["model"] == "dummy_baseline"
+            }
+            raise ValueError(
+                "[!] The dummy baseline could not be scored in split(s) "
+                f"{[s['split'] for s in ungated]}, so the consensus gate is off and "
+                "nothing can be selected safely. Dummy failure: "
+                f"{'; '.join(sorted(reasons)) or 'no dummy model was built'}."
+            )
+
         if is_auto:
             report["run"]["auto_groups"] = auto_groups_record(self.auto_groups_threshold)
         silent = report["n_splits"] - sum(1 for s in report["splits"] if s["report"]["consensus"])

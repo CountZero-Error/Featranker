@@ -45,7 +45,7 @@ A dummy model that ignores the features is fit and scored too. A model votes onl
 
 - `baseline_score` is the dummy's score. It is used only for the vote.
 - If no model beats the dummy, `consensus` is empty. The features may not predict the target, or the evaluation set may be too small.
-- If the dummy itself fails, every model votes and the report says so (`gate_off`). Treat that consensus with extra care.
+- If the dummy itself fails, every model votes and the report says so (`gate_off`). Treat that consensus with extra care. `ConsensusSelector.fit()` raises `ValueError` instead when the dummy could not be scored in a split.
 
 ## Consensus
 

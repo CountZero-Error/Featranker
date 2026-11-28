@@ -45,7 +45,7 @@ importance = model_score - model_score_after_shuffling
 
 - `baseline_score` 是哑基线的得分，仅用于投票判定。
 - 如果没有模型胜过哑基线，`consensus` 为空。可能是特征无法预测目标，也可能是评估集太小。
-- 如果哑基线本身失败，则所有模型都投票，报告会注明这一点（`gate_off`）。对这样的共识要格外谨慎。
+- 如果哑基线本身失败，则所有模型都投票，报告会注明这一点（`gate_off`）。对这样的共识要格外谨慎。`ConsensusSelector.fit()` 则会在任一划分中无法给哑基线评分时引发 `ValueError`。
 
 ## 共识排名
 

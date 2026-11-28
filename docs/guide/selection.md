@@ -69,6 +69,7 @@ A selected group keeps all its columns, in their original order. Feature names c
 - `report_` reflects only the data that fit saw. For the ranking of your whole development set, call `rank_resampled()` directly.
 - If any split failed or had no consensus, `fit()` warns how many splits did not vote. Those splits already count as misses in the shares; look at `report_["failures"]` and `report_["splits"]` to see why.
 - If no group passes, `fit()` warns and the selector keeps no columns, as scikit-learn's own selectors do. Most downstream estimators then fail on zero columns. Loosen the shadow rules, or use only a positive `k`.
+- `fit()` raises `ValueError` naming the splits and the failure when the dummy baseline could not be scored in a split, because without it every model would vote. `rank_resampled()` still returns a report with `gate_off`.
 - With a shadow rule, `fit()` raises `ValueError` when no model kept the shadow columns in any split, instead of selecting without shadow evidence.
 - Invalid rules raise `ValueError` in `fit()`, not in `__init__`, so `clone`, `set_params` and `GridSearchCV` over `select__k` work.
 - For a group-aware inner `cv` such as `GroupKFold`, pass `fit(X, y, groups=...)`; in a `Pipeline`, pass `select__groups=...` (for example `cross_val_score(..., params={"select__groups": groups})`). With `shuffle="within_groups"` the same groups also confine the shuffles.

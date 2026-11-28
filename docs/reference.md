@@ -179,7 +179,7 @@ Fitted attributes: `selected_groups_`, `report_` (the resampled report of this f
 fit(X, y, groups=None, sample_weight=None)
 ```
 
-Ranks on `X` and `y` only (resampled) and keeps the selected groups. Returns the selector. A failed `fit()` clears earlier fitted state. Raises `ValueError` for an invalid rule or option, or if every model dropped the shadow columns while a shadow rule is set.
+Ranks on `X` and `y` only (resampled) and keeps the selected groups. Returns the selector. A failed `fit()` clears earlier fitted state. Raises `ValueError` for an invalid rule or option, if every model dropped the shadow columns while a shadow rule is set, or if the dummy baseline could not be scored in a split.
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|

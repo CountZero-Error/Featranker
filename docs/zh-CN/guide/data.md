@@ -185,7 +185,7 @@ weighted {'train': True, 'eval': True} {'x1': 1.44, 'x2': 0.02}
 
 ## pandas 索引
 
-当 `X` 是 DataFrame 时，pandas 的 `y`、`y_eval`、`sample_weight`、`eval_sample_weight`、`groups` 或 `shuffle_groups` 在使用前会与 `X` 的索引核对。取值始终按位置使用。索引相同则通过。标签相同但顺序不同会抛出 `ValueError`，因为这些值会与错误的行配对；请用 `.loc[X.index]` 对齐，或传入 `.to_numpy()`。任何其他标签（例如全新的 `RangeIndex`）会发出指明索引的 `UserWarning`，并按位置使用这些值。NumPy 的 `X` 和非 pandas 的值不检查。带有 `set_output(transform="pandas")` 的管道步骤会给 `X` 一个新的 `RangeIndex`，因此索引被打乱的 `y`（例如经过 `df.sample(frac=1)`）在那里会被拒绝；请传入 `y.to_numpy()` 或 `y.reset_index(drop=True)`。
+当 `X` 是 DataFrame 时，pandas 的 `y`、`y_eval`、`sample_weight`、`eval_sample_weight`、`groups` 或 `shuffle_groups` 在使用前会与 `X` 的索引核对。取值始终按位置使用。索引相同则通过。标签相同但顺序不同会抛出 `ValueError`，因为这些值会与错误的行配对；请用 `.loc[X.index]` 对齐，或传入 `.to_numpy()`。任何其他标签（例如全新的 `RangeIndex`）会发出指明索引的 `UserWarning`，并按位置使用这些值。NumPy 的 `X` 和非 pandas 的值不检查。传入管道的 DataFrame 在经过 `set_output(transform="pandas")` 步骤后仍保留其索引。只有当管道的输入是 NumPy 数组（或某个步骤新建了索引）时，`X` 才会带着新的 `RangeIndex` 到达 FeatRanker；此时索引被打乱的 `y`（例如经过 `df.sample(frac=1)`）会被拒绝，请传入 `y.to_numpy()` 或 `y.reset_index(drop=True)`。
 
 ## 标签与数据处理
 

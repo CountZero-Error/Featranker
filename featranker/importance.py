@@ -421,6 +421,17 @@ def _validate_n_jobs(n_jobs: Any) -> None:
         raise ValueError("[!] n_jobs must be None or a non-zero int.")
 
 
+def _label_counts(index: Any) -> Counter:
+    """Label multiset with every missing label (also inside tuples) as one sentinel."""
+    def one(label: Any) -> Any:
+        return None if _pd.api.types.is_scalar(label) and _pd.isna(label) else label
+
+    return Counter(
+        tuple(one(part) for part in label) if isinstance(label, tuple) else one(label)
+        for label in index
+    )
+
+
 def _check_index(X: Any, value: Any, name: str) -> None:
     """Refuse or flag a pandas `value` whose index does not match the DataFrame X.
 
@@ -431,7 +442,7 @@ def _check_index(X: Any, value: Any, name: str) -> None:
         return
     if not isinstance(value, (_pd.Series, _pd.DataFrame)) or value.index.equals(X.index):
         return
-    if len(value) == len(X) and Counter(value.index) == Counter(X.index):
+    if len(value) == len(X) and _label_counts(value.index) == _label_counts(X.index):
         raise ValueError(
             f"[!] {name} has the same index labels as X in another order; it would be "
             f"used by position. Align it with {name}.loc[X.index] or pass {name}.to_numpy()."
@@ -1539,10 +1550,15 @@ def _fit_model(
         return name, None, _failure(name, "fit", error)
 
 
+def _fresh(X: Any) -> Any:
+    """A DataFrame gets its own shallow wrapper per scorer call; arrays pass through."""
+    return X.copy(deep=False) if _pd is not None and isinstance(X, _pd.DataFrame) else X
+
+
 def _call_scorer(scorer: Any, model: Any, X: Any, y: np.ndarray, kwargs: Dict[str, Any]) -> Any:
     """The score, or the exception the scorer raised."""
     try:
-        return scorer(model, X, y, **kwargs)
+        return scorer(model, _fresh(X), y, **kwargs)
     except Exception as error:
         return error
 
@@ -1580,7 +1596,7 @@ def _shared_group_scores(
     try:
         scores = _MultimetricScorer(
             scorers={str(i): scorer for i, scorer in group.items()}, raise_exc=False
-        )(model, X, y, **kwargs)
+        )(model, _fresh(X), y, **kwargs)
         return {int(key): value for key, value in scores.items() if not isinstance(value, str)}
     except Exception:
         return {}  # e.g. a response method is missing or the result is odd: score one by one
@@ -2569,19 +2585,6 @@ class FeatureRanker:
         # Scores use the subsample; the shadows and the evidence see every row.
         y_scored = y_values[rows]
         weights_scored = None if weights is None else weights[rows]
-        # The dummy sees the models' input form and read-only views (no shadows).
-        baseline_X = _model_X(
-            X_values[rows], self.feature_names_ if self.model_input == "dataframe" else None
-        )
-        baseline_y, baseline_w = _read_only(y_scored), _read_only(weights_scored)
-        baseline_score = self._score_baseline(
-            scorer, baseline_X, baseline_y, ranking_failures, baseline_w
-        )
-        # The dummy is not ranked, so a failure here is null, not a failure entry.
-        secondary_baselines = {
-            other_name: self._score_baseline(other, baseline_X, baseline_y, [], baseline_w)
-            for other, other_name in secondary_scorers
-        }
         X_models, shadow_groups = X_values, None
         if self.shadows:
             # An independent, reproducible shuffle of the evaluation rows.
@@ -2598,6 +2601,17 @@ class FeatureRanker:
             (self.train_X_, self.train_y_, self.train_weight_) if self.evidence else None
         )
         columns = self._model_columns(self.feature_names_)
+        # The dummy sees what the models see: their columns (shadows too), form and views.
+        baseline_X = _model_X(X_models[rows], columns)
+        baseline_y, baseline_w = _read_only(y_scored), _read_only(weights_scored)
+        baseline_score = self._score_baseline(
+            scorer, baseline_X, baseline_y, ranking_failures, baseline_w
+        )
+        # The dummy is not ranked, so a failure here is null, not a failure entry.
+        secondary_baselines = {
+            other_name: self._score_baseline(other, baseline_X, baseline_y, [], baseline_w)
+            for other, other_name in secondary_scorers
+        }
         # A model that ignores the shadow columns gets no shadow evidence.
         shadow_failures: List[Dict[str, str]] = []
         no_shadows: set = set()
@@ -3062,7 +3076,7 @@ class FeatureRanker:
         try:
             return _finite_float(
                 _unrouted(
-                    scorer, self.baseline_model_, X_values, y_values,
+                    scorer, self.baseline_model_, _fresh(X_values), y_values,
                     **_score_weights(weights),
                 ),
                 "baseline score",
