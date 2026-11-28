@@ -421,14 +421,37 @@ def _validate_n_jobs(n_jobs: Any) -> None:
         raise ValueError("[!] n_jobs must be None or a non-zero int.")
 
 
+class _Missing:
+    """Private key for a missing label; equal only to another _Missing of the same kind."""
+
+    def __init__(self, kind: str) -> None:
+        self.kind = kind
+
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, _Missing) and other.kind == self.kind
+
+    def __hash__(self) -> int:
+        return hash((_Missing, self.kind))
+
+
 def _normalised_labels(index: Any) -> list:
     """Index labels with every missing label (also inside tuples) as one sentinel."""
     def one(label: Any) -> Any:
         if isinstance(label, tuple):
             return tuple(one(part) for part in label)
-        return None if _pd.api.types.is_scalar(label) and _pd.isna(label) else label
+        if not (_pd.api.types.is_scalar(label) and _pd.isna(label)):
+            return label
+        # float NaNs are one key; None, pd.NA, NaT ... each get their own (.loc tells them apart)
+        return _Missing("float" if isinstance(label, (float, np.floating)) else type(label).__name__)
 
     return [one(label) for label in index]
+
+
+def _has_no_missing(index: Any) -> bool:
+    """True when `index` surely holds no missing label (tuple labels holding NaN fail equals())."""
+    if isinstance(index, _pd.MultiIndex):
+        return not any((codes == -1).any() for codes in index.codes)
+    return not index.hasnans
 
 
 def _check_index(X: Any, value: Any, name: str) -> None:
@@ -439,8 +462,14 @@ def _check_index(X: Any, value: Any, name: str) -> None:
     """
     if _pd is None or not isinstance(X, _pd.DataFrame):
         return
-    if not isinstance(value, (_pd.Series, _pd.DataFrame)) or value.index.equals(X.index):
+    if not isinstance(value, (_pd.Series, _pd.DataFrame)):
         return
+    # equals() treats NaN and None as equal, so it only settles indexes without missing labels
+    try:
+        if _has_no_missing(X.index) and value.index.equals(X.index):
+            return
+    except TypeError:  # equals() cannot compare pd.NA inside tuples; compare normalised labels
+        pass
     mine, theirs = _normalised_labels(value.index), _normalised_labels(X.index)
     if mine == theirs:
         return
